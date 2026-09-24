@@ -15,28 +15,66 @@ import {
   Search,
   Clock,
   MapPin,
-  Check,
+  Lock,
+  LogOut,
   AlertTriangle,
+  ShieldCheck,
+  KeyRound,
 } from 'lucide-react';
+import { createClient } from '@/utils/supabase/client';
+import type { Session } from '@supabase/supabase-js';
 
 interface PhotoRecord {
   id: string;
   image_url: string;
+  photo_url?: string;
   storage_path: string;
   template_type: string;
+  frame_preset?: string;
   layout: string;
   location: string | null;
   created_at: string;
 }
 
 export default function AdminDashboardPage() {
+  const supabase = useMemo(() => createClient(), []);
+
+  // Auth State
+  const [session, setSession] = useState<Session | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [loginError, setLoginError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Gallery State
   const [photos, setPhotos] = useState<PhotoRecord[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [searchFilter, setSearchFilter] = useState('');
   const [selectedPreset, setSelectedPreset] = useState<string>('all');
   const [confirmDelete, setConfirmDelete] = useState<PhotoRecord | null>(null);
 
+  // ── Auth Lifecycle (getSession & onAuthStateChange) ──────
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
+      setSession(currentSession);
+      setAuthLoading(false);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, currentSession) => {
+      setSession(currentSession);
+      setAuthLoading(false);
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, [supabase]);
+
+  // Fetch photos only when authenticated
   const fetchPhotos = useCallback(async () => {
     setLoading(true);
     try {
@@ -53,9 +91,42 @@ export default function AdminDashboardPage() {
   }, []);
 
   useEffect(() => {
-    fetchPhotos();
-  }, [fetchPhotos]);
+    if (session) {
+      fetchPhotos();
+    }
+  }, [session, fetchPhotos]);
 
+  // Handle Login
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError('');
+    setIsSubmitting(true);
+
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+
+      if (error) {
+        setLoginError(error.message || 'Invalid admin credentials. Access restricted.');
+      }
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Authentication failed';
+      setLoginError(message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Handle Sign Out
+  const handleSignOut = async () => {
+    await supabase.auth.signOut();
+    setSession(null);
+    setPhotos([]);
+  };
+
+  // Handle Photo Deletion
   const handleDelete = async (photo: PhotoRecord) => {
     setDeletingId(photo.id);
     try {
@@ -97,7 +168,8 @@ export default function AdminDashboardPage() {
     }).length;
 
     const presetCounts = photos.reduce((acc, p) => {
-      acc[p.template_type] = (acc[p.template_type] || 0) + 1;
+      const key = p.template_type || p.frame_preset || 'editorial';
+      acc[key] = (acc[key] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);
 
@@ -109,13 +181,14 @@ export default function AdminDashboardPage() {
   // Filtered gallery
   const filteredPhotos = useMemo(() => {
     return photos.filter((p) => {
+      const presetName = p.template_type || p.frame_preset || '';
       const matchesSearch =
         searchFilter === '' ||
         p.id.toLowerCase().includes(searchFilter.toLowerCase()) ||
         (p.location && p.location.toLowerCase().includes(searchFilter.toLowerCase())) ||
-        p.template_type.toLowerCase().includes(searchFilter.toLowerCase());
+        presetName.toLowerCase().includes(searchFilter.toLowerCase());
 
-      const matchesPreset = selectedPreset === 'all' || p.template_type === selectedPreset;
+      const matchesPreset = selectedPreset === 'all' || presetName === selectedPreset;
 
       return matchesSearch && matchesPreset;
     });
@@ -123,9 +196,127 @@ export default function AdminDashboardPage() {
 
   // Unique presets
   const availablePresets = useMemo(() => {
-    return Array.from(new Set(photos.map((p) => p.template_type)));
+    return Array.from(new Set(photos.map((p) => p.template_type || p.frame_preset || 'editorial')));
   }, [photos]);
 
+  // ── 1. LOADING SCREEN ──
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-[#FDFBF7] flex flex-col items-center justify-center text-zinc-900 p-4">
+        <div className="w-10 h-10 border-2 border-zinc-300 border-t-zinc-900 rounded-full animate-spin mb-3" />
+        <p className="text-xs font-mono uppercase tracking-widest text-zinc-500">
+          Verifying Studio Security...
+        </p>
+      </div>
+    );
+  }
+
+  // ── 2. AUTH GATE (KOREAN-MINIMALIST LOGIN CARD) ──
+  if (!session) {
+    return (
+      <div className="min-h-screen bg-[#FAF7EE] text-zinc-900 flex flex-col items-center justify-center p-4 relative">
+        {/* Dot Matrix Background */}
+        <div
+          className="fixed inset-0 pointer-events-none opacity-[0.14] z-0"
+          style={{
+            backgroundImage: 'radial-gradient(circle, #C4B99A 1.2px, transparent 1.2px)',
+            backgroundSize: '24px 24px',
+          }}
+        />
+
+        <div className="relative z-10 w-full max-w-md bg-white border border-[#E8DFCE] rounded-2xl p-8 shadow-xl">
+          {/* Header */}
+          <div className="text-center mb-6">
+            <div className="w-12 h-12 bg-zinc-900 text-white rounded-xl mx-auto flex items-center justify-center shadow-md mb-3">
+              <Lock size={20} />
+            </div>
+            <div className="flex items-center justify-center gap-1.5 mb-1">
+              <h1 className="font-bold text-sm tracking-widest uppercase text-zinc-900">
+                Photobooth Studio
+              </h1>
+              <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-zinc-900 text-white">
+                Admin
+              </span>
+            </div>
+            <p className="text-[11px] text-zinc-500 font-mono">
+              Korean Aesthetic Studio • Private Management Gate
+            </p>
+          </div>
+
+          {/* Error Message */}
+          {loginError && (
+            <div className="mb-5 p-3 rounded-lg bg-red-50 border border-red-200 text-red-600 text-xs flex items-center gap-2">
+              <AlertTriangle size={15} className="shrink-0" />
+              <span>{loginError}</span>
+            </div>
+          )}
+
+          {/* Form */}
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-600 block mb-1.5">
+                Admin Email
+              </label>
+              <input
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="admin@studio.com"
+                className="w-full text-xs border border-zinc-300 rounded-lg px-3 py-2.5 bg-zinc-50/50 outline-none focus:border-zinc-900 focus:bg-white transition-all shadow-xs"
+              />
+            </div>
+
+            <div>
+              <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-600 block mb-1.5">
+                Password
+              </label>
+              <input
+                type="password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full text-xs border border-zinc-300 rounded-lg px-3 py-2.5 bg-zinc-50/50 outline-none focus:border-zinc-900 focus:bg-white transition-all shadow-xs"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={isSubmitting}
+              className="w-full btn-neo-dark flex items-center justify-center gap-2 py-3 rounded-xl text-xs font-bold uppercase tracking-wider shadow-md disabled:opacity-50 transition-all active:scale-[0.99] mt-2"
+            >
+              {isSubmitting ? (
+                <>
+                  <RefreshCw size={13} className="animate-spin" />
+                  <span>Verifying Credentials...</span>
+                </>
+              ) : (
+                <>
+                  <KeyRound size={13} />
+                  <span>Sign In to Console</span>
+                </>
+              )}
+            </button>
+          </form>
+
+          {/* Footer Navigation */}
+          <div className="mt-6 pt-4 border-t border-zinc-100 flex items-center justify-between text-xs">
+            <Link
+              href="/"
+              className="text-zinc-500 hover:text-zinc-900 flex items-center gap-1 font-medium transition-colors"
+            >
+              <ArrowLeft size={12} />
+              <span>Back to Photobooth</span>
+            </Link>
+            <span className="text-[10px] font-mono text-zinc-400">Enforced by Supabase Auth</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── 3. AUTHENTICATED DASHBOARD ──
   return (
     <div className="min-h-screen bg-[#FDFBF7] text-zinc-900 flex flex-col font-sans relative">
       {/* Background Matrix Texture */}
@@ -156,6 +347,10 @@ export default function AdminDashboardPage() {
                 <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded bg-zinc-900 text-white">
                   HQ Admin
                 </span>
+                <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-mono text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                  <ShieldCheck size={11} />
+                  <span>{session.user.email}</span>
+                </span>
               </div>
               <p className="text-[10px] text-zinc-500 font-mono uppercase tracking-widest mt-0.5">
                 Korean Aesthetic Gallery &amp; Cloud Management
@@ -163,7 +358,7 @@ export default function AdminDashboardPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
             <button
               onClick={fetchPhotos}
               disabled={loading}
@@ -176,11 +371,20 @@ export default function AdminDashboardPage() {
 
             <Link
               href="/"
-              className="btn-neo-dark text-xs py-2 px-3.5 flex items-center gap-1.5 rounded-lg shadow-sm"
+              className="btn-neo text-xs py-2 px-3.5 flex items-center gap-1.5 rounded-lg bg-white border border-zinc-300 hover:border-zinc-900 text-zinc-800 transition-colors"
             >
               <ArrowLeft size={13} />
-              <span>Back to Booth</span>
+              <span className="hidden sm:inline">Booth</span>
             </Link>
+
+            <button
+              onClick={handleSignOut}
+              className="btn-neo-dark text-xs py-2 px-3 flex items-center gap-1.5 rounded-lg shadow-sm bg-red-600 hover:bg-red-700 text-white border-red-700 transition-colors"
+              title="Sign Out from Admin"
+            >
+              <LogOut size={13} />
+              <span>Sign Out</span>
+            </button>
           </div>
         </div>
       </header>
@@ -311,6 +515,9 @@ export default function AdminDashboardPage() {
                 minute: '2-digit',
               });
 
+              const photoUrl = photo.image_url || photo.photo_url || '';
+              const presetLabel = photo.template_type || photo.frame_preset || 'editorial';
+
               return (
                 <div
                   key={photo.id}
@@ -320,7 +527,7 @@ export default function AdminDashboardPage() {
                   <div className="relative aspect-[3/4] bg-[#FAF7F0] overflow-hidden flex items-center justify-center p-3 border-b border-[#E8DFCE]">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={photo.image_url}
+                      src={photoUrl}
                       alt={`Photo ${photo.id}`}
                       className="max-h-full max-w-full object-contain rounded shadow-sm group-hover:scale-[1.02] transition-transform duration-300"
                       loading="lazy"
@@ -329,7 +536,7 @@ export default function AdminDashboardPage() {
                     {/* Preset Badge */}
                     <div className="absolute top-2.5 left-2.5">
                       <span className="text-[9px] font-bold uppercase tracking-wider bg-zinc-900/80 text-white px-2 py-0.5 rounded backdrop-blur-xs shadow-xs">
-                        {photo.template_type}
+                        {presetLabel}
                       </span>
                     </div>
 
@@ -363,7 +570,7 @@ export default function AdminDashboardPage() {
                     {/* Action Buttons */}
                     <div className="flex items-center gap-1.5 pt-2 border-t border-zinc-100">
                       <a
-                        href={photo.image_url}
+                        href={photoUrl}
                         target="_blank"
                         rel="noreferrer"
                         download={`photobooth-${photo.id}.png`}

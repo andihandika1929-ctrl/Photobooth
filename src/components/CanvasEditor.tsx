@@ -1811,14 +1811,20 @@ export default function CanvasEditor({
         hasRenderedRef.current = true;
         playPrintSound(700);
 
-        // Non-blocking background upload for rapid QR sharing
+        // Non-blocking background upload to Supabase storage with full high-res rendering
         if (onPreviewReady) {
-          setTimeout(() => {
-            fetch(dataUrl)
-              .then((r) => r.blob())
-              .then((blob) => onPreviewReady(blob, preset))
-              .catch((e) => console.warn('Background upload skipped:', e));
-          }, 80);
+          setTimeout(async () => {
+            try {
+              const highResData = await renderToCanvas(true);
+              if (highResData) {
+                const res = await fetch(highResData);
+                const blob = await res.blob();
+                onPreviewReady(blob, preset);
+              }
+            } catch (err) {
+              console.error("Supabase Save Error: high-res canvas conversion failed:", err);
+            }
+          }, 120);
         }
       }
     } catch (e) {

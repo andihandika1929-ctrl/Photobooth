@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
       });
 
     if (uploadError) {
-      console.error('Storage upload error:', uploadError);
+      console.error("Supabase Save Error: Storage upload failed:", uploadError);
       return NextResponse.json({ error: uploadError.message }, { status: 500 });
     }
 
@@ -48,20 +48,42 @@ export async function POST(request: NextRequest) {
       .from('photos')
       .getPublicUrl(fileName);
 
-    // Insert record into public.photos
-    const { error: insertError } = await supabaseAdmin
+    const nowIso = new Date().toISOString();
+
+    // Primary DB insert attempt (using image_url & template_type per supabase-setup.sql)
+    let { error: insertError } = await supabaseAdmin
       .from('photos')
       .insert({
-        image_url:    publicUrl,
+        id: uuid,
+        image_url: publicUrl,
         storage_path: fileName,
         template_type: framePreset,
         layout,
         location,
+        created_at: nowIso,
       });
 
+    // Fallback DB insert attempt (in case table columns are named photo_url & frame_preset)
     if (insertError) {
-      console.error('DB insert error:', insertError);
-      // Still return success with URL even if DB insert fails
+      console.error("Supabase Save Error (attempt 1 failed, trying fallback columns):", insertError);
+      const fallbackAttempt = await supabaseAdmin
+        .from('photos')
+        .insert({
+          id: uuid,
+          photo_url: publicUrl,
+          storage_path: fileName,
+          frame_preset: framePreset,
+          layout,
+          location,
+          created_at: nowIso,
+        });
+
+      if (fallbackAttempt.error) {
+        console.error("Supabase Save Error:", fallbackAttempt.error);
+        insertError = fallbackAttempt.error;
+      } else {
+        insertError = null;
+      }
     }
 
     return NextResponse.json({

@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useCallback } from 'react';
-import Link from 'next/link';
+import { useState, useCallback, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 import CameraViewport, { type FilterName } from '@/components/CameraViewport';
 import CanvasEditor, { type LayoutType } from '@/components/CanvasEditor';
 import LoadingScreen from '@/components/LoadingScreen';
 import ShareModal from '@/components/ShareModal';
 import { initAudio } from '@/components/AudioEngine';
-import { Camera, Grid, AlignJustify, Layers, Sparkles, Settings } from 'lucide-react';
+import { Camera, Grid, AlignJustify, Layers, Sparkles } from 'lucide-react';
 
 type AppStep = 'capture' | 'edit';
 
@@ -23,6 +23,7 @@ const LAYOUTS: { id: LayoutType; label: string; icon: React.ReactNode; frames: n
 ];
 
 export default function HomePage() {
+  const router = useRouter();
   const [appLoaded, setAppLoaded] = useState(false);
   const [step, setStep] = useState<AppStep>('capture');
   const [layout, setLayout] = useState<LayoutType>('strip3');
@@ -30,6 +31,18 @@ export default function HomePage() {
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+
+  // Secret admin access via Ctrl+Shift+A / Cmd+Shift+A shortcut
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
+        e.preventDefault();
+        router.push('/admin');
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [router]);
 
   const totalFrames = LAYOUTS.find((l) => l.id === layout)?.frames ?? 3;
   const isCapturing = capturedFrames.length < totalFrames;
@@ -53,13 +66,13 @@ export default function HomePage() {
     setStep('capture');
   }, []);
 
-  // Background non-blocking Supabase upload triggered immediately when preview is ready
+  // Background high-res Supabase upload triggered immediately when preview/render is ready
   const handlePreviewReady = useCallback(
     async (blob: Blob, templateType: string) => {
       try {
         setIsUploading(true);
         const fd = new FormData();
-        fd.append('file', blob, 'strip.png');
+        fd.append('file', blob, `${Date.now()}-strip.png`);
         fd.append('framePreset', templateType);
         fd.append('layout', layout);
 
@@ -68,14 +81,18 @@ export default function HomePage() {
           body: fd,
         });
 
-        if (res.ok) {
-          const data = await res.json();
-          if (data?.uuid) {
-            setShareUrl(`${window.location.origin}/result/${data.uuid}`);
-          }
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          console.error("Supabase Save Error:", errData);
+          return;
+        }
+
+        const data = await res.json();
+        if (data?.uuid) {
+          setShareUrl(`${window.location.origin}/result/${data.uuid}`);
         }
       } catch (err) {
-        console.warn('Background upload skipped or offline:', err);
+        console.error("Supabase Save Error:", err);
       } finally {
         setIsUploading(false);
       }
@@ -97,11 +114,15 @@ export default function HomePage() {
           fd.append('layout', layout);
 
           const res = await fetch('/api/upload', { method: 'POST', body: fd });
-          if (!res.ok) throw new Error('Upload failed');
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            console.error("Supabase Save Error:", errData);
+            throw new Error('Upload failed');
+          }
           const data = await res.json();
           setShareUrl(`${window.location.origin}/result/${data.uuid}`);
         } catch (err) {
-          console.error('Share upload error:', err);
+          console.error("Supabase Save Error:", err);
         } finally {
           setIsUploading(false);
         }
@@ -159,18 +180,10 @@ export default function HomePage() {
           </div>
 
           <div className="flex items-center gap-3">
-            <div className="hidden sm:flex items-center gap-1 text-[11px] font-mono text-zinc-500">
+            <div className="flex items-center gap-1 text-[11px] font-mono text-zinc-500">
               <Sparkles size={12} className="text-amber-500" />
               <span>DIRECTED BY ANDI HANDIKA</span>
             </div>
-            <Link
-              href="/admin"
-              className="flex items-center gap-1 text-[11px] font-mono font-semibold text-zinc-600 hover:text-zinc-900 border border-[#E8DFCE] hover:border-zinc-800 rounded-lg px-2.5 py-1.5 transition-colors bg-white shadow-xs"
-              title="Studio Dashboard & Management"
-            >
-              <Settings size={12} className="text-zinc-500" />
-              <span>Admin</span>
-            </Link>
           </div>
         </div>
       </header>
@@ -362,27 +375,17 @@ export default function HomePage() {
           <p className="text-[11px] font-mono text-zinc-500">
             © 2026 PHOTOBOOTH STUDIO • SEOUL EDITION
           </p>
-          <div className="flex items-center gap-3">
-            <p className="text-[11px] text-zinc-600">
-              Crafted &amp; Directed by{' '}
-              <a
-                href="https://github.com"
-                target="_blank"
-                rel="noreferrer"
-                className="text-zinc-900 font-semibold underline underline-offset-4 hover:text-zinc-700 transition-colors"
-              >
-                Andi Handika
-              </a>
-            </p>
-            <span className="text-zinc-300">•</span>
-            <Link
-              href="/admin"
-              className="text-[11px] font-mono text-zinc-500 hover:text-zinc-900 transition-colors flex items-center gap-1"
-              title="Studio Admin Dashboard"
+          <p className="text-[11px] text-zinc-600">
+            Crafted &amp; Directed by{' '}
+            <a
+              href="https://github.com"
+              target="_blank"
+              rel="noreferrer"
+              className="text-zinc-900 font-semibold underline underline-offset-4 hover:text-zinc-700 transition-colors"
             >
-              <Settings size={11} /> Admin
-            </Link>
-          </div>
+              Andi Handika
+            </a>
+          </p>
         </div>
       </footer>
 
