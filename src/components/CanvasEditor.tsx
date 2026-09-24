@@ -24,6 +24,7 @@ import { type FilterName } from './CameraViewport';
 import { playPrintSound } from './AudioEngine';
 import { v4 as uuidv4 } from 'uuid';
 import { getKeyedSticker, getKeyedStickerSync, preloadAllStickers } from '@/utils/stickerCache';
+import { savePhotoToSupabase } from '@/utils/supabasePhotoPipeline';
 
 // ─── Types ───────────────────────────────────────────────
 export type FramePreset =
@@ -1815,11 +1816,13 @@ export default function CanvasEditor({
         if (onPreviewReady) {
           setTimeout(async () => {
             try {
-              const highResData = await renderToCanvas(true);
-              if (highResData) {
-                const res = await fetch(highResData);
-                const blob = await res.blob();
-                onPreviewReady(blob, preset);
+              await renderToCanvas(true);
+              const canvas = canvasRef.current;
+              if (canvas) {
+                const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
+                if (blob) {
+                  onPreviewReady(blob, preset);
+                }
               }
             } catch (err) {
               console.error("Supabase Save Error: high-res canvas conversion failed:", err);
@@ -1848,7 +1851,7 @@ export default function CanvasEditor({
     setPreset(newPreset);
   };
 
-  // Download Handler (Full High-Resolution Export)
+  // Download Handler (Full High-Resolution Export + Supabase DB sync)
   const handleDownload = async () => {
     if (isRenderingRef.current) return;
     isRenderingRef.current = true;
@@ -1865,6 +1868,16 @@ export default function CanvasEditor({
       link.download = `photobooth-${preset}-${Date.now()}.png`;
       link.href = dataUrl;
       link.click();
+
+      // Convert canvas to Blob & save to Supabase using exact database schema
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
+        if (blob) {
+          savePhotoToSupabase(blob, preset, location || 'Jakarta Studio')
+            .catch((err) => console.error("Supabase Save Error:", err));
+        }
+      }
     } catch (err) {
       console.error('Download export failed:', err);
     } finally {
@@ -1886,9 +1899,13 @@ export default function CanvasEditor({
       await yieldToMain();
       if (!dataUrl) return;
 
-      const res = await fetch(dataUrl);
-      const blob = await res.blob();
-      onShare(blob, preset);
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
+        if (blob) {
+          onShare(blob, preset);
+        }
+      }
     } catch (err) {
       console.error('Share export failed:', err);
     } finally {

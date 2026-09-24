@@ -44,12 +44,15 @@ export default async function ResultPage({ params }: ResultPageProps) {
             <span className="flex items-center gap-1.5">
               <Clock size={12} /> {createdAt}
             </span>
-            {photo.location && (
+            {(photo.location_tag || photo.location) && (
               <span className="flex items-center gap-1.5">
-                <MapPin size={12} /> {photo.location}
+                <MapPin size={12} /> {photo.location_tag || photo.location}
               </span>
             )}
-            <span className="ml-auto uppercase">{photo.template_type} · {photo.layout}</span>
+            <span className="ml-auto uppercase">
+              {photo.template_type}
+              {photo.layout ? ` · ${photo.layout}` : ''}
+            </span>
           </div>
         </div>
 

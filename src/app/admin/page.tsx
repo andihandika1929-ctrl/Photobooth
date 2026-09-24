@@ -9,7 +9,6 @@ import {
   RefreshCw,
   Sparkles,
   Calendar,
-  Layers,
   ArrowLeft,
   ExternalLink,
   Search,
@@ -27,12 +26,9 @@ import type { Session } from '@supabase/supabase-js';
 interface PhotoRecord {
   id: string;
   image_url: string;
-  photo_url?: string;
   storage_path: string;
   template_type: string;
-  frame_preset?: string;
-  layout: string;
-  location: string | null;
+  location_tag?: string | null;
   created_at: string;
 }
 
@@ -74,21 +70,31 @@ export default function AdminDashboardPage() {
     };
   }, [supabase]);
 
-  // Fetch photos only when authenticated
+  // Fetch photos: selects id, image_url, storage_path, template_type, location_tag, created_at ordered by created_at desc
   const fetchPhotos = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/photos', { cache: 'no-store' });
-      if (res.ok) {
-        const data = await res.json();
-        setPhotos(data.photos || []);
+      const { data, error } = await supabase
+        .from('photos')
+        .select('id, image_url, storage_path, template_type, location_tag, created_at')
+        .order('created_at', { ascending: false });
+
+      if (!error && data) {
+        setPhotos(data as PhotoRecord[]);
+      } else {
+        if (error) console.error('Supabase query error, fallback to admin API:', error);
+        const res = await fetch('/api/admin/photos', { cache: 'no-store' });
+        if (res.ok) {
+          const apiData = await res.json();
+          setPhotos(apiData.photos || []);
+        }
       }
     } catch (err) {
       console.error('Failed to load photos:', err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [supabase]);
 
   useEffect(() => {
     if (session) {
@@ -126,25 +132,41 @@ export default function AdminDashboardPage() {
     setPhotos([]);
   };
 
-  // Handle Photo Deletion
+  // Handle Photo Deletion: removes from storage via storage_path and removes from DB via id
   const handleDelete = async (photo: PhotoRecord) => {
     setDeletingId(photo.id);
     try {
-      const res = await fetch('/api/admin/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ids: [photo.id],
-          storagePaths: photo.storage_path ? [photo.storage_path] : [],
-        }),
-      });
-
-      if (res.ok) {
-        setPhotos((prev) => prev.filter((p) => p.id !== photo.id));
-        setConfirmDelete(null);
-      } else {
-        alert('Failed to delete photo. Check server logs.');
+      // 1. Remove from storage via item.storage_path
+      if (photo.storage_path) {
+        const { error: storageErr } = await supabase.storage
+          .from('photos')
+          .remove([photo.storage_path]);
+        if (storageErr) {
+          console.error('Supabase storage delete error:', storageErr);
+        }
       }
+
+      // 2. Remove from DB via id
+      const { error: dbErr } = await supabase
+        .from('photos')
+        .delete()
+        .eq('id', photo.id);
+
+      if (dbErr) {
+        console.error('Supabase DB delete error, trying admin API:', dbErr);
+        const res = await fetch('/api/admin/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ids: [photo.id],
+            storagePaths: photo.storage_path ? [photo.storage_path] : [],
+          }),
+        });
+        if (!res.ok) throw new Error('Delete failed');
+      }
+
+      setPhotos((prev) => prev.filter((p) => p.id !== photo.id));
+      setConfirmDelete(null);
     } catch (err) {
       console.error('Delete error:', err);
       alert('Delete request failed.');
@@ -168,7 +190,7 @@ export default function AdminDashboardPage() {
     }).length;
 
     const presetCounts = photos.reduce((acc, p) => {
-      const key = p.template_type || p.frame_preset || 'editorial';
+      const key = p.template_type || 'classic-strip';
       acc[key] = (acc[key] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);
@@ -181,11 +203,11 @@ export default function AdminDashboardPage() {
   // Filtered gallery
   const filteredPhotos = useMemo(() => {
     return photos.filter((p) => {
-      const presetName = p.template_type || p.frame_preset || '';
+      const presetName = p.template_type || '';
       const matchesSearch =
         searchFilter === '' ||
         p.id.toLowerCase().includes(searchFilter.toLowerCase()) ||
-        (p.location && p.location.toLowerCase().includes(searchFilter.toLowerCase())) ||
+        (p.location_tag && p.location_tag.toLowerCase().includes(searchFilter.toLowerCase())) ||
         presetName.toLowerCase().includes(searchFilter.toLowerCase());
 
       const matchesPreset = selectedPreset === 'all' || presetName === selectedPreset;
@@ -196,7 +218,7 @@ export default function AdminDashboardPage() {
 
   // Unique presets
   const availablePresets = useMemo(() => {
-    return Array.from(new Set(photos.map((p) => p.template_type || p.frame_preset || 'editorial')));
+    return Array.from(new Set(photos.map((p) => p.template_type || 'classic-strip')));
   }, [photos]);
 
   // ── 1. LOADING SCREEN ──
@@ -515,19 +537,16 @@ export default function AdminDashboardPage() {
                 minute: '2-digit',
               });
 
-              const photoUrl = photo.image_url || photo.photo_url || '';
-              const presetLabel = photo.template_type || photo.frame_preset || 'editorial';
-
               return (
                 <div
                   key={photo.id}
                   className="bg-white border border-[#E8DFCE] rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all flex flex-col group"
                 >
-                  {/* Photo Preview Container */}
+                  {/* Photo Preview Container - using item.image_url */}
                   <div className="relative aspect-[3/4] bg-[#FAF7F0] overflow-hidden flex items-center justify-center p-3 border-b border-[#E8DFCE]">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
-                      src={photoUrl}
+                      src={photo.image_url}
                       alt={`Photo ${photo.id}`}
                       className="max-h-full max-w-full object-contain rounded shadow-sm group-hover:scale-[1.02] transition-transform duration-300"
                       loading="lazy"
@@ -536,14 +555,7 @@ export default function AdminDashboardPage() {
                     {/* Preset Badge */}
                     <div className="absolute top-2.5 left-2.5">
                       <span className="text-[9px] font-bold uppercase tracking-wider bg-zinc-900/80 text-white px-2 py-0.5 rounded backdrop-blur-xs shadow-xs">
-                        {presetLabel}
-                      </span>
-                    </div>
-
-                    {/* Layout Badge */}
-                    <div className="absolute top-2.5 right-2.5">
-                      <span className="text-[9px] font-mono uppercase bg-white/90 text-zinc-700 px-1.5 py-0.5 rounded border border-zinc-200/80 shadow-xs">
-                        {photo.layout}
+                        {photo.template_type}
                       </span>
                     </div>
                   </div>
@@ -559,10 +571,10 @@ export default function AdminDashboardPage() {
                         </span>
                       </div>
 
-                      {photo.location && (
+                      {photo.location_tag && (
                         <p className="text-[10px] text-zinc-600 flex items-center gap-1 font-medium truncate">
                           <MapPin size={10} className="text-zinc-400 shrink-0" />
-                          <span>{photo.location}</span>
+                          <span>{photo.location_tag}</span>
                         </p>
                       )}
                     </div>
@@ -570,7 +582,7 @@ export default function AdminDashboardPage() {
                     {/* Action Buttons */}
                     <div className="flex items-center gap-1.5 pt-2 border-t border-zinc-100">
                       <a
-                        href={photoUrl}
+                        href={photo.image_url}
                         target="_blank"
                         rel="noreferrer"
                         download={`photobooth-${photo.id}.png`}

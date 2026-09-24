@@ -8,6 +8,7 @@ import LoadingScreen from '@/components/LoadingScreen';
 import ShareModal from '@/components/ShareModal';
 import { initAudio } from '@/components/AudioEngine';
 import { Camera, Grid, AlignJustify, Layers, Sparkles } from 'lucide-react';
+import { savePhotoToSupabase } from '@/utils/supabasePhotoPipeline';
 
 type AppStep = 'capture' | 'edit';
 
@@ -71,25 +72,9 @@ export default function HomePage() {
     async (blob: Blob, templateType: string) => {
       try {
         setIsUploading(true);
-        const fd = new FormData();
-        fd.append('file', blob, `${Date.now()}-strip.png`);
-        fd.append('framePreset', templateType);
-        fd.append('layout', layout);
-
-        const res = await fetch('/api/upload', {
-          method: 'POST',
-          body: fd,
-        });
-
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          console.error("Supabase Save Error:", errData);
-          return;
-        }
-
-        const data = await res.json();
-        if (data?.uuid) {
-          setShareUrl(`${window.location.origin}/result/${data.uuid}`);
+        const result = await savePhotoToSupabase(blob, templateType, 'Jakarta Studio');
+        if (result.success && result.id) {
+          setShareUrl(`${window.location.origin}/result/${result.id}`);
         }
       } catch (err) {
         console.error("Supabase Save Error:", err);
@@ -97,7 +82,7 @@ export default function HomePage() {
         setIsUploading(false);
       }
     },
-    [layout]
+    []
   );
 
   // Manual share button trigger
@@ -108,19 +93,10 @@ export default function HomePage() {
       if (!shareUrl && !isUploading) {
         setIsUploading(true);
         try {
-          const fd = new FormData();
-          fd.append('file', blob, 'strip.png');
-          fd.append('framePreset', templateType);
-          fd.append('layout', layout);
-
-          const res = await fetch('/api/upload', { method: 'POST', body: fd });
-          if (!res.ok) {
-            const errData = await res.json().catch(() => ({}));
-            console.error("Supabase Save Error:", errData);
-            throw new Error('Upload failed');
+          const result = await savePhotoToSupabase(blob, templateType, 'Jakarta Studio');
+          if (result.success && result.id) {
+            setShareUrl(`${window.location.origin}/result/${result.id}`);
           }
-          const data = await res.json();
-          setShareUrl(`${window.location.origin}/result/${data.uuid}`);
         } catch (err) {
           console.error("Supabase Save Error:", err);
         } finally {
@@ -128,7 +104,7 @@ export default function HomePage() {
         }
       }
     },
-    [shareUrl, isUploading, layout]
+    [shareUrl, isUploading]
   );
 
   const handleReset = useCallback(() => {

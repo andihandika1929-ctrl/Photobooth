@@ -16,7 +16,7 @@ export async function GET() {
   try {
     const { data, error } = await supabaseAdmin
       .from('photos')
-      .select('*')
+      .select('id, image_url, storage_path, template_type, location_tag, created_at')
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -24,20 +24,7 @@ export async function GET() {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    // Normalize fields so both image_url / photo_url and template_type / frame_preset work seamlessly
-    const photos = (data ?? []).map((row: any) => ({
-      id: row.id,
-      image_url: row.image_url || row.photo_url || '',
-      photo_url: row.photo_url || row.image_url || '',
-      storage_path: row.storage_path || '',
-      template_type: row.template_type || row.frame_preset || 'editorial',
-      frame_preset: row.frame_preset || row.template_type || 'editorial',
-      layout: row.layout || 'strip3',
-      location: row.location || null,
-      created_at: row.created_at || new Date().toISOString(),
-    }));
-
-    return NextResponse.json({ photos });
+    return NextResponse.json({ photos: data ?? [] });
   } catch (err) {
     console.error('Admin photos API error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
