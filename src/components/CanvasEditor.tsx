@@ -20,7 +20,7 @@ import {
   Sparkles,
   Layers,
 } from 'lucide-react';
-import { type FilterName, getFilterCss } from './CameraViewport';
+import { type FilterName } from './CameraViewport';
 import { playPrintSound } from './AudioEngine';
 import { v4 as uuidv4 } from 'uuid';
 import { getKeyedSticker, getKeyedStickerSync, preloadAllStickers } from '@/utils/stickerCache';
@@ -207,10 +207,10 @@ function drawGradedPhoto(
     ctx.clip();
   }
 
-  // Apply the selected studio preset CSS filter to the 2D canvas context before drawImage
-  const filterCss = explicitFilterCss || (img as any).filterCss || 'none';
-  if (filterCss && filterCss !== 'none') {
-    ctx.filter = filterCss;
+  // The snapshot data URL already contains the true baked filter pixels.
+  // If an explicit override filter is passed, apply it; otherwise keep ctx.filter as 'none'.
+  if (explicitFilterCss && explicitFilterCss !== 'none') {
+    ctx.filter = explicitFilterCss;
   } else {
     ctx.filter = 'none';
   }
@@ -1722,11 +1722,8 @@ export default function CanvasEditor({
             (f) =>
               new Promise<HTMLImageElement>((resolve) => {
                 const img = new Image();
-                const filterCss = getFilterCss(f.filter);
-                (img as any).filterCss = filterCss;
                 const timer = setTimeout(() => {
                   const fb = new Image();
-                  (fb as any).filterCss = filterCss;
                   fb.src = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
                   resolve(fb);
                 }, 3000);
@@ -1737,7 +1734,6 @@ export default function CanvasEditor({
                 img.onerror = () => {
                   clearTimeout(timer);
                   const fb = new Image();
-                  (fb as any).filterCss = filterCss;
                   fb.src = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
                   resolve(fb);
                 };

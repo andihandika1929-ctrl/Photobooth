@@ -178,9 +178,12 @@ export default function CameraViewport({
     if (!ctx) return;
 
     if (isMirrored) { ctx.translate(size, 0); ctx.scale(-1, 1); }
-    ctx.filter = 'none'; // Clean raw capture so identical CSS filter is applied on 2D canvas export
+    // Bake active filter directly into the captured canvas snapshot pixels
+    const filterCss = getFilterCss(activeFilter);
+    ctx.filter = filterCss && filterCss.trim() !== '' ? filterCss : 'none';
     ctx.drawImage(video, offsetX, offsetY, size, size, 0, 0, size, size);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    // Reset ctx.filter immediately after drawing to avoid side effects
     ctx.filter = 'none';
 
     onCapture(canvas.toDataURL('image/jpeg', 0.98), activeFilter);
@@ -237,7 +240,31 @@ export default function CameraViewport({
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = ev => onCapture(ev.target?.result as string, activeFilter);
+    reader.onload = ev => {
+      const dataUrl = ev.target?.result as string;
+      const img = new Image();
+      img.onload = () => {
+        const canvas = canvasRef.current || document.createElement('canvas');
+        const size = Math.min(img.width, img.height);
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          const filterCss = getFilterCss(activeFilter);
+          const ox = (img.width - size) / 2;
+          const oy = (img.height - size) / 2;
+          ctx.save();
+          ctx.filter = filterCss && filterCss.trim() !== '' ? filterCss : 'none';
+          ctx.drawImage(img, ox, oy, size, size, 0, 0, size, size);
+          ctx.filter = 'none';
+          ctx.restore();
+          onCapture(canvas.toDataURL('image/jpeg', 0.98), activeFilter);
+        } else {
+          onCapture(dataUrl, activeFilter);
+        }
+      };
+      img.src = dataUrl;
+    };
     reader.readAsDataURL(file);
   }, [activeFilter, onCapture]);
 

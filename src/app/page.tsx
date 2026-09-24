@@ -331,7 +331,6 @@ export default function HomePage() {
                         <img
                           src={frame.dataUrl}
                           alt={`Frame ${i + 1}`}
-                          style={{ filter: getFilterCss(frame.filter) }}
                           className="w-full aspect-square object-cover rounded-sm"
                         />
                         {/* Hover Overlay with Retake */}
