@@ -56,29 +56,32 @@ export function playShutterClick(): void {
 
 /**
  * Countdown beep — pitch varies per count
- * High = 1, Mid = 2, Low = 3
+ * High = 1, Mid = 2, Low = 3, gentle tick for counts > 3
  */
-export function playCountdownBeep(count: 1 | 2 | 3): void {
+export function playCountdownBeep(count: number): void {
   try {
     const ctx = getAudioContext();
-    const frequencies: Record<number, number> = { 3: 660, 2: 770, 1: 880 };
-    const freq = frequencies[count] ?? 660;
+    const frequencies: Record<number, number> = { 3: 660, 2: 770, 1: 940 };
+    const freq = frequencies[count] ?? 520;
 
     const oscillator = ctx.createOscillator();
     const gainNode = ctx.createGain();
 
-    oscillator.type = 'sine';
+    oscillator.type = count === 1 ? 'triangle' : 'sine';
     oscillator.frequency.setValueAtTime(freq, ctx.currentTime);
 
+    const volume = count === 1 ? 0.45 : count <= 3 ? 0.32 : 0.22;
+    const duration = count === 1 ? 0.22 : count <= 3 ? 0.16 : 0.12;
+
     gainNode.gain.setValueAtTime(0, ctx.currentTime);
-    gainNode.gain.linearRampToValueAtTime(0.35, ctx.currentTime + 0.01);
-    gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.18);
+    gainNode.gain.linearRampToValueAtTime(volume, ctx.currentTime + 0.008);
+    gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
 
     oscillator.connect(gainNode);
     gainNode.connect(ctx.destination);
 
     oscillator.start(ctx.currentTime);
-    oscillator.stop(ctx.currentTime + 0.2);
+    oscillator.stop(ctx.currentTime + duration + 0.02);
   } catch (e) {
     console.warn('AudioEngine: countdown beep failed', e);
   }

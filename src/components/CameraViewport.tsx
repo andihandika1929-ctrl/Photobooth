@@ -1,10 +1,13 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Camera, Upload, RotateCcw, Zap, AlertCircle, FlipHorizontal } from 'lucide-react';
+import { Camera, Upload, RotateCcw, Zap, AlertCircle, FlipHorizontal, Timer } from 'lucide-react';
 import { playCountdownBeep, playFlashSound, initAudio } from './AudioEngine';
 
 export type FilterName = 'natural' | 'bw' | 'vintage' | 'cyber';
+
+export const COUNTDOWN_OPTIONS = [3, 5, 10, 15] as const;
+export type CountdownDuration = (typeof COUNTDOWN_OPTIONS)[number];
 
 const FILTERS: { id: FilterName; label: string; css: string }[] = [
   { id: 'natural', label: 'Natural',  css: '' },
@@ -18,6 +21,8 @@ interface CameraViewportProps {
   isCapturing: boolean;
   capturedCount: number;
   totalFrames: number;
+  countdownDuration?: CountdownDuration;
+  onCountdownDurationChange?: (duration: CountdownDuration) => void;
 }
 
 export default function CameraViewport({
@@ -25,6 +30,8 @@ export default function CameraViewport({
   isCapturing,
   capturedCount,
   totalFrames,
+  countdownDuration = 5,
+  onCountdownDurationChange,
 }: CameraViewportProps) {
   const videoRef    = useRef<HTMLVideoElement>(null);
   const canvasRef   = useRef<HTMLCanvasElement>(null);
@@ -40,6 +47,9 @@ export default function CameraViewport({
   const [isMirrored,   setIsMirrored]   = useState(true);
   const [isLoading,    setIsLoading]    = useState(true);
   const [countKey,     setCountKey]     = useState(0); // forces re-render for animation reset
+
+  const transitionTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const lastCapturedCountRef = useRef(capturedCount);
 
   const startCamera = useCallback(async () => {
     setIsLoading(true);
@@ -73,6 +83,7 @@ export default function CameraViewport({
     return () => {
       streamRef.current?.getTracks().forEach(t => t.stop());
       if (countdownRef.current) clearInterval(countdownRef.current);
+      if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
     };
   }, [startCamera]);
 
@@ -103,21 +114,26 @@ export default function CameraViewport({
 
   const startCountdown = useCallback(() => {
     if (countdown !== null || !isCapturing) return;
+    if (transitionTimerRef.current) {
+      clearTimeout(transitionTimerRef.current);
+      transitionTimerRef.current = null;
+    }
     initAudio();
-    let count = 3;
+    let count = countdownDuration;
     setCountdown(count);
     setCountKey(k => k + 1);
-    playCountdownBeep(3);
+    playCountdownBeep(count);
 
+    if (countdownRef.current) clearInterval(countdownRef.current);
     countdownRef.current = setInterval(() => {
       count--;
       if (count > 0) {
         setCountdown(count);
         setCountKey(k => k + 1);
-        playCountdownBeep(count as 1 | 2 | 3);
+        playCountdownBeep(count);
       } else {
         setCountdown(null);
-        clearInterval(countdownRef.current!);
+        if (countdownRef.current) clearInterval(countdownRef.current);
         if (flashRef.current) {
           flashRef.current.classList.add('active');
           setTimeout(() => flashRef.current?.classList.remove('active'), 300);
@@ -126,7 +142,22 @@ export default function CameraViewport({
         setTimeout(captureFrame, 80);
       }
     }, 1000);
-  }, [countdown, isCapturing, captureFrame]);
+  }, [countdown, isCapturing, countdownDuration, captureFrame]);
+
+  // Auto-transition countdown between frames
+  useEffect(() => {
+    if (capturedCount > lastCapturedCountRef.current && capturedCount < totalFrames && isCapturing) {
+      if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
+      transitionTimerRef.current = setTimeout(() => {
+        startCountdown();
+      }, 1500);
+    }
+    lastCapturedCountRef.current = capturedCount;
+
+    return () => {
+      if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
+    };
+  }, [capturedCount, totalFrames, isCapturing, startCountdown]);
 
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -207,14 +238,26 @@ export default function CameraViewport({
 
             {/* Countdown overlay */}
             {countdown !== null && (
-              <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none bg-black/20">
-                <span
-                  key={countKey}
-                  className="count-pop text-white font-black drop-shadow-2xl select-none"
-                  style={{ fontSize: '9rem', lineHeight: 1, textShadow: '0 4px 32px rgba(0,0,0,0.7)' }}
-                >
-                  {countdown}
-                </span>
+              <div className="absolute inset-0 flex flex-col items-center justify-center z-20 pointer-events-none bg-black/30 backdrop-blur-[1px]">
+                <div className="relative flex items-center justify-center">
+                  {/* Subtle pulse ring on final tick */}
+                  {countdown === 1 && (
+                    <span className="absolute w-44 h-44 rounded-full border-4 border-amber-300 animate-ping opacity-75" />
+                  )}
+                  <span
+                    key={countKey}
+                    className="count-pop text-white font-black drop-shadow-2xl select-none tracking-tight"
+                    style={{ fontSize: '9.5rem', lineHeight: 1, textShadow: '0 4px 32px rgba(0,0,0,0.85)' }}
+                  >
+                    {countdown}
+                  </span>
+                </div>
+                {countdown === 1 && (
+                  <span className="mt-3 px-3 py-1 rounded-full bg-white/95 text-zinc-900 font-bold text-[11px] uppercase tracking-widest shadow-xl flex items-center gap-1.5 animate-bounce border border-amber-300">
+                    <span>📸</span>
+                    <span>SMILE ♡</span>
+                  </span>
+                )}
               </div>
             )}
 
@@ -254,18 +297,40 @@ export default function CameraViewport({
           </div>
 
           {/* Bottom controls bar */}
-          <div className="mt-3 flex items-center gap-2">
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 px-0.5">
             {/* Filter pills */}
-            <div className="flex gap-1.5 flex-1 flex-wrap">
+            <div className="flex gap-1.5 flex-wrap items-center">
+              <span className="text-[9px] font-mono text-white/40 uppercase tracking-wider mr-0.5">Filter:</span>
               {FILTERS.map(f => (
                 <button
                   key={f.id}
                   onClick={() => setActiveFilter(f.id)}
-                  className={`pill-tab text-[10px] px-3 py-1 ${
-                    activeFilter === f.id ? 'pill-tab-active' : 'bg-white/10 text-white/50 border-white/20 hover:text-white/80 hover:border-white/40'
+                  className={`pill-tab text-[10px] px-2.5 py-1 ${
+                    activeFilter === f.id
+                      ? 'pill-tab-active'
+                      : 'bg-white/10 text-white/50 border-white/20 hover:text-white/80 hover:border-white/40'
                   }`}
                 >
                   {f.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Quick Timer pills */}
+            <div className="flex items-center gap-1 bg-white/10 px-2 py-1 rounded-lg border border-white/10">
+              <Timer size={11} className="text-white/50 mr-0.5" />
+              <span className="text-[9px] font-mono text-white/50 uppercase tracking-wider mr-1">Timer:</span>
+              {COUNTDOWN_OPTIONS.map(sec => (
+                <button
+                  key={sec}
+                  onClick={() => onCountdownDurationChange?.(sec)}
+                  className={`text-[10px] font-mono px-2 py-0.5 rounded transition-all ${
+                    countdownDuration === sec
+                      ? 'bg-white text-zinc-900 font-bold shadow-xs'
+                      : 'text-white/60 hover:text-white hover:bg-white/10'
+                  }`}
+                >
+                  {sec}s
                 </button>
               ))}
             </div>
@@ -279,16 +344,24 @@ export default function CameraViewport({
 
       {/* Shutter button */}
       <button
-        onClick={startCountdown}
+        onClick={() => {
+          if (transitionTimerRef.current) {
+            clearTimeout(transitionTimerRef.current);
+            transitionTimerRef.current = null;
+          }
+          startCountdown();
+        }}
         disabled={!isCapturing || countdown !== null}
         className="w-full btn-neo-dark flex items-center justify-center gap-2.5 py-3.5 text-sm font-semibold tracking-wide disabled:opacity-40 disabled:cursor-not-allowed disabled:translate-x-0 disabled:translate-y-0 disabled:shadow-[2px_2px_0px_#8A7560]"
       >
         <Zap size={16} />
         {countdown !== null
           ? `Capturing in ${countdown}...`
-          : isCapturing
-          ? `Take Shot  (${capturedCount}/${totalFrames})`
-          : 'All frames captured!'}
+          : !isCapturing
+          ? 'All frames captured!'
+          : capturedCount > 0
+          ? `Next Shot (${capturedCount + 1}/${totalFrames}) • ${countdownDuration}s`
+          : `Take Shot (${capturedCount}/${totalFrames}) • ${countdownDuration}s`}
       </button>
 
       <input

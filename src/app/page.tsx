@@ -2,12 +2,16 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import CameraViewport, { type FilterName } from '@/components/CameraViewport';
+import CameraViewport, {
+  type FilterName,
+  COUNTDOWN_OPTIONS,
+  type CountdownDuration,
+} from '@/components/CameraViewport';
 import CanvasEditor, { type LayoutType } from '@/components/CanvasEditor';
 import LoadingScreen from '@/components/LoadingScreen';
 import ShareModal from '@/components/ShareModal';
 import { initAudio } from '@/components/AudioEngine';
-import { Camera, Grid, AlignJustify, Layers, Sparkles } from 'lucide-react';
+import { Camera, Grid, AlignJustify, Layers, Sparkles, Timer } from 'lucide-react';
 import { savePhotoToSupabase } from '@/utils/supabasePhotoPipeline';
 
 type AppStep = 'capture' | 'edit';
@@ -28,6 +32,7 @@ export default function HomePage() {
   const [appLoaded, setAppLoaded] = useState(false);
   const [step, setStep] = useState<AppStep>('capture');
   const [layout, setLayout] = useState<LayoutType>('strip3');
+  const [countdownDuration, setCountdownDuration] = useState<CountdownDuration>(5);
   const [capturedFrames, setCapturedFrames] = useState<CapturedFrame[]>([]);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -226,28 +231,54 @@ export default function HomePage() {
           {/* ── Left Column: Live Booth or Canvas Editor ── */}
           <div className="flex flex-col gap-5 w-full">
             {step === 'capture' && (
-              <div>
-                <p className="text-[11px] font-bold text-zinc-600 uppercase tracking-widest mb-2.5">
-                  Choose Strip Layout
-                </p>
-                <div className="flex gap-2">
-                  {LAYOUTS.map((l) => (
-                    <button
-                      key={l.id}
-                      onClick={() => {
-                        setLayout(l.id);
-                        setCapturedFrames([]);
-                      }}
-                      className={`pill-tab flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl border text-xs font-bold transition-all ${
-                        layout === l.id
-                          ? 'bg-zinc-900 text-white border-zinc-900 shadow-md'
-                          : 'bg-white text-zinc-700 border-zinc-200 hover:border-zinc-400 hover:bg-zinc-50 shadow-xs'
-                      }`}
-                    >
-                      {l.icon}
-                      <span>{l.label}</span>
-                    </button>
-                  ))}
+              <div className="bg-white/80 backdrop-blur-xs p-3.5 sm:p-4 rounded-2xl border border-[#E8DFCE] shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+                {/* Strip Layout Selector */}
+                <div className="flex-1">
+                  <p className="text-[11px] font-bold text-zinc-600 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                    Choose Strip Layout
+                  </p>
+                  <div className="flex gap-2">
+                    {LAYOUTS.map((l) => (
+                      <button
+                        key={l.id}
+                        onClick={() => {
+                          setLayout(l.id);
+                          setCapturedFrames([]);
+                        }}
+                        className={`pill-tab flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border text-xs font-bold transition-all ${
+                          layout === l.id
+                            ? 'bg-zinc-900 text-white border-zinc-900 shadow-sm'
+                            : 'bg-[#FAF7F0] text-zinc-700 border-[#E8DFCE] hover:border-zinc-400 hover:bg-zinc-50 shadow-xs'
+                        }`}
+                      >
+                        {l.icon}
+                        <span>{l.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Preparation Timer Selector */}
+                <div>
+                  <p className="text-[11px] font-bold text-zinc-600 uppercase tracking-widest mb-2 flex items-center gap-1.5">
+                    <Timer size={13} className="text-zinc-500" />
+                    <span>Timer Delay</span>
+                  </p>
+                  <div className="flex items-center gap-1.5 bg-[#FAF7F0] p-1 rounded-xl border border-[#E8DFCE]">
+                    {COUNTDOWN_OPTIONS.map((sec) => (
+                      <button
+                        key={sec}
+                        onClick={() => setCountdownDuration(sec)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                          countdownDuration === sec
+                            ? 'bg-zinc-900 text-white shadow-sm'
+                            : 'text-zinc-600 hover:text-zinc-900 hover:bg-white/80'
+                        }`}
+                      >
+                        {sec}s
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
             )}
@@ -258,6 +289,8 @@ export default function HomePage() {
                 isCapturing={isCapturing}
                 capturedCount={capturedFrames.length}
                 totalFrames={totalFrames}
+                countdownDuration={countdownDuration}
+                onCountdownDurationChange={setCountdownDuration}
               />
             ) : (
               <div className="bg-[#FAF7F0] border border-[#E8DFCE] rounded-2xl p-5 sm:p-6 shadow-sm">
