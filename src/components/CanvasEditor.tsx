@@ -20,7 +20,7 @@ import {
   Sparkles,
   Layers,
 } from 'lucide-react';
-import { type FilterName } from './CameraViewport';
+import { type FilterName, getFilterCss } from './CameraViewport';
 import { playPrintSound } from './AudioEngine';
 import { v4 as uuidv4 } from 'uuid';
 import { getKeyedSticker, getKeyedStickerSync, preloadAllStickers } from '@/utils/stickerCache';
@@ -189,7 +189,7 @@ function getNoisePattern(ctx: CanvasRenderingContext2D): CanvasPattern | null {
   return ctx.createPattern(cachedNoiseCanvas, 'repeat');
 }
 
-// Hardware-accelerated warm skin-tone rendering (grain applied only on export; preview uses CSS overlay)
+// Hardware-accelerated Korean studio & film preset rendering (grain applied only on export)
 function drawGradedPhoto(
   ctx: CanvasRenderingContext2D,
   img: HTMLImageElement,
@@ -199,6 +199,7 @@ function drawGradedPhoto(
   dh: number,
   borderRadius = 0,
   applyGrain = false,
+  explicitFilterCss?: string,
 ) {
   ctx.save();
   if (borderRadius > 0) {
@@ -206,8 +207,13 @@ function drawGradedPhoto(
     ctx.clip();
   }
 
-  // Warm post-processing grade via canvas filter
-  ctx.filter = 'contrast(106%) brightness(102%) saturate(105%) sepia(8%)';
+  // Apply the selected studio preset CSS filter to the 2D canvas context before drawImage
+  const filterCss = explicitFilterCss || (img as any).filterCss || 'none';
+  if (filterCss && filterCss !== 'none') {
+    ctx.filter = filterCss;
+  } else {
+    ctx.filter = 'none';
+  }
   ctx.drawImage(img, dx, dy, dw, dh);
   ctx.filter = 'none';
 
@@ -1716,8 +1722,11 @@ export default function CanvasEditor({
             (f) =>
               new Promise<HTMLImageElement>((resolve) => {
                 const img = new Image();
+                const filterCss = getFilterCss(f.filter);
+                (img as any).filterCss = filterCss;
                 const timer = setTimeout(() => {
                   const fb = new Image();
+                  (fb as any).filterCss = filterCss;
                   fb.src = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
                   resolve(fb);
                 }, 3000);
@@ -1728,6 +1737,7 @@ export default function CanvasEditor({
                 img.onerror = () => {
                   clearTimeout(timer);
                   const fb = new Image();
+                  (fb as any).filterCss = filterCss;
                   fb.src = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
                   resolve(fb);
                 };

@@ -170,3 +170,14 @@ body::after {
 .animate-fade-in {
   animation: fadeIn 0.2s ease-out forwards;
 }
+
+/* ────────────────────────────────
+   Smooth horizontal scroll without scrollbar
+──────────────────────────────── */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}

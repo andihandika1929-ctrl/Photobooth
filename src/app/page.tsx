@@ -6,6 +6,8 @@ import CameraViewport, {
   type FilterName,
   COUNTDOWN_OPTIONS,
   type CountdownDuration,
+  getFilterCss,
+  STUDIO_FILTERS,
 } from '@/components/CameraViewport';
 import CanvasEditor, { type LayoutType } from '@/components/CanvasEditor';
 import LoadingScreen from '@/components/LoadingScreen';
@@ -329,6 +331,7 @@ export default function HomePage() {
                         <img
                           src={frame.dataUrl}
                           alt={`Frame ${i + 1}`}
+                          style={{ filter: getFilterCss(frame.filter) }}
                           className="w-full aspect-square object-cover rounded-sm"
                         />
                         {/* Hover Overlay with Retake */}
@@ -343,8 +346,8 @@ export default function HomePage() {
                         {/* Polaroid Label */}
                         <div className="absolute bottom-1.5 left-2 right-2 flex items-center justify-between text-[9.5px] font-mono text-zinc-500">
                           <span>SHOT #{i + 1}</span>
-                          <span className="uppercase font-semibold text-zinc-700">
-                            {frame.filter}
+                          <span className="uppercase font-semibold text-zinc-700 truncate max-w-[120px]" title={frame.filter}>
+                            {STUDIO_FILTERS.find(f => f.id === frame.filter)?.label || frame.filter}
                           </span>
                         </div>
                       </div>

@@ -1,20 +1,95 @@
 'use client';
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { Camera, Upload, RotateCcw, Zap, AlertCircle, FlipHorizontal, Timer } from 'lucide-react';
+import { Camera, Upload, RotateCcw, Zap, AlertCircle, FlipHorizontal, Timer, Sparkles } from 'lucide-react';
 import { playCountdownBeep, playFlashSound, initAudio } from './AudioEngine';
 
-export type FilterName = 'natural' | 'bw' | 'vintage' | 'cyber';
+export type FilterName =
+  | 'natural'
+  | 'haru-glow'
+  | 'portra-400'
+  | 'fuji-astia'
+  | 'y2k-flash'
+  | 'muted-mocha'
+  | 'leica-noir'
+  | 'bw'
+  | 'vintage'
+  | 'cyber';
 
 export const COUNTDOWN_OPTIONS = [3, 5, 10, 15] as const;
 export type CountdownDuration = (typeof COUNTDOWN_OPTIONS)[number];
 
-const FILTERS: { id: FilterName; label: string; css: string }[] = [
-  { id: 'natural', label: 'Natural',  css: '' },
-  { id: 'bw',      label: 'B&W',      css: 'grayscale(100%) contrast(125%) brightness(92%)' },
-  { id: 'vintage', label: 'Vintage',  css: 'sepia(45%) contrast(108%) brightness(106%) saturate(75%)' },
-  { id: 'cyber',   label: 'Cyber',    css: 'hue-rotate(170deg) saturate(180%) contrast(115%)' },
+export interface StudioFilter {
+  id: FilterName;
+  label: string;
+  tag: string;
+  css: string;
+  desc: string;
+}
+
+export const STUDIO_FILTERS: StudioFilter[] = [
+  {
+    id: 'natural',
+    label: 'Studio Natural',
+    tag: 'Default',
+    css: 'brightness(1.03) contrast(1.02) saturate(1.03)',
+    desc: 'Clean, bright, true-to-life studio flash look',
+  },
+  {
+    id: 'haru-glow',
+    label: 'Haru Glow',
+    tag: 'Idol Skin',
+    css: 'brightness(1.08) contrast(0.95) saturate(1.06) sepia(0.04)',
+    desc: 'Soft skin smoothing tone, lifted highlights, warm peachy glow',
+  },
+  {
+    id: 'portra-400',
+    label: 'Kodak Portra 400',
+    tag: 'Warm Film',
+    css: 'brightness(1.03) contrast(1.04) saturate(0.92) sepia(0.12) hue-rotate(-6deg)',
+    desc: 'Creamy golden warmth, gentle analog 35mm magazine aesthetic',
+  },
+  {
+    id: 'fuji-astia',
+    label: 'Fuji Astia',
+    tag: 'Pastel Clean',
+    css: 'brightness(1.05) contrast(1.02) saturate(1.1) hue-rotate(6deg)',
+    desc: 'Slight cyan-pastel undertone, vivid colors, crisp modern Korean look',
+  },
+  {
+    id: 'y2k-flash',
+    label: 'Y2K Flash Digicam',
+    tag: 'Direct Flash',
+    css: 'brightness(1.12) contrast(1.18) saturate(1.08)',
+    desc: 'Sharp direct-flash digicam look popular on TikTok/Instagram',
+  },
+  {
+    id: 'muted-mocha',
+    label: 'Muted Mocha',
+    tag: 'Matte Earth',
+    css: 'brightness(1.02) contrast(0.92) saturate(0.85) sepia(0.16)',
+    desc: 'Cinematic low-contrast earth tone with lifted matte shadows',
+  },
+  {
+    id: 'leica-noir',
+    label: 'Leica Noir',
+    tag: 'Editorial B&W',
+    css: 'grayscale(1) contrast(1.22) brightness(1.04)',
+    desc: 'Deep punchy blacks and luminous skin highlights, luxury editorial look',
+  },
 ];
+
+export function getFilterCss(filterId?: FilterName): string {
+  if (!filterId) return STUDIO_FILTERS[0].css;
+  const match = STUDIO_FILTERS.find((f) => f.id === filterId);
+  if (match) return match.css;
+  if (filterId === 'bw') return 'grayscale(1) contrast(1.22) brightness(1.04)';
+  if (filterId === 'vintage')
+    return 'brightness(1.03) contrast(1.04) saturate(0.92) sepia(0.12) hue-rotate(-6deg)';
+  if (filterId === 'cyber')
+    return 'brightness(1.05) contrast(1.02) saturate(1.1) hue-rotate(6deg)';
+  return STUDIO_FILTERS[0].css;
+}
 
 interface CameraViewportProps {
   onCapture: (imageDataUrl: string, filter: FilterName) => void;
@@ -103,13 +178,12 @@ export default function CameraViewport({
     if (!ctx) return;
 
     if (isMirrored) { ctx.translate(size, 0); ctx.scale(-1, 1); }
-    const filterObj = FILTERS.find(f => f.id === activeFilter);
-    if (filterObj?.css) ctx.filter = filterObj.css;
+    ctx.filter = 'none'; // Clean raw capture so identical CSS filter is applied on 2D canvas export
     ctx.drawImage(video, offsetX, offsetY, size, size, 0, 0, size, size);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.filter = 'none';
 
-    onCapture(canvas.toDataURL('image/jpeg', 0.96), activeFilter);
+    onCapture(canvas.toDataURL('image/jpeg', 0.98), activeFilter);
   }, [activeFilter, isMirrored, onCapture]);
 
   const startCountdown = useCallback(() => {
@@ -167,7 +241,7 @@ export default function CameraViewport({
     reader.readAsDataURL(file);
   }, [activeFilter, onCapture]);
 
-  const filterStyle = FILTERS.find(f => f.id === activeFilter)?.css ?? '';
+  const filterStyle = getFilterCss(activeFilter);
 
   return (
     <div className="flex flex-col gap-4">
@@ -261,14 +335,6 @@ export default function CameraViewport({
               </div>
             )}
 
-            {/* Scan-line overlay for that retro feel */}
-            <div
-              className="absolute inset-0 z-10 pointer-events-none opacity-[0.04]"
-              style={{
-                backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,1) 2px, rgba(0,0,0,1) 4px)',
-              }}
-            />
-
             <video
               ref={videoRef}
               playsInline
@@ -296,43 +362,68 @@ export default function CameraViewport({
             <canvas ref={canvasRef} className="hidden" />
           </div>
 
-          {/* Bottom controls bar */}
-          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 px-0.5">
-            {/* Filter pills */}
-            <div className="flex gap-1.5 flex-wrap items-center">
-              <span className="text-[9px] font-mono text-white/40 uppercase tracking-wider mr-0.5">Filter:</span>
-              {FILTERS.map(f => (
-                <button
-                  key={f.id}
-                  onClick={() => setActiveFilter(f.id)}
-                  className={`pill-tab text-[10px] px-2.5 py-1 ${
-                    activeFilter === f.id
-                      ? 'pill-tab-active'
-                      : 'bg-white/10 text-white/50 border-white/20 hover:text-white/80 hover:border-white/40'
-                  }`}
-                >
-                  {f.label}
-                </button>
-              ))}
+          {/* Bottom controls bar: 7 Signature Korean Studio & Film Presets */}
+          <div className="mt-3 flex flex-col gap-2 px-1">
+            {/* Horizontally scrollable presets */}
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 text-[10px] font-mono uppercase tracking-wider text-white/50 shrink-0 select-none">
+                <Sparkles size={11} className="text-amber-400" />
+                <span>Filter</span>
+              </div>
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5 scroll-smooth flex-1">
+                {STUDIO_FILTERS.map(f => {
+                  const isActive = activeFilter === f.id;
+                  return (
+                    <button
+                      key={f.id}
+                      type="button"
+                      onClick={() => setActiveFilter(f.id)}
+                      title={f.desc}
+                      className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs transition-all ${
+                        isActive
+                          ? 'bg-white text-zinc-900 font-bold shadow-md shadow-black/40 scale-[1.02]'
+                          : 'bg-white/10 text-white/70 hover:text-white hover:bg-white/20 border border-white/10'
+                      }`}
+                    >
+                      <span>{f.label}</span>
+                      <span
+                        className={`text-[9px] font-mono px-1.5 py-0.2 rounded-full uppercase tracking-tight ${
+                          isActive
+                            ? 'bg-zinc-900/10 text-zinc-700'
+                            : 'bg-white/10 text-white/50'
+                        }`}
+                      >
+                        {f.tag}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
-            {/* Quick Timer pills */}
-            <div className="flex items-center gap-1 bg-white/10 px-2 py-1 rounded-lg border border-white/10">
-              <Timer size={11} className="text-white/50 mr-0.5" />
-              <span className="text-[9px] font-mono text-white/50 uppercase tracking-wider mr-1">Timer:</span>
-              {COUNTDOWN_OPTIONS.map(sec => (
-                <button
-                  key={sec}
-                  onClick={() => onCountdownDurationChange?.(sec)}
-                  className={`text-[10px] font-mono px-2 py-0.5 rounded transition-all ${
-                    countdownDuration === sec
-                      ? 'bg-white text-zinc-900 font-bold shadow-xs'
-                      : 'text-white/60 hover:text-white hover:bg-white/10'
-                  }`}
-                >
-                  {sec}s
-                </button>
-              ))}
+            {/* Sub-bar: Preset description & timer pills */}
+            <div className="flex items-center justify-between pt-1 border-t border-white/10 text-[10px] font-mono text-white/50">
+              <span className="truncate max-w-[240px] text-white/40">
+                {STUDIO_FILTERS.find(f => f.id === activeFilter)?.desc}
+              </span>
+              <div className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded-md border border-white/10 shrink-0">
+                <Timer size={11} className="text-white/40 mr-0.5" />
+                <span className="text-[9px] uppercase tracking-wider mr-1">Timer:</span>
+                {COUNTDOWN_OPTIONS.map(sec => (
+                  <button
+                    key={sec}
+                    type="button"
+                    onClick={() => onCountdownDurationChange?.(sec)}
+                    className={`text-[10px] px-1.5 py-0.5 rounded transition-all ${
+                      countdownDuration === sec
+                        ? 'bg-white text-zinc-900 font-bold shadow-xs'
+                        : 'text-white/60 hover:text-white hover:bg-white/10'
+                    }`}
+                  >
+                    {sec}s
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </div>
