@@ -29,6 +29,7 @@ import { getKeyedSticker, getKeyedStickerSync, preloadAllStickers } from '@/util
 export type FramePreset =
   | 'editorial'
   | 'birthday'
+  | 'birthdayBow'
   | 'kitty'
   | 'cyberSparkle'
   | 'coquette'
@@ -64,11 +65,12 @@ interface CanvasEditorProps {
 
 // ─── Constants ────────────────────────────────────────────
 const CUTE_PRESETS: { id: FramePreset; label: string; emoji: string; desc: string }[] = [
-  { id: 'birthday',     label: 'Birthday Celebration', emoji: '🎂', desc: 'Party balloons, confetti & cake' },
-  { id: 'kitty',        label: 'Kitty & Paws',         emoji: '🐱', desc: 'Cute ears, paws & happy cat' },
-  { id: 'cyberSparkle', label: 'Y2K Cyber Sparkle',    emoji: '✨', desc: 'Chrome stars, CD discs & hearts' },
-  { id: 'coquette',     label: 'Coquette Ribbon',      emoji: '🎀', desc: 'Pretty bows, cherries & lace' },
-  { id: 'thermal',      label: 'Thermal Receipt',      emoji: '🧾', desc: 'Jagged edges, barcode & mascot' },
+  { id: 'birthday',     label: 'Cinema Ticket Birthday', emoji: '🎟️', desc: 'OURstudio scalloped ticket & vintage stamp' },
+  { id: 'birthdayBow',  label: 'Coquette Pink Bow',      emoji: '🎀', desc: 'Silk vector bows, bold caps & script' },
+  { id: 'kitty',        label: 'Kitty & Paws',           emoji: '🐱', desc: 'Cute ears, paws & happy cat' },
+  { id: 'cyberSparkle', label: 'Y2K Cyber Sparkle',      emoji: '✨', desc: 'Chrome stars, CD discs & hearts' },
+  { id: 'coquette',     label: 'Coquette Ribbon',        emoji: '🌸', desc: 'Pretty bows, cherries & lace' },
+  { id: 'thermal',      label: 'Thermal Receipt',        emoji: '🧾', desc: 'Jagged edges, barcode & mascot' },
 ];
 
 const CLASSIC_PRESETS: { id: FramePreset; label: string; emoji: string; desc: string }[] = [
@@ -110,6 +112,13 @@ function fmtTime() {
     minute: '2-digit',
     hour12: false,
   });
+}
+function fmtCinemaDate() {
+  const d = new Date();
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  return `• ${day}.${month}.${year} •`;
 }
 
 function roundRect(
@@ -237,11 +246,22 @@ export default function CanvasEditor({
   const [frameColor, setFrameColor] = useState<FrameColorId>('cream');
   const [location, setLocation] = useState('SEOUL STUDIO');
   const [nowPlaying, setNowPlaying] = useState('NewJeans - Hype Boy');
+  const [birthdayNameInput, setBirthdayNameInput] = useState("Hollie's Birthday");
+  const [birthdayName, setBirthdayName] = useState("Hollie's Birthday");
+  const [birthdayTheme, setBirthdayTheme] = useState<'cream' | 'black'>('cream');
   const [renderProgress, setRenderProgress] = useState<number | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [placedStickers, setPlacedStickers] = useState<PlacedSticker[]>([]);
   const [activeStickerID, setActiveStickerID] = useState<string | null>(null);
   const [stickerThumbnails, setStickerThumbnails] = useState<Record<string, string>>({});
+
+  // Debounce birthday title input to keep UI snappy and prevent canvas re-render thrashing
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setBirthdayName(birthdayNameInput.trim() || "Hollie's Birthday");
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [birthdayNameInput]);
 
   const placedStickersRef = useRef<PlacedSticker[]>(placedStickers);
   useEffect(() => {
@@ -252,8 +272,12 @@ export default function CanvasEditor({
   const hasRenderedRef = useRef(false);
   const locationRef = useRef(location);
   const nowPlayingRef = useRef(nowPlaying);
+  const birthdayNameRef = useRef(birthdayName);
+  const birthdayThemeRef = useRef(birthdayTheme);
   locationRef.current = location;
   nowPlayingRef.current = nowPlaying;
+  birthdayNameRef.current = birthdayName;
+  birthdayThemeRef.current = birthdayTheme;
 
   const COLOR = FRAME_COLORS.find((c) => c.id === frameColor)!;
 
@@ -349,8 +373,8 @@ export default function CanvasEditor({
   //  PRESET RENDERERS (PROCEDURAL ACCENTS)
   // ═══════════════════════════════════════════════════════
 
-  // 1. Birthday Celebration 🎂
-  const drawBirthday = useCallback(
+  // 1. Retro Cinema Ticket Birthday (OURstudio Korean Aesthetic) 🎟️
+  const drawCinemaTicketBirthday = useCallback(
     async (
       ctx: CanvasRenderingContext2D,
       imgs: HTMLImageElement[],
@@ -359,98 +383,366 @@ export default function CanvasEditor({
       s: number,
       isExport: boolean = false,
     ) => {
-      // Festive pastel cream background
-      ctx.fillStyle = '#FFFDF0';
-      ctx.fillRect(0, 0, w, h);
-
-      // Balloons - Top-Left Cluster
-      const drawBalloon = (bx: number, by: number, br: number, color: string) => {
-        ctx.save();
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.arc(bx, by, br, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Highlight
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
-        ctx.beginPath();
-        ctx.ellipse(bx - br * 0.3, by - br * 0.3, br * 0.2, br * 0.35, -0.6, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Knot
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        ctx.arc(bx, by + br + 2 * s, 3 * s, 0, Math.PI * 2);
-        ctx.fill();
-
-        // String
-        ctx.strokeStyle = '#B3A898';
-        ctx.lineWidth = 1.2 * s;
-        ctx.beginPath();
-        ctx.moveTo(bx, by + br + 4 * s);
-        ctx.quadraticCurveTo(bx + 8 * s, by + br + 35 * s, bx - 2 * s, by + br + 75 * s);
-        ctx.stroke();
-        ctx.restore();
-      };
-
-      drawBalloon(50 * s, 70 * s, 26 * s, '#FF6B6B');
-      drawBalloon(88 * s, 54 * s, 22 * s, '#FFD93D');
-      drawBalloon(w - 50 * s, 70 * s, 26 * s, '#4D96FF');
-      drawBalloon(w - 88 * s, 54 * s, 22 * s, '#6BCB77');
-
-      // Confetti Sprinkles Along Outer Margins
-      const confettiColors = ['#FF6B6B', '#FFD93D', '#4D96FF', '#6BCB77', '#FF85A1', '#C084FC'];
-      for (let i = 0; i < 48; i++) {
-        const edge = i % 4;
-        let cx2 = 0;
-        let cy2 = 0;
-        const offset = ((i * 37) % 100) / 100;
-
-        if (edge === 0) {
-          cx2 = 12 * s + offset * 22 * s;
-          cy2 = offset * h;
-        } else if (edge === 1) {
-          cx2 = w - (12 * s + offset * 22 * s);
-          cy2 = offset * h;
-        } else if (edge === 2) {
-          cx2 = offset * w;
-          cy2 = 16 * s + (i % 3) * 10 * s;
-        } else {
-          cx2 = offset * w;
-          cy2 = h - (16 * s + (i % 3) * 10 * s);
-        }
-
-        ctx.fillStyle = confettiColors[i % confettiColors.length];
-        const shape = i % 3;
-        if (shape === 0) {
-          ctx.beginPath();
-          ctx.arc(cx2, cy2, (2.5 + (i % 2)) * s, 0, Math.PI * 2);
-          ctx.fill();
-        } else if (shape === 1) {
-          ctx.fillRect(cx2, cy2, 5 * s, 3 * s);
-        } else {
-          // Mini star
-          ctx.beginPath();
-          ctx.arc(cx2, cy2, 1.8 * s, 0, Math.PI * 2);
-          ctx.fill();
+      if (typeof document !== 'undefined' && document.fonts) {
+        try {
+          await document.fonts.ready;
+        } catch {
+          // ignore font loading fallback
         }
       }
 
-      // Header Typography
-      ctx.fillStyle = '#1E2022';
-      ctx.font = `bold ${21 * s}px Inter, sans-serif`;
+      const isBlack = birthdayThemeRef.current === 'black';
+      const bg = isBlack ? '#141416' : '#FAF7EE';
+      const fg = isBlack ? '#E8DFCE' : '#2A2826';
+      const muted = isBlack ? '#9E968B' : '#7D776D';
+      const borderCol = isBlack ? '#2E2D2A' : '#E8DFCE';
+      const accentGold = isBlack ? '#E2B874' : '#B85D3B';
+
+      // Dimensions & ticket notch setup
+      const headerH = 155 * s;
+      const footerH = 135 * s;
+      const notchY = headerH;
+      const notchR = 12 * s;
+
+      // Draw Cinema Ticket Base Shape with Scalloped Left/Right Cutouts
+      ctx.save();
+      ctx.fillStyle = bg;
+      ctx.beginPath();
+      // Start top-left
+      ctx.moveTo(0, 0);
+      ctx.lineTo(w, 0);
+      // Right edge down to notch
+      ctx.lineTo(w, notchY - notchR);
+      // Right notch (semicircle curved inward)
+      ctx.arc(w, notchY, notchR, -Math.PI / 2, Math.PI / 2, true);
+      // Right edge to bottom
+      ctx.lineTo(w, h);
+      // Bottom edge
+      ctx.lineTo(0, h);
+      // Left edge up to notch
+      ctx.lineTo(0, notchY + notchR);
+      // Left notch (semicircle curved inward)
+      ctx.arc(0, notchY, notchR, Math.PI / 2, -Math.PI / 2, true);
+      ctx.lineTo(0, 0);
+      ctx.closePath();
+      ctx.fill();
+
+      // Delicate outer inset frame
+      ctx.strokeStyle = borderCol;
+      ctx.lineWidth = 1.2 * s;
+      ctx.strokeRect(10 * s, 10 * s, w - 20 * s, h - 20 * s);
+
+      // Clean horizontal row of circular negative cutouts / perforated dots dividing header & frames
+      const dotR = 2.2 * s;
+      const dotGap = 12 * s;
+      ctx.fillStyle = isBlack ? '#282725' : '#E2D9C5';
+      for (let px = notchR + 14 * s; px < w - notchR - 14 * s; px += dotGap) {
+        ctx.beginPath();
+        ctx.arc(px, notchY, dotR, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // ── Header Box ──
+      // Top ticket meta
+      ctx.fillStyle = muted;
+      ctx.font = `600 ${7.5 * s}px Inter, sans-serif`;
+      ctx.textAlign = 'left';
+      ctx.fillText('ADMIT ONE  •  NO. BDAY-2026', 22 * s, 34 * s);
+      ctx.textAlign = 'right';
+      ctx.fillText('KOREAN STUDIO STRIP', w - 22 * s, 34 * s);
+
+      // Thin separator under top meta
+      ctx.strokeStyle = borderCol;
+      ctx.lineWidth = 0.8 * s;
+      ctx.beginPath();
+      ctx.moveTo(22 * s, 42 * s);
+      ctx.lineTo(w - 22 * s, 42 * s);
+      ctx.stroke();
+
+      // Cursive script header: [Name]'s Birthday
+      const title = birthdayNameRef.current || "Hollie's Birthday";
+      ctx.fillStyle = fg;
+      ctx.font = `italic 400 ${32 * s}px "Pinyon Script", "Playfair Display", Georgia, cursive`;
       ctx.textAlign = 'center';
-      ctx.fillText('HAPPY BIRTHDAY ✨', w / 2, 126 * s);
+      ctx.fillText(title, w / 2, 88 * s);
 
-      ctx.fillStyle = '#FF6B6B';
-      ctx.font = `600 ${11 * s}px Inter, sans-serif`;
-      ctx.fillText('Make a Wish  ♡', w / 2, 146 * s);
+      // Minimalist date stamp underneath (e.g. • 24.09.2026 •)
+      ctx.fillStyle = muted;
+      ctx.font = `600 ${9.5 * s}px Inter, sans-serif`;
+      ctx.fillText(fmtCinemaDate(), w / 2, 112 * s);
 
-      // Photos
-      const pad = 28 * s;
+      ctx.font = `600 ${7 * s}px Inter, sans-serif`;
+      ctx.fillStyle = isBlack ? '#B5ABA0' : '#8A847A';
+      ctx.fillText('✦  CELEBRATING SPECIAL MOMENTS  ✦', w / 2, 128 * s);
+
+      // ── Crisp Photo Frames ──
+      const pad = 24 * s;
       const gap = 12 * s;
-      const headerH = 168 * s;
-      const footerH = 140 * s;
+      const count = layout === 'strip4' ? 4 : layout === 'strip3' ? 3 : 4;
+
+      if (layout === 'grid2x2') {
+        const cw = (w - pad * 2 - gap) / 2;
+        const ch = (h - headerH - footerH - gap) / 2;
+        const pos = [
+          [0, 0],
+          [1, 0],
+          [0, 1],
+          [1, 1],
+        ];
+        for (let i = 0; i < 4; i++) {
+          if (!imgs[i]) continue;
+          const [c2, r] = pos[i];
+          const ix = pad + c2 * (cw + gap);
+          const iy = headerH + 16 * s + r * (ch + gap);
+          drawGradedPhoto(ctx, imgs[i], ix, iy, cw, ch, 5 * s, isExport);
+          ctx.strokeStyle = borderCol;
+          ctx.lineWidth = 1.2 * s;
+          roundRect(ctx, ix, iy, cw, ch, 5 * s);
+          ctx.stroke();
+        }
+      } else {
+        const iw = w - pad * 2;
+        const ih = (h - headerH - footerH - 18 * s - gap * (count - 1)) / count;
+        for (let i = 0; i < count; i++) {
+          if (!imgs[i]) continue;
+          const iy = headerH + 18 * s + i * (ih + gap);
+          drawGradedPhoto(ctx, imgs[i], pad, iy, iw, ih, 5 * s, isExport);
+          ctx.strokeStyle = borderCol;
+          ctx.lineWidth = 1.2 * s;
+          roundRect(ctx, pad, iy, iw, ih, 5 * s);
+          ctx.stroke();
+
+          // Subtle photo index marker
+          ctx.fillStyle = muted;
+          ctx.font = `600 ${6.5 * s}px "Courier New", monospace`;
+          ctx.textAlign = 'right';
+          ctx.fillText(`0${i + 1} / 0${count}`, w - pad - 6 * s, iy + ih - 6 * s);
+        }
+      }
+
+      // ── Vintage Celebratory Stamp Badge ──
+      const stampX = w / 2;
+      const stampY = h - 72 * s;
+      const stampR = 32 * s;
+
+      ctx.save();
+      ctx.translate(stampX, stampY);
+      ctx.rotate(-0.06); // authentic vintage stamp tilt
+
+      // Outer dashed circle
+      ctx.strokeStyle = accentGold;
+      ctx.lineWidth = 1.2 * s;
+      ctx.setLineDash([3 * s, 3 * s]);
+      ctx.beginPath();
+      ctx.arc(0, 0, stampR, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Inner solid circle
+      ctx.setLineDash([]);
+      ctx.lineWidth = 0.8 * s;
+      ctx.beginPath();
+      ctx.arc(0, 0, stampR - 4 * s, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Stamp typography & stars
+      ctx.fillStyle = accentGold;
+      ctx.textAlign = 'center';
+      ctx.font = `bold ${6.5 * s}px Inter, sans-serif`;
+      ctx.fillText('✦ SPECIAL DAY ✦', 0, -14 * s);
+
+      ctx.font = `bold ${9 * s}px "Playfair Display", Georgia, serif`;
+      ctx.fillText("LET'S CELEBRATE", 0, -1 * s);
+
+      ctx.font = `italic 400 ${7.5 * s}px "Pinyon Script", cursive`;
+      ctx.fillText("It's your special day", 0, 11 * s);
+
+      ctx.font = `600 ${5.5 * s}px Inter, sans-serif`;
+      ctx.fillText('• OUR STUDIO 2026 •', 0, 20 * s);
+
+      ctx.restore();
+
+      // ── Cinema Ticket Barcode & Serial Footer ──
+      const barW = 140 * s;
+      const barH = 14 * s;
+      drawBarcode(ctx, w / 2 - barW / 2, h - 35 * s, barW, barH, isBlack ? '#5A564F' : '#B0A798');
+
+      ctx.fillStyle = muted;
+      ctx.font = `600 ${7.5 * s}px "Courier New", monospace`;
+      ctx.textAlign = 'center';
+      ctx.fillText(`* ${fmtDate().replace(/\//g, '')}-BDAY-OURSTUDIO *`, w / 2, h - 16 * s);
+
+      ctx.restore();
+    },
+    [layout]
+  );
+
+  // 2. Coquette Pink Bow Birthday 🎀
+  const drawPinkBowBirthday = useCallback(
+    async (
+      ctx: CanvasRenderingContext2D,
+      imgs: HTMLImageElement[],
+      w: number,
+      h: number,
+      s: number,
+      isExport: boolean = false,
+    ) => {
+      if (typeof document !== 'undefined' && document.fonts) {
+        try {
+          await document.fonts.ready;
+        } catch {
+          // ignore font loading fallback
+        }
+      }
+
+      // Soft ballet cream background
+      ctx.fillStyle = '#FFF6F8';
+      ctx.fillRect(0, 0, w, h);
+
+      // Delicate outer double lace border
+      ctx.strokeStyle = '#FBCFE8';
+      ctx.lineWidth = 1.5 * s;
+      ctx.strokeRect(10 * s, 10 * s, w - 20 * s, h - 20 * s);
+
+      ctx.strokeStyle = '#F472B6';
+      ctx.lineWidth = 0.6 * s;
+      ctx.strokeRect(14 * s, 14 * s, w - 28 * s, h - 28 * s);
+
+      // Realistic silk vector bow renderer
+      const drawSilkBow = (bx: number, by: number, size: number, angle: number = 0) => {
+        ctx.save();
+        ctx.translate(bx, by);
+        ctx.rotate(angle);
+
+        // Ribbon Tails (behind loops)
+        const drawTail = (dir: number) => {
+          ctx.save();
+          ctx.beginPath();
+          ctx.moveTo(0, size * 0.2);
+          ctx.bezierCurveTo(
+            dir * size * 0.4,
+            size * 0.8,
+            dir * size * 0.6,
+            size * 1.4,
+            dir * size * 0.8,
+            size * 1.9
+          );
+          ctx.lineTo(dir * size * 0.55, size * 1.75);
+          ctx.lineTo(dir * size * 0.35, size * 1.9);
+          ctx.bezierCurveTo(
+            dir * size * 0.3,
+            size * 1.2,
+            dir * size * 0.15,
+            size * 0.6,
+            0,
+            size * 0.2
+          );
+          ctx.fillStyle = '#F472B6';
+          ctx.fill();
+
+          // Tail highlight streak
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+          ctx.lineWidth = 1 * s;
+          ctx.beginPath();
+          ctx.moveTo(dir * size * 0.1, size * 0.4);
+          ctx.quadraticCurveTo(dir * size * 0.35, size * 1.1, dir * size * 0.5, size * 1.6);
+          ctx.stroke();
+          ctx.restore();
+        };
+        drawTail(-1);
+        drawTail(1);
+
+        // Ribbon Loops
+        const drawLoop = (dir: number) => {
+          ctx.save();
+          // Main loop body
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.bezierCurveTo(
+            dir * size * 1.2,
+            -size * 0.8,
+            dir * size * 1.7,
+            size * 0.5,
+            0,
+            size * 0.2
+          );
+          ctx.closePath();
+          ctx.fillStyle = '#EC4899';
+          ctx.fill();
+
+          // Inner loop shadow
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.bezierCurveTo(
+            dir * size * 0.9,
+            -size * 0.4,
+            dir * size * 1.2,
+            size * 0.3,
+            0,
+            size * 0.15
+          );
+          ctx.fillStyle = '#DB2777';
+          ctx.fill();
+
+          // Silk sheen highlight
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.65)';
+          ctx.lineWidth = 1.5 * s;
+          ctx.beginPath();
+          ctx.moveTo(dir * size * 0.2, -size * 0.1);
+          ctx.bezierCurveTo(
+            dir * size * 0.8,
+            -size * 0.55,
+            dir * size * 1.3,
+            0,
+            dir * size * 0.8,
+            size * 0.25
+          );
+          ctx.stroke();
+          ctx.restore();
+        };
+        drawLoop(-1);
+        drawLoop(1);
+
+        // Center knot with wraps
+        ctx.fillStyle = '#BE185D';
+        ctx.beginPath();
+        ctx.arc(0, size * 0.1, size * 0.25, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+        ctx.beginPath();
+        ctx.ellipse(0, size * 0.05, size * 0.12, size * 0.18, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+      };
+
+      // Top corner silk bows
+      drawSilkBow(36 * s, 36 * s, 18 * s, 0.15);
+      drawSilkBow(w - 36 * s, 36 * s, 18 * s, -0.15);
+
+      // Header Typography
+      // Bold modern caps "HAPPY BIRTHDAY"
+      ctx.fillStyle = '#831843';
+      ctx.font = `700 ${19 * s}px "Playfair Display", Georgia, serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText('HAPPY BIRTHDAY', w / 2, 54 * s);
+
+      // Paired with romantic cursive script accent
+      const title = birthdayNameRef.current || "Hollie's Birthday";
+      ctx.fillStyle = '#BE185D';
+      ctx.font = `italic 400 ${29 * s}px "Pinyon Script", "Playfair Display", cursive`;
+      ctx.fillText(`♡ ${title} ♡`, w / 2, 85 * s);
+
+      // Subtitle
+      ctx.fillStyle = '#DB2777';
+      ctx.font = `600 ${8 * s}px Inter, sans-serif`;
+      ctx.fillText('✦  A BEAUTIFUL DAY TO CELEBRATE YOU  ✦', w / 2, 102 * s);
+
+      // Photo Frames
+      const pad = 26 * s;
+      const gap = 12 * s;
+      const headerH = 118 * s;
+      const footerH = 125 * s;
       const count = layout === 'strip4' ? 4 : layout === 'strip3' ? 3 : 4;
 
       if (layout === 'grid2x2') {
@@ -467,10 +759,10 @@ export default function CanvasEditor({
           const [c2, r] = pos[i];
           const ix = pad + c2 * (cw + gap);
           const iy = headerH + r * (ch + gap);
-          drawGradedPhoto(ctx, imgs[i], ix, iy, cw, ch, 8 * s, isExport);
-          ctx.strokeStyle = '#FFEAA7';
+          drawGradedPhoto(ctx, imgs[i], ix, iy, cw, ch, 6 * s, isExport);
+          ctx.strokeStyle = '#FBCFE8';
           ctx.lineWidth = 1.5 * s;
-          roundRect(ctx, ix, iy, cw, ch, 8 * s);
+          roundRect(ctx, ix, iy, cw, ch, 6 * s);
           ctx.stroke();
         }
       } else {
@@ -479,57 +771,44 @@ export default function CanvasEditor({
         for (let i = 0; i < count; i++) {
           if (!imgs[i]) continue;
           const iy = headerH + i * (ih + gap);
-          drawGradedPhoto(ctx, imgs[i], pad, iy, iw, ih, 8 * s, isExport);
-          ctx.strokeStyle = '#FFEAA7';
+          drawGradedPhoto(ctx, imgs[i], pad, iy, iw, ih, 6 * s, isExport);
+          ctx.strokeStyle = '#FBCFE8';
           ctx.lineWidth = 1.5 * s;
-          roundRect(ctx, pad, iy, iw, ih, 8 * s);
+          roundRect(ctx, pad, iy, iw, ih, 6 * s);
           ctx.stroke();
         }
       }
 
-      // Birthday Cake Doodle at bottom
-      const cakeX = w / 2;
-      const cakeY = h - 68 * s;
-      const cakeW = 84 * s;
+      // Bottom Silk Bows (left and right)
+      drawSilkBow(40 * s, h - 52 * s, 16 * s, 0.1);
+      drawSilkBow(w - 40 * s, h - 52 * s, 16 * s, -0.1);
 
-      // Plate
-      ctx.fillStyle = '#E5E0D8';
-      ctx.beginPath();
-      ctx.ellipse(cakeX, cakeY + 12 * s, cakeW * 0.6, 6 * s, 0, 0, Math.PI * 2);
+      // Date stamp badge at bottom center
+      const badgeW = 160 * s;
+      const badgeH = 28 * s;
+      const badgeX = w / 2 - badgeW / 2;
+      const badgeY = h - 68 * s;
+
+      ctx.fillStyle = '#FCE7F3';
+      roundRect(ctx, badgeX, badgeY, badgeW, badgeH, 14 * s);
       ctx.fill();
 
-      // Bottom tier
-      ctx.fillStyle = '#FFEAA7';
-      roundRect(ctx, cakeX - cakeW / 2, cakeY - 24 * s, cakeW, 30 * s, 4 * s);
-      ctx.fill();
+      ctx.strokeStyle = '#F472B6';
+      ctx.lineWidth = 1 * s;
+      roundRect(ctx, badgeX, badgeY, badgeW, badgeH, 14 * s);
+      ctx.stroke();
 
-      // Top tier
-      ctx.fillStyle = '#FFD0D0';
-      roundRect(ctx, cakeX - cakeW * 0.32, cakeY - 44 * s, cakeW * 0.64, 22 * s, 4 * s);
-      ctx.fill();
+      ctx.fillStyle = '#9D174D';
+      ctx.font = `600 ${8.5 * s}px Inter, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText(`• ${fmtCinemaDate()} •`, w / 2, badgeY + 13 * s);
 
-      // Frosting drip accents
-      ctx.fillStyle = '#FFF5F5';
-      ctx.fillRect(cakeX - cakeW / 2, cakeY - 24 * s, cakeW, 4 * s);
-      ctx.fillRect(cakeX - cakeW * 0.32, cakeY - 44 * s, cakeW * 0.64, 4 * s);
+      ctx.font = `600 ${6.5 * s}px Inter, sans-serif`;
+      ctx.fillStyle = '#DB2777';
+      ctx.fillText('CHERISHED MEMORIES FOREVER', w / 2, badgeY + 22 * s);
 
-      // Lit Candle
-      ctx.fillStyle = '#FF6B6B';
-      ctx.fillRect(cakeX - 3 * s, cakeY - 60 * s, 6 * s, 16 * s);
-
-      // Flame
-      ctx.fillStyle = '#FFD93D';
-      ctx.beginPath();
-      ctx.ellipse(cakeX, cakeY - 66 * s, 4 * s, 6 * s, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.fillStyle = '#FF7675';
-      ctx.beginPath();
-      ctx.ellipse(cakeX, cakeY - 65 * s, 2.5 * s, 3.5 * s, 0, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Signature watermark
-      ctx.fillStyle = '#8A8275';
+      // Watermark Signature
+      ctx.fillStyle = '#BE185D';
       ctx.font = `600 ${8.5 * s}px "Courier New", monospace`;
       ctx.textAlign = 'center';
       ctx.fillText(SIGNATURE, w / 2, h - 16 * s);
@@ -537,7 +816,7 @@ export default function CanvasEditor({
     [layout]
   );
 
-  // 2. Kitty & Paws 🐱
+  // 3. Kitty & Paws 🐱
   const drawKitty = useCallback(
     async (
       ctx: CanvasRenderingContext2D,
@@ -1459,7 +1738,10 @@ export default function CanvasEditor({
         // Render Chosen Preset
         switch (preset) {
           case 'birthday':
-            await drawBirthday(ctx, imgs, w, h, s, isExport);
+            await drawCinemaTicketBirthday(ctx, imgs, w, h, s, isExport);
+            break;
+          case 'birthdayBow':
+            await drawPinkBowBirthday(ctx, imgs, w, h, s, isExport);
             break;
           case 'kitty':
             await drawKitty(ctx, imgs, w, h, s, isExport);
@@ -1500,7 +1782,8 @@ export default function CanvasEditor({
       frames,
       preset,
       getDimensions,
-      drawBirthday,
+      drawCinemaTicketBirthday,
+      drawPinkBowBirthday,
       drawKitty,
       drawCyberSparkle,
       drawCoquette,
@@ -1546,12 +1829,12 @@ export default function CanvasEditor({
     }
   }, [renderToCanvas, onPreviewReady, preset]);
 
-  // Auto-render preview once on mount or when preset, frameColor, or layout changes
+  // Auto-render preview once on mount or when preset, frameColor, layout, or birthday settings change
   useEffect(() => {
     if (frames.length > 0) {
       triggerRender();
     }
-  }, [frames, preset, frameColor, layout, triggerRender]);
+  }, [frames, preset, frameColor, layout, birthdayName, birthdayTheme, triggerRender]);
 
   // Re-render when preset or frameColor changes
   const handlePresetSelect = (newPreset: FramePreset) => {
@@ -1723,6 +2006,96 @@ export default function CanvasEditor({
               ))}
             </div>
           </div>
+
+          {/* Birthday Customization Panel (when Cinema Ticket or Pink Bow is selected) */}
+          {(preset === 'birthday' || preset === 'birthdayBow') && (
+            <div className="p-4 bg-gradient-to-br from-amber-50/70 via-white to-pink-50/70 rounded-xl border border-amber-200/90 shadow-sm flex flex-col gap-3.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <Sparkles size={14} className="text-amber-500" />
+                  <span className="text-[11px] font-bold text-zinc-900 uppercase tracking-wider">
+                    {preset === 'birthday' ? 'Cinema Ticket Settings' : 'Pink Bow Settings'}
+                  </span>
+                </div>
+                <span className="text-[9.5px] font-mono font-bold text-amber-800 bg-amber-100/90 px-2 py-0.5 rounded-full border border-amber-200">
+                  Korean Studio Redesign
+                </span>
+              </div>
+
+              {/* Custom Birthday Title / Name */}
+              <div>
+                <label className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest block mb-1.5">
+                  Birthday Header Title / Name
+                </label>
+                <input
+                  type="text"
+                  value={birthdayNameInput}
+                  onChange={(e) => setBirthdayNameInput(e.target.value)}
+                  placeholder="e.g. Hollie's Birthday"
+                  maxLength={32}
+                  className="w-full text-xs font-semibold border border-zinc-300 rounded-lg px-3 py-2 bg-white outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition-all shadow-xs"
+                />
+                <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                  <span className="text-[10px] text-zinc-400 font-mono">Quick:</span>
+                  {["Hollie's Birthday", "Andi's Birthday", "Happy Birthday ♡", "Our Special Day"].map((sug) => (
+                    <button
+                      key={sug}
+                      type="button"
+                      onClick={() => setBirthdayNameInput(sug)}
+                      className={`text-[10px] font-medium px-2 py-0.5 rounded-md border transition-all ${
+                        birthdayNameInput === sug
+                          ? 'bg-zinc-900 text-white border-zinc-900'
+                          : 'bg-white border-zinc-200 hover:border-zinc-400 text-zinc-600'
+                      }`}
+                    >
+                      {sug}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Dual Color Themes (Cinema Ticket only) */}
+              {preset === 'birthday' && (
+                <div>
+                  <label className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest block mb-1.5">
+                    Ticket Color Theme
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setBirthdayTheme('cream')}
+                      className={`p-2.5 rounded-lg border flex items-center gap-2.5 text-xs font-semibold transition-all ${
+                        birthdayTheme === 'cream'
+                          ? 'border-zinc-900 bg-white shadow-sm ring-1 ring-zinc-900 font-bold'
+                          : 'border-zinc-200 bg-[#FAF7EE] text-zinc-600 hover:border-zinc-300'
+                      }`}
+                    >
+                      <span className="w-4 h-4 rounded-full bg-[#FAF7EE] border border-zinc-300 shadow-xs shrink-0" />
+                      <div className="text-left">
+                        <p className="leading-tight">Warm Soft Cream</p>
+                        <p className="text-[9.5px] font-normal text-zinc-500">Charcoal text & accents</p>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBirthdayTheme('black')}
+                      className={`p-2.5 rounded-lg border flex items-center gap-2.5 text-xs font-semibold transition-all ${
+                        birthdayTheme === 'black'
+                          ? 'border-zinc-900 bg-zinc-900 text-white shadow-sm ring-1 ring-zinc-900 font-bold'
+                          : 'border-zinc-200 bg-[#141416] text-zinc-300 hover:border-zinc-700'
+                      }`}
+                    >
+                      <span className="w-4 h-4 rounded-full bg-[#141416] border border-zinc-600 shadow-xs shrink-0" />
+                      <div className="text-left">
+                        <p className="leading-tight">Dark Jet-Black</p>
+                        <p className="text-[9.5px] font-normal text-zinc-400">Cream gold script</p>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Classic Studio Themes */}
           <div>
