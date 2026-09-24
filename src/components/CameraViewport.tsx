@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { Camera, Upload, RotateCcw, Zap, AlertCircle, FlipHorizontal, Timer, Sparkles } from 'lucide-react';
 import { playCountdownBeep, playFlashSound, initAudio } from './AudioEngine';
+import { isCanvasFilterSupported, applyPixelFilter } from '@/utils/canvasColorGrading';
 
 export type FilterName =
   | 'natural'
@@ -177,14 +178,30 @@ export default function CameraViewport({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    if (isMirrored) { ctx.translate(size, 0); ctx.scale(-1, 1); }
-    // Bake active filter directly into the captured canvas snapshot pixels
     const filterCss = getFilterCss(activeFilter);
-    ctx.filter = filterCss && filterCss.trim() !== '' ? filterCss : 'none';
-    ctx.drawImage(video, offsetX, offsetY, size, size, 0, 0, size, size);
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    // Reset ctx.filter immediately after drawing to avoid side effects
-    ctx.filter = 'none';
+    const hasNativeFilter = isCanvasFilterSupported();
+
+    ctx.save();
+    if (isMirrored) {
+      ctx.translate(size, 0);
+      ctx.scale(-1, 1);
+    }
+
+    if (hasNativeFilter) {
+      // Desktop / Supported: Native hardware-accelerated canvas filter
+      ctx.filter = filterCss && filterCss.trim() !== '' ? filterCss : 'none';
+      ctx.drawImage(video, offsetX, offsetY, size, size, 0, 0, size, size);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.filter = 'none';
+      ctx.restore();
+    } else {
+      // Mobile Safari / iOS WebKit: Draw raw frame, then apply pixel-manipulation fallback
+      ctx.filter = 'none';
+      ctx.drawImage(video, offsetX, offsetY, size, size, 0, 0, size, size);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.restore();
+      applyPixelFilter(ctx, activeFilter, size, size);
+    }
 
     onCapture(canvas.toDataURL('image/jpeg', 0.98), activeFilter);
   }, [activeFilter, isMirrored, onCapture]);
@@ -251,13 +268,22 @@ export default function CameraViewport({
         const ctx = canvas.getContext('2d');
         if (ctx) {
           const filterCss = getFilterCss(activeFilter);
+          const hasNativeFilter = isCanvasFilterSupported();
           const ox = (img.width - size) / 2;
           const oy = (img.height - size) / 2;
+
           ctx.save();
-          ctx.filter = filterCss && filterCss.trim() !== '' ? filterCss : 'none';
-          ctx.drawImage(img, ox, oy, size, size, 0, 0, size, size);
-          ctx.filter = 'none';
-          ctx.restore();
+          if (hasNativeFilter) {
+            ctx.filter = filterCss && filterCss.trim() !== '' ? filterCss : 'none';
+            ctx.drawImage(img, ox, oy, size, size, 0, 0, size, size);
+            ctx.filter = 'none';
+            ctx.restore();
+          } else {
+            ctx.filter = 'none';
+            ctx.drawImage(img, ox, oy, size, size, 0, 0, size, size);
+            ctx.restore();
+            applyPixelFilter(ctx, activeFilter, size, size);
+          }
           onCapture(canvas.toDataURL('image/jpeg', 0.98), activeFilter);
         } else {
           onCapture(dataUrl, activeFilter);
