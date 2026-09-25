@@ -65,7 +65,7 @@ interface CanvasEditorProps {
   allFrames?: CapturedFrame[];
   layout: LayoutType;
   initialPreset?: FramePreset;
-  onAutoUpload?: (blob: Blob, templateType: string) => void;
+  onAutoUpload?: (blob: Blob, templateType: string, isSyncUpdate?: boolean) => void;
   onShare: (blob: Blob, templateType: string) => void;
   onReset: () => void;
 }
@@ -274,6 +274,33 @@ function loadBirthdayCatPinkFrame(): Promise<HTMLImageElement> {
   return birthdayCatPinkLoadingPromise;
 }
 
+// Preload cute fonts and ensure document.fonts.ready before rendering canvas text
+let fontsLoadingPromise: Promise<void> | null = null;
+function loadCuteBirthdayFonts(): Promise<void> {
+  if (typeof document === 'undefined' || !document.fonts) {
+    return Promise.resolve();
+  }
+  if (fontsLoadingPromise) return fontsLoadingPromise;
+
+  fontsLoadingPromise = (async () => {
+    try {
+      await Promise.all([
+        document.fonts.load('bold 700 48px DynaPuff'),
+        document.fonts.load('bold 800 56px DynaPuff'),
+        document.fonts.load('bold 700 36px Caveat'),
+        document.fonts.load('400 36px Pacifico'),
+        document.fonts.load('bold 700 48px "Playfair Display"'),
+        document.fonts.load('bold 700 48px "Bodoni Moda"'),
+      ]);
+      await document.fonts.ready;
+    } catch (e) {
+      console.warn('[HaloLuna] Font loading fallback:', e);
+    }
+  })();
+
+  return fontsLoadingPromise;
+}
+
 // Hardware-accelerated Korean studio & film preset rendering (grain applied only on export)
 // Object-fit: cover center-crop helper — preserves aspect ratio, no face distortion
 function drawImageCover(
@@ -356,6 +383,8 @@ export default function CanvasEditor({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const previewWrapRef = useRef<HTMLDivElement>(null);
   const lastUploadedPresetRef = useRef<string | null>(null);
+  const lastSyncedKeyRef = useRef<string | null>(null);
+  const isSyncingRef = useRef(false);
   const dragState = useRef<{
     id: string;
     startMX: number;
@@ -524,13 +553,7 @@ export default function CanvasEditor({
       s: number,
       isExport: boolean = false,
     ) => {
-      if (typeof document !== 'undefined' && document.fonts) {
-        try {
-          await document.fonts.ready;
-        } catch {
-          // ignore font loading fallback
-        }
-      }
+      await loadCuteBirthdayFonts();
 
       const palette = BIRTHDAY_PALETTES[birthdayPaletteRef.current] ?? BIRTHDAY_PALETTES.ivory;
       const bg = palette.bg;
@@ -665,13 +688,7 @@ export default function CanvasEditor({
       s: number,
       isExport: boolean = false,
     ) => {
-      if (typeof document !== 'undefined' && document.fonts) {
-        try {
-          await document.fonts.ready;
-        } catch {
-          // ignore font loading fallback
-        }
-      }
+      await loadCuteBirthdayFonts();
 
       // Palette-aware background
       const pal = BIRTHDAY_PALETTES[birthdayPaletteRef.current] ?? BIRTHDAY_PALETTES.pink;
@@ -953,13 +970,7 @@ export default function CanvasEditor({
       s: number,
       isExport: boolean = false,
     ) => {
-      if (typeof document !== 'undefined' && document.fonts) {
-        try {
-          await document.fonts.ready;
-        } catch {
-          // ignore font loading fallback
-        }
-      }
+      await loadCuteBirthdayFonts();
 
       // Base coordinates from the native 1181 × 1772 PNG frame asset
       const baseW = 1181;
@@ -1008,68 +1019,131 @@ export default function CanvasEditor({
       }
       ctx.drawImage(frameImg, 0, 0, w, h);
 
-      // LAYER 3: Dynamic Custom Age & Name Overlay
-      const title = birthdayNameRef.current || "SARAH'S DAY";
-      const ageVal = birthdayAgeRef.current ? birthdayAgeRef.current.trim().replace(/^NO\.?\s*/i, '') : '';
+      // LAYER 3: Dynamic Custom Birthday Scrapbook Headline & Stickers
+      const title = birthdayNameRef.current || "SARAH";
+      let personName = title.trim();
+      if (/['’]s\s*day$/i.test(personName)) {
+        personName = personName.replace(/['’]s\s*day$/i, '').trim();
+      } else if (/['’]s\s*birthday$/i.test(personName)) {
+        personName = personName.replace(/['’]s\s*birthday$/i, '').trim();
+      } else if (/birthday$/i.test(personName)) {
+        personName = personName.replace(/birthday$/i, '').trim();
+      } else if (/['’]s$/i.test(personName)) {
+        personName = personName.replace(/['’]s$/i, '').trim();
+      }
+      if (!personName) personName = 'Sarah';
+      // Format as Title Case for cute handwriting aesthetic (e.g. "Sarah" or "Andi")
+      const displayName = personName.charAt(0).toUpperCase() + personName.slice(1);
 
-      // 1. Age Number Display: prominent, bold, playful birthday candle numbers right above the cake illustration
-      if (ageVal) {
-        const cakeCenterX = 588.5 * scaleX;
-        const cakeCandleBaseY = 1184 * scaleY; // sits right above cake top & candle wicks
-
-        ctx.save();
-        const ageFontSize = 115 * scaleX;
-        ctx.font = `bold 900 ${ageFontSize}px "Playfair Display", "Bodoni Moda", Georgia, serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'bottom';
-
-        // Soft festive drop shadow
-        ctx.shadowColor = 'rgba(159, 18, 57, 0.28)';
-        ctx.shadowBlur = 10 * scaleX;
-        ctx.shadowOffsetY = 4 * scaleX;
-
-        // Clean bold white outline (drawn first for full pop & sticker candle look)
-        ctx.strokeStyle = '#FFFFFF';
-        ctx.lineWidth = 14 * scaleX;
-        ctx.lineJoin = 'round';
-        ctx.strokeText(ageVal, cakeCenterX, cakeCandleBaseY);
-
-        // Reset shadow for crisp text fill
-        ctx.shadowColor = 'transparent';
-        // Bold playful cherry/rose candle number fill
-        ctx.fillStyle = '#E11D48';
-        ctx.fillText(ageVal, cakeCenterX, cakeCandleBaseY);
-        ctx.restore();
+      const rawAge = birthdayAgeRef.current ? birthdayAgeRef.current.trim().replace(/\D/g, '') : '';
+      let ordinalAge = '';
+      if (rawAge) {
+        const num = parseInt(rawAge, 10);
+        if (!isNaN(num)) {
+          const j = num % 10;
+          const k = num % 100;
+          const suffix = (j === 1 && k !== 11) ? 'st' : (j === 2 && k !== 12) ? 'nd' : (j === 3 && k !== 13) ? 'rd' : 'th';
+          ordinalAge = `${num}${suffix}`;
+        }
       }
 
-      // 2. Custom Name Display: scaled up, bold, clearly readable below the bottom-left birthday stickers
+      // Cohesive birthday headline with letters and numbers sharing exact same font family & weight
+      const line1 = `It's ${displayName}'s`;
+      const line2 = ordinalAge ? `${ordinalAge} Birthday! 🎂` : 'Birthday Party! 🎂';
+
+      // Scrapbook Sticker Center Position: centered horizontally at 590.5, sitting right above the cake at y ≈ 1115
+      const stickerX = 590.5 * scaleX;
+      const stickerY = 1115 * scaleY;
+      const cuteFontFamily = '"DynaPuff", "Caveat", "Pacifico", cursive, sans-serif';
+
+      ctx.save();
+      ctx.translate(stickerX, stickerY);
+      // Playful -3.2 degree scrapbook sticker tilt
+      ctx.rotate(-0.055);
+
+      let line1Size = 44 * scaleX;
+      let line2Size = 54 * scaleX;
+
+      ctx.font = `bold 700 ${line1Size}px ${cuteFontFamily}`;
+      const m1 = ctx.measureText(line1).width;
+      ctx.font = `bold 800 ${line2Size}px ${cuteFontFamily}`;
+      const m2 = ctx.measureText(line2).width;
+
+      // Allow natural 10-15% overlap of adjacent photo slots (~540px max width at base 1181)
+      const maxStickerW = 540 * scaleX;
+      const maxMeasured = Math.max(m1, m2);
+      if (maxMeasured > maxStickerW) {
+        const shrinkRatio = maxStickerW / maxMeasured;
+        line1Size *= shrinkRatio;
+        line2Size *= shrinkRatio;
+      }
+
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      const line1YOffset = -26 * scaleY;
+      const line2YOffset = 30 * scaleY;
+
+      // 1. Soft Warm Drop Shadow (gives tactile die-cut sticker depth over photos & frame)
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.18)';
+      ctx.shadowBlur = 12 * scaleX;
+      ctx.shadowOffsetX = 0;
+      ctx.shadowOffsetY = 6 * scaleY;
+
+      // 2. Thick Opaque White Sticker Border (ctx.strokeText with lineWidth = 16 * scaleX)
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 16 * scaleX;
+      ctx.lineJoin = 'round';
+      ctx.lineCap = 'round';
+
+      ctx.font = `bold 700 ${line1Size}px ${cuteFontFamily}`;
+      ctx.strokeText(line1, 0, line1YOffset);
+      ctx.font = `bold 800 ${line2Size}px ${cuteFontFamily}`;
+      ctx.strokeText(line2, 0, line2YOffset);
+
+      // 3. Crisp Secondary Stroke (clean white inner stroke, shadows cleared)
+      ctx.shadowColor = 'transparent';
+      ctx.lineWidth = 14 * scaleX;
+      ctx.font = `bold 700 ${line1Size}px ${cuteFontFamily}`;
+      ctx.strokeText(line1, 0, line1YOffset);
+      ctx.font = `bold 800 ${line2Size}px ${cuteFontFamily}`;
+      ctx.strokeText(line2, 0, line2YOffset);
+
+      // 4. Vibrant Cherry-Rose Text Fill
+      ctx.fillStyle = '#E11D48';
+      ctx.font = `bold 700 ${line1Size}px ${cuteFontFamily}`;
+      ctx.fillText(line1, 0, line1YOffset);
+      ctx.font = `bold 800 ${line2Size}px ${cuteFontFamily}`;
+      ctx.fillText(line2, 0, line2YOffset);
+      ctx.restore();
+
+      // 2. Custom Name Banner: clean and cute inside the bottom-left banner
       ctx.save();
       const bannerCenterX = 295 * scaleX;
       const footerNameY = 1746 * scaleY;
       const maxAllowedWidth = 510 * scaleX;
 
-      let nameFontSize = 32 * scaleX;
-      ctx.font = `bold 800 ${nameFontSize}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
-      const nameText = title.toUpperCase();
-      const measuredW = ctx.measureText(nameText).width;
+      let footerFontSize = 26 * scaleX;
+      ctx.font = `bold 800 ${footerFontSize}px ${cuteFontFamily}`;
+      const footerText = `♡ ${displayName.toUpperCase()}'S SPECIAL DAY ♡`;
+      const measuredW = ctx.measureText(footerText).width;
       if (measuredW > maxAllowedWidth) {
-        nameFontSize = Math.max(18 * scaleX, (maxAllowedWidth / measuredW) * nameFontSize);
-        ctx.font = `bold 800 ${nameFontSize}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
+        footerFontSize = Math.max(16 * scaleX, (maxAllowedWidth / measuredW) * footerFontSize);
+        ctx.font = `bold 800 ${footerFontSize}px ${cuteFontFamily}`;
       }
 
-      if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${2 * scaleX}px`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 
       // Clean white stroke
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.98)';
-      ctx.lineWidth = 5 * scaleX;
+      ctx.lineWidth = 6 * scaleX;
       ctx.lineJoin = 'round';
-      ctx.strokeText(nameText, bannerCenterX, footerNameY);
+      ctx.strokeText(footerText, bannerCenterX, footerNameY);
 
       // Deep berry pink text fill
       ctx.fillStyle = '#831843';
-      ctx.fillText(nameText, bannerCenterX, footerNameY);
+      ctx.fillText(footerText, bannerCenterX, footerNameY);
       ctx.restore();
 
       // 3. Watermark: tiny subtle watermark under bottom-right column
@@ -2105,13 +2179,18 @@ export default function CanvasEditor({
     }
   }, [frames, preset, frameColor, layout, birthdayName, birthdayTheme, birthdayAge, birthdayPalette, triggerRender]);
 
+  // Content key fingerprint for tracking changes that require Supabase / Admin synchronization
+  const currentSyncKey = `${preset}_${birthdayName}_${birthdayAge}_${birthdayPalette}_${birthdayTheme}_${frameColor}_${location}`;
+
   // Single-save automatic upload trigger: once preview canvas finishes rendering, upload high-res composite
   useEffect(() => {
     if (!previewUrl) return;
-    // Don't duplicate upload if this exact preset was already uploaded in this session
-    if (lastUploadedPresetRef.current === preset) return;
+    // Don't duplicate initial upload if this exact preset was already uploaded in this session
+    if (lastUploadedPresetRef.current === preset && lastSyncedKeyRef.current) return;
 
     const timer = setTimeout(async () => {
+      if (isSyncingRef.current) return;
+      isSyncingRef.current = true;
       try {
         await yieldToMain();
         console.log(`[HaloLuna] Preparing high-res export composite for upload, preset: ${preset}`);
@@ -2128,8 +2207,9 @@ export default function CanvasEditor({
         const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
         if (blob && blob.size > 0) {
           lastUploadedPresetRef.current = preset;
+          lastSyncedKeyRef.current = currentSyncKey;
           if (onAutoUpload) {
-            onAutoUpload(blob, preset);
+            onAutoUpload(blob, preset, false);
           } else {
             savePhotoToSupabase(blob, preset, locationRef.current || 'HaloLuna Studio')
               .catch((err) => console.error('[HaloLuna] Supabase auto-upload error:', err));
@@ -2137,11 +2217,51 @@ export default function CanvasEditor({
         }
       } catch (err) {
         console.error('[HaloLuna] Single-save auto-upload failed:', err);
+      } finally {
+        isSyncingRef.current = false;
       }
-    }, 350);
+    }, 400);
 
     return () => clearTimeout(timer);
-  }, [previewUrl, onAutoUpload, preset, renderToCanvas]);
+  }, [previewUrl, onAutoUpload, preset, renderToCanvas, currentSyncKey]);
+
+  // Debounced sync to Supabase/Admin when user edits inputs (800ms - 1.2s delay)
+  useEffect(() => {
+    // Only trigger if initial upload has already occurred and the content has actually changed
+    if (!lastSyncedKeyRef.current) return;
+    if (lastSyncedKeyRef.current === currentSyncKey) return;
+
+    const syncTimer = setTimeout(async () => {
+      if (isSyncingRef.current) return;
+      isSyncingRef.current = true;
+      try {
+        await yieldToMain();
+        console.log(`[HaloLuna] Debounced sync triggering for updated inputs: ${currentSyncKey}`);
+        const highResDataUrl = await renderToCanvas(true);
+        if (!highResDataUrl) return;
+
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+
+        const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
+        if (blob && blob.size > 0) {
+          lastSyncedKeyRef.current = currentSyncKey;
+          if (onAutoUpload) {
+            onAutoUpload(blob, preset, true);
+          } else {
+            savePhotoToSupabase(blob, preset, locationRef.current || 'HaloLuna Studio')
+              .catch((err) => console.error('[HaloLuna] Supabase debounced-sync error:', err));
+          }
+        }
+      } catch (err) {
+        console.error('[HaloLuna] Debounced sync failed:', err);
+      } finally {
+        isSyncingRef.current = false;
+      }
+    }, 950);
+
+    return () => clearTimeout(syncTimer);
+  }, [currentSyncKey, onAutoUpload, preset, renderToCanvas]);
 
   // Re-render when preset or frameColor changes
   const handlePresetSelect = (newPreset: FramePreset) => {
@@ -2167,19 +2287,18 @@ export default function CanvasEditor({
       link.href = dataUrl;
       link.click();
 
-      // Fallback: Ensure photo is saved to Supabase / Admin dashboard if not already uploaded for this preset
-      if (lastUploadedPresetRef.current !== preset) {
-        lastUploadedPresetRef.current = preset;
-        const canvas = canvasRef.current;
-        if (canvas) {
-          const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
-          if (blob && blob.size > 0) {
-            if (onAutoUpload) {
-              onAutoUpload(blob, preset);
-            } else {
-              savePhotoToSupabase(blob, preset, locationRef.current || 'HaloLuna Studio')
-                .catch((err) => console.error('[HaloLuna] Supabase download-save error:', err));
-            }
+      // Ensure finalized download state is synced to Supabase / Admin dashboard
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
+        if (blob && blob.size > 0) {
+          lastSyncedKeyRef.current = currentSyncKey;
+          lastUploadedPresetRef.current = preset;
+          if (onAutoUpload) {
+            onAutoUpload(blob, preset, true);
+          } else {
+            savePhotoToSupabase(blob, preset, locationRef.current || 'HaloLuna Studio')
+              .catch((err) => console.error('[HaloLuna] Supabase download-save error:', err));
           }
         }
       }
@@ -2281,6 +2400,22 @@ export default function CanvasEditor({
       link.download = `haloluna-wallpaper-${Date.now()}.png`;
       link.href = wallpaperUrl;
       link.click();
+
+      // Ensure finalized photostrip state is saved/updated in Supabase / Admin dashboard
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
+        if (blob && blob.size > 0) {
+          lastSyncedKeyRef.current = currentSyncKey;
+          lastUploadedPresetRef.current = preset;
+          if (onAutoUpload) {
+            onAutoUpload(blob, preset, true);
+          } else {
+            savePhotoToSupabase(blob, preset, locationRef.current || 'HaloLuna Studio')
+              .catch((err) => console.error('[HaloLuna] Supabase wallpaper-sync error:', err));
+          }
+        }
+      }
     } catch (err) {
       console.error('Wallpaper export failed:', err);
     } finally {

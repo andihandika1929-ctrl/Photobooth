@@ -59,6 +59,8 @@ export default function HomePage() {
   const [showShareModal, setShowShareModal] = useState(false);
   const hasUploadedRef = useRef(false);
   const lastUploadedTemplateRef = useRef<string | null>(null);
+  const sessionPhotoIdRef = useRef<string | null>(null);
+  const sessionStoragePathRef = useRef<string | null>(null);
 
   // Secret admin access via Ctrl+Shift+A / Cmd+Shift+A shortcut
   useEffect(() => {
@@ -142,6 +144,8 @@ export default function HomePage() {
   const handleRetakeSingle = useCallback((index: number) => {
     hasUploadedRef.current = false;
     lastUploadedTemplateRef.current = null;
+    sessionPhotoIdRef.current = null;
+    sessionStoragePathRef.current = null;
     setCapturedFrames((prev) => prev.filter((_, i) => i !== index));
     setSelectedIndices((prev) => prev.filter((i) => i !== index));
     setStep('capture');
@@ -150,6 +154,8 @@ export default function HomePage() {
   const handleReset = useCallback(() => {
     hasUploadedRef.current = false;
     lastUploadedTemplateRef.current = null;
+    sessionPhotoIdRef.current = null;
+    sessionStoragePathRef.current = null;
     setCapturedFrames([]);
     setSelectedIndices([]);
     setStep('capture');
@@ -157,13 +163,14 @@ export default function HomePage() {
     setShowShareModal(false);
   }, []);
 
-  // Automatic single-save upload trigger: uploads to Supabase (guarded per template / session)
+  // Automatic upload and debounced sync trigger: uploads/upserts to Supabase (guarded per template / session)
   const handleAutoUpload = useCallback(
-    async (blob: Blob, templateType: string) => {
-      console.log("Starting upload for frame:", templateType);
+    async (blob: Blob, templateType: string, isSyncUpdate: boolean = false) => {
+      console.log("Starting upload for frame:", templateType, "isSyncUpdate:", isSyncUpdate);
       console.log("Upload payload size:", blob?.size);
 
-      if (lastUploadedTemplateRef.current === templateType && hasUploadedRef.current) {
+      // If initial upload was already done for this template and this is not a sync update, skip duplicate
+      if (!isSyncUpdate && lastUploadedTemplateRef.current === templateType && hasUploadedRef.current) {
         console.log("Already uploaded template", templateType, "in this session, skipping duplicate");
         return;
       }
@@ -173,18 +180,32 @@ export default function HomePage() {
       setIsUploading(true);
 
       try {
-        const result = await savePhotoToSupabase(blob, templateType, 'HaloLuna Studio');
+        const result = await savePhotoToSupabase(
+          blob,
+          templateType,
+          'HaloLuna Studio',
+          sessionPhotoIdRef.current || undefined,
+          sessionStoragePathRef.current || undefined
+        );
         console.log("Upload result:", result);
         if (result.success && result.id) {
+          sessionPhotoIdRef.current = result.id;
+          if (result.storage_path) {
+            sessionStoragePathRef.current = result.storage_path;
+          }
           setShareUrl(`${window.location.origin}/result/${result.id}`);
         } else {
-          // If upload failed, allow retry
+          // If upload failed and we don't have a session ID yet, allow retry
+          if (!sessionPhotoIdRef.current) {
+            hasUploadedRef.current = false;
+            lastUploadedTemplateRef.current = null;
+          }
+        }
+      } catch (err) {
+        if (!sessionPhotoIdRef.current) {
           hasUploadedRef.current = false;
           lastUploadedTemplateRef.current = null;
         }
-      } catch (err) {
-        hasUploadedRef.current = false;
-        lastUploadedTemplateRef.current = null;
         console.error('Supabase Auto-Upload Error:', err);
       } finally {
         setIsUploading(false);
@@ -193,26 +214,40 @@ export default function HomePage() {
     []
   );
 
-  // Manual share button trigger: uploads to Supabase EXACTLY ONCE per session
+  // Manual share button trigger: uploads to Supabase (or reuses existing session)
   const handleShare = useCallback(
     async (blob: Blob, templateType: string) => {
       setShowShareModal(true);
 
       // If already uploaded and share link exists, reuse it without duplicate upload
-      if (shareUrl) return;
+      if (shareUrl && sessionPhotoIdRef.current) return;
 
-      if (!isUploading && !hasUploadedRef.current) {
+      if (!isUploading) {
         hasUploadedRef.current = true;
         setIsUploading(true);
         try {
-          const result = await savePhotoToSupabase(blob, templateType, 'HaloLuna Studio');
+          const result = await savePhotoToSupabase(
+            blob,
+            templateType,
+            'HaloLuna Studio',
+            sessionPhotoIdRef.current || undefined,
+            sessionStoragePathRef.current || undefined
+          );
           if (result.success && result.id) {
+            sessionPhotoIdRef.current = result.id;
+            if (result.storage_path) {
+              sessionStoragePathRef.current = result.storage_path;
+            }
             setShareUrl(`${window.location.origin}/result/${result.id}`);
           } else {
-            hasUploadedRef.current = false;
+            if (!sessionPhotoIdRef.current) {
+              hasUploadedRef.current = false;
+            }
           }
         } catch (err) {
-          hasUploadedRef.current = false;
+          if (!sessionPhotoIdRef.current) {
+            hasUploadedRef.current = false;
+          }
           console.error("Supabase Save Error:", err);
         } finally {
           setIsUploading(false);

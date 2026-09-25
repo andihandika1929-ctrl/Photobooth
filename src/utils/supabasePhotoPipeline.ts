@@ -21,20 +21,22 @@ export interface SavePhotoResult {
 export async function savePhotoToSupabase(
   blob: Blob,
   currentTemplate: string = 'classic-strip',
-  locationTag: string = 'Jakarta Studio'
+  locationTag: string = 'Jakarta Studio',
+  existingId?: string,
+  existingStoragePath?: string
 ): Promise<SavePhotoResult> {
   const selectedFrame = currentTemplate || 'classic-strip';
-  console.log("Starting upload for frame:", selectedFrame);
+  console.log("Starting upload for frame:", selectedFrame, "existingId:", existingId);
   console.log("Upload payload size:", blob?.size);
 
   const supabase = createClient();
-  const storage_path = `strip_${Date.now()}_${Math.random().toString(36).substring(7)}.png`;
+  const storage_path = existingStoragePath || `strip_${Date.now()}_${Math.random().toString(36).substring(7)}.png`;
 
   try {
-    // 1. Upload to Supabase Storage: bucket 'photos'
+    // 1. Upload to Supabase Storage: bucket 'photos' with upsert
     const { error: uploadErr } = await supabase.storage
       .from('photos')
-      .upload(storage_path, blob, { contentType: 'image/png' });
+      .upload(storage_path, blob, { contentType: 'image/png', upsert: true });
 
     if (uploadErr) {
       console.error('Supabase Save Error (Storage Upload):', uploadErr);
@@ -46,28 +48,52 @@ export async function savePhotoToSupabase(
       data: { publicUrl },
     } = supabase.storage.from('photos').getPublicUrl(storage_path);
 
-    // 3. Insert to DB with exact column names:
-    const { data: inserted, error: dbErr } = await supabase
-      .from('photos')
-      .insert([
-        {
+    // 3. Upsert or Update DB record
+    let recordId = existingId;
+    if (existingId) {
+      const { data: updated, error: updateErr } = await supabase
+        .from('photos')
+        .update({
           image_url: publicUrl,
           storage_path: storage_path,
           template_type: selectedFrame,
           location_tag: locationTag || 'Jakarta Studio',
-        },
-      ])
-      .select('id, image_url, storage_path, template_type, location_tag, created_at')
-      .single();
+        })
+        .eq('id', existingId)
+        .select('id, image_url, storage_path, template_type, location_tag, created_at')
+        .maybeSingle();
 
-    if (dbErr) {
-      console.error('Supabase Save Error (DB Insert):', dbErr);
-      throw dbErr;
+      if (updateErr) {
+        console.error('Supabase Save Error (DB Update):', updateErr);
+        throw updateErr;
+      }
+      if (updated) {
+        recordId = updated.id;
+      }
+    } else {
+      const { data: inserted, error: dbErr } = await supabase
+        .from('photos')
+        .insert([
+          {
+            image_url: publicUrl,
+            storage_path: storage_path,
+            template_type: selectedFrame,
+            location_tag: locationTag || 'Jakarta Studio',
+          },
+        ])
+        .select('id, image_url, storage_path, template_type, location_tag, created_at')
+        .single();
+
+      if (dbErr) {
+        console.error('Supabase Save Error (DB Insert):', dbErr);
+        throw dbErr;
+      }
+      recordId = inserted?.id;
     }
 
     const res: SavePhotoResult = {
       success: true,
-      id: inserted?.id,
+      id: recordId,
       publicUrl,
       storage_path,
     };
@@ -82,6 +108,12 @@ export async function savePhotoToSupabase(
       fd.append('file', blob, storage_path);
       fd.append('templateType', selectedFrame);
       fd.append('locationTag', locationTag || 'Jakarta Studio');
+      if (existingId) {
+        fd.append('existingId', existingId);
+      }
+      if (storage_path) {
+        fd.append('storagePath', storage_path);
+      }
 
       const serverRes = await fetch('/api/upload', {
         method: 'POST',

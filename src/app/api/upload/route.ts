@@ -20,21 +20,25 @@ export async function POST(request: NextRequest) {
     const file = formData.get('file') as File | null;
     const templateType = (formData.get('templateType') || formData.get('framePreset') || 'classic-strip') as string;
     const locationTag = (formData.get('locationTag') || formData.get('location') || 'Jakarta Studio') as string;
+    const existingId = (formData.get('existingId') || formData.get('id')) as string | null;
+    let storage_path = (formData.get('storagePath') || formData.get('existingStoragePath')) as string | null;
 
     if (!file) {
       return NextResponse.json({ error: 'No file provided' }, { status: 400 });
     }
 
-    const storage_path = `strip_${Date.now()}_${Math.random().toString(36).substring(7)}.png`;
+    if (!storage_path) {
+      storage_path = `strip_${Date.now()}_${Math.random().toString(36).substring(7)}.png`;
+    }
     const buffer = Buffer.from(await file.arrayBuffer());
 
-    // 1. Upload to Supabase Storage → 'photos' bucket
+    // 1. Upload to Supabase Storage → 'photos' bucket with upsert
     const { error: uploadError } = await supabaseAdmin.storage
       .from('photos')
       .upload(storage_path, buffer, {
         contentType: 'image/png',
         cacheControl: '3600',
-        upsert: false,
+        upsert: true,
       });
 
     if (uploadError) {
@@ -47,33 +51,54 @@ export async function POST(request: NextRequest) {
       data: { publicUrl },
     } = supabaseAdmin.storage.from('photos').getPublicUrl(storage_path);
 
-    // 3. Insert record into public.photos with exact columns:
-    // id, image_url, storage_path, template_type, location_tag
-    const { data: inserted, error: insertError } = await supabaseAdmin
-      .from('photos')
-      .insert([
-        {
+    // 3. Upsert record into public.photos
+    let record: any = null;
+    if (existingId) {
+      const { data: updated, error: updateError } = await supabaseAdmin
+        .from('photos')
+        .update({
           image_url: publicUrl,
           storage_path: storage_path,
           template_type: templateType,
           location_tag: locationTag,
-        },
-      ])
-      .select('id, image_url, storage_path, template_type, location_tag, created_at')
-      .single();
+        })
+        .eq('id', existingId)
+        .select('id, image_url, storage_path, template_type, location_tag, created_at')
+        .maybeSingle();
 
-    if (insertError) {
-      console.error('Supabase Save Error (DB Insert):', insertError);
-      return NextResponse.json({ error: insertError.message }, { status: 500 });
+      if (!updateError && updated) {
+        record = updated;
+      }
+    }
+
+    if (!record) {
+      const { data: inserted, error: insertError } = await supabaseAdmin
+        .from('photos')
+        .insert([
+          {
+            image_url: publicUrl,
+            storage_path: storage_path,
+            template_type: templateType,
+            location_tag: locationTag,
+          },
+        ])
+        .select('id, image_url, storage_path, template_type, location_tag, created_at')
+        .single();
+
+      if (insertError) {
+        console.error('Supabase Save Error (DB Insert):', insertError);
+        return NextResponse.json({ error: insertError.message }, { status: 500 });
+      }
+      record = inserted;
     }
 
     return NextResponse.json({
       success: true,
-      id: inserted.id,
-      uuid: inserted.id,
+      id: record.id,
+      uuid: record.id,
       publicUrl,
       storage_path,
-      resultUrl: `/result/${inserted.id}`,
+      resultUrl: `/result/${record.id}`,
     });
   } catch (err) {
     console.error('Supabase Save Error:', err);
