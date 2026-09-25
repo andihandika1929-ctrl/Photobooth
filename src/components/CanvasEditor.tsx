@@ -520,7 +520,7 @@ export default function CanvasEditor({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const previewWrapRef = useRef<HTMLDivElement>(null);
   const lastUploadedPresetRef = useRef<string | null>(null);
-  const initialSaveDoneRef = useRef(false);
+
   const dragState = useRef<{
     id: string;
     startMX: number;
@@ -1144,12 +1144,12 @@ export default function CanvasEditor({
 
             // Name line
             if (guestName) {
-              ctx.font = 'bold 50px Caveat, cursive';
+              ctx.font = `bold ${50 * s}px Caveat, cursive`;
               ctx.strokeStyle = '#FFFFFF';
-              ctx.lineWidth = 6;
-              ctx.strokeText(guestName, w / 2, h - 30);
+              ctx.lineWidth = 6 * s;
+              ctx.strokeText(guestName, w / 2, h - 30 * s);
               ctx.fillStyle = '#FF69B4';
-              ctx.fillText(guestName, w / 2, h - 30);
+              ctx.fillText(guestName, w / 2, h - 30 * s);
             }
 
             // Age line (e.g. "21st", "29th")
@@ -1160,12 +1160,12 @@ export default function CanvasEditor({
               const suffix =
                 j === 1 && k !== 11 ? 'st' : j === 2 && k !== 12 ? 'nd' : j === 3 && k !== 13 ? 'rd' : 'th';
               const ageLabel = `${num}${suffix}`;
-              ctx.font = 'bold 30px Caveat, cursive';
+              ctx.font = `bold ${30 * s}px Caveat, cursive`;
               ctx.strokeStyle = '#FFFFFF';
-              ctx.lineWidth = 4;
-              ctx.strokeText(ageLabel, w / 2, h - 10);
+              ctx.lineWidth = 4 * s;
+              ctx.strokeText(ageLabel, w / 2, h - 10 * s);
               ctx.fillStyle = '#FF69B4';
-              ctx.fillText(ageLabel, w / 2, h - 10);
+              ctx.fillText(ageLabel, w / 2, h - 10 * s);
             }
 
             ctx.restore();
@@ -1266,30 +1266,28 @@ export default function CanvasEditor({
     }
   }, [renderToCanvas]);
 
-  // Initial cloud save once — caption sync happens on download / share, not per keystroke
+  // Auto-sync to cloud when canvas visually changes (debounced)
   useEffect(() => {
-    if (!previewUrl || initialSaveDoneRef.current) return;
-    initialSaveDoneRef.current = true;
+    if (!previewUrl) return;
 
     const timer = setTimeout(async () => {
       try {
-        console.log('[HaloLuna] Initial Save: exporting canvas blob for preset', preset);
+        console.log('[HaloLuna] Auto-Sync: exporting canvas blob for preset', preset);
         const blob = await exportCanvasBlob();
         if (blob && blob.size > 0) {
-          console.log('[HaloLuna] Initial Save: triggering onAutoUpload for preset', preset);
           if (onAutoUpload) {
-            onAutoUpload(blob, preset, false);
+            onAutoUpload(blob, preset, true); // isActionSave = true forces upsert in page.tsx
           } else {
             savePhotoToSupabase(blob, preset, locationRef.current || 'HaloLuna Studio')
               .catch((err) => console.error("ADMIN UPLOAD ERROR:", err));
           }
         } else {
-          console.error("ADMIN UPLOAD ERROR: Initial export blob was null or empty");
+          console.error("ADMIN UPLOAD ERROR: Auto-sync blob was null or empty");
         }
       } catch (err) {
-        console.error("ADMIN UPLOAD ERROR: Initial save failed:", err);
+        console.error("ADMIN UPLOAD ERROR: Auto-sync failed:", err);
       }
-    }, 400);
+    }, 800);
 
     return () => clearTimeout(timer);
   }, [previewUrl, preset, onAutoUpload, exportCanvasBlob]);
@@ -1298,7 +1296,6 @@ export default function CanvasEditor({
   const handlePresetSelect = (newPreset: FramePreset) => {
     if (newPreset === preset) return;
     setPreset(newPreset);
-    initialSaveDoneRef.current = false;
   };
 
   // Download Handler (Full High-Resolution Export + Action Save to Supabase)
