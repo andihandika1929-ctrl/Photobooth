@@ -23,6 +23,10 @@ export async function savePhotoToSupabase(
   currentTemplate: string = 'classic-strip',
   locationTag: string = 'Jakarta Studio'
 ): Promise<SavePhotoResult> {
+  const selectedFrame = currentTemplate || 'classic-strip';
+  console.log("Starting upload for frame:", selectedFrame);
+  console.log("Upload payload size:", blob?.size);
+
   const supabase = createClient();
   const storage_path = `strip_${Date.now()}_${Math.random().toString(36).substring(7)}.png`;
 
@@ -49,7 +53,7 @@ export async function savePhotoToSupabase(
         {
           image_url: publicUrl,
           storage_path: storage_path,
-          template_type: currentTemplate || 'classic-strip',
+          template_type: selectedFrame,
           location_tag: locationTag || 'Jakarta Studio',
         },
       ])
@@ -61,43 +65,54 @@ export async function savePhotoToSupabase(
       throw dbErr;
     }
 
-    return {
+    const res: SavePhotoResult = {
       success: true,
       id: inserted?.id,
       publicUrl,
       storage_path,
     };
+    console.log("Upload result:", res);
+    return res;
   } catch (clientErr) {
-    console.error('Supabase Save Error (client attempt):', clientErr);
+    console.warn('Supabase direct client upload failed or constrained, attempting server route /api/upload fallback...', clientErr);
 
     // Fallback to server route /api/upload with service role fallback
     try {
       const fd = new FormData();
       fd.append('file', blob, storage_path);
-      fd.append('templateType', currentTemplate);
-      fd.append('locationTag', locationTag);
+      fd.append('templateType', selectedFrame);
+      fd.append('locationTag', locationTag || 'Jakarta Studio');
 
-      const res = await fetch('/api/upload', {
+      const serverRes = await fetch('/api/upload', {
         method: 'POST',
         body: fd,
       });
 
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        console.error('Supabase Save Error (server route fallback):', errJson);
-        throw new Error(errJson.error || 'Server upload failed');
+      if (!serverRes.ok) {
+        const errJson = await serverRes.json().catch(() => ({}));
+        console.error('Supabase Save Error (server route fallback failed):', errJson);
+        const res: SavePhotoResult = {
+          success: false,
+          error: errJson.error || `Server route returned ${serverRes.status}`,
+        };
+        console.log("Upload result:", res);
+        return res;
       }
 
-      const resData = await res.json();
-      return {
+      const resData = await serverRes.json();
+      const res: SavePhotoResult = {
         success: true,
         id: resData.id || resData.uuid,
         publicUrl: resData.publicUrl,
         storage_path: resData.storage_path || storage_path,
       };
+      console.log("Upload result:", res);
+      return res;
     } catch (fallbackErr) {
-      console.error('Supabase Save Error (all attempts failed):', fallbackErr);
-      return { success: false, error: fallbackErr };
+      console.error('Supabase Save Error (all upload pipelines failed):', fallbackErr);
+      const res: SavePhotoResult = { success: false, error: fallbackErr };
+      console.log("Upload result:", res);
+      return res;
     }
   }
 }

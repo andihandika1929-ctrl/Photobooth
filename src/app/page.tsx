@@ -58,6 +58,7 @@ export default function HomePage() {
   const [isUploading, setIsUploading] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
   const hasUploadedRef = useRef(false);
+  const lastUploadedTemplateRef = useRef<string | null>(null);
 
   // Secret admin access via Ctrl+Shift+A / Cmd+Shift+A shortcut
   useEffect(() => {
@@ -139,6 +140,8 @@ export default function HomePage() {
   }, []);
 
   const handleRetakeSingle = useCallback((index: number) => {
+    hasUploadedRef.current = false;
+    lastUploadedTemplateRef.current = null;
     setCapturedFrames((prev) => prev.filter((_, i) => i !== index));
     setSelectedIndices((prev) => prev.filter((i) => i !== index));
     setStep('capture');
@@ -146,6 +149,7 @@ export default function HomePage() {
 
   const handleReset = useCallback(() => {
     hasUploadedRef.current = false;
+    lastUploadedTemplateRef.current = null;
     setCapturedFrames([]);
     setSelectedIndices([]);
     setStep('capture');
@@ -153,21 +157,34 @@ export default function HomePage() {
     setShowShareModal(false);
   }, []);
 
-  // Automatic single-save upload trigger: uploads to Supabase EXACTLY ONCE per session
+  // Automatic single-save upload trigger: uploads to Supabase (guarded per template / session)
   const handleAutoUpload = useCallback(
     async (blob: Blob, templateType: string) => {
-      if (hasUploadedRef.current) return;
+      console.log("Starting upload for frame:", templateType);
+      console.log("Upload payload size:", blob?.size);
+
+      if (lastUploadedTemplateRef.current === templateType && hasUploadedRef.current) {
+        console.log("Already uploaded template", templateType, "in this session, skipping duplicate");
+        return;
+      }
+
       hasUploadedRef.current = true;
+      lastUploadedTemplateRef.current = templateType;
       setIsUploading(true);
+
       try {
         const result = await savePhotoToSupabase(blob, templateType, 'HaloLuna Studio');
+        console.log("Upload result:", result);
         if (result.success && result.id) {
           setShareUrl(`${window.location.origin}/result/${result.id}`);
         } else {
+          // If upload failed, allow retry
           hasUploadedRef.current = false;
+          lastUploadedTemplateRef.current = null;
         }
       } catch (err) {
         hasUploadedRef.current = false;
+        lastUploadedTemplateRef.current = null;
         console.error('Supabase Auto-Upload Error:', err);
       } finally {
         setIsUploading(false);
@@ -693,6 +710,7 @@ export default function HomePage() {
               frames={activeEditorFrames}
               allFrames={capturedFrames}
               layout={layout}
+              initialPreset={layout === 'grid2x3' ? 'birthdayCatPink' : undefined}
               onAutoUpload={handleAutoUpload}
               onShare={handleShare}
               onReset={handleReset}

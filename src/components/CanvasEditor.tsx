@@ -64,6 +64,7 @@ interface CanvasEditorProps {
   frames: CapturedFrame[];
   allFrames?: CapturedFrame[];
   layout: LayoutType;
+  initialPreset?: FramePreset;
   onAutoUpload?: (blob: Blob, templateType: string) => void;
   onShare: (blob: Blob, templateType: string) => void;
   onReset: () => void;
@@ -229,27 +230,48 @@ function getNoisePattern(ctx: CanvasRenderingContext2D): CanvasPattern | null {
 
 // Cached transparent PNG frame image for instant rendering
 let cachedBirthdayCatPinkImg: HTMLImageElement | null = null;
+let birthdayCatPinkLoadingPromise: Promise<HTMLImageElement> | null = null;
+
 function loadBirthdayCatPinkFrame(): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    if (
-      cachedBirthdayCatPinkImg &&
-      cachedBirthdayCatPinkImg.complete &&
-      cachedBirthdayCatPinkImg.naturalWidth > 0
-    ) {
-      return resolve(cachedBirthdayCatPinkImg);
-    }
+  if (
+    cachedBirthdayCatPinkImg &&
+    cachedBirthdayCatPinkImg.complete &&
+    cachedBirthdayCatPinkImg.naturalWidth > 0
+  ) {
+    return Promise.resolve(cachedBirthdayCatPinkImg);
+  }
+  if (birthdayCatPinkLoadingPromise) {
+    return birthdayCatPinkLoadingPromise;
+  }
+
+  birthdayCatPinkLoadingPromise = new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.src = '/frames/birthday-cat-pink.png';
-    img.onload = () => {
-      cachedBirthdayCatPinkImg = img;
-      resolve(img);
+    img.onload = async () => {
+      try {
+        if ('decode' in img) {
+          await img.decode();
+        }
+      } catch {
+        // ignore decode failure fallback
+      }
+      if (img.naturalWidth > 0) {
+        cachedBirthdayCatPinkImg = img;
+        birthdayCatPinkLoadingPromise = null;
+        resolve(img);
+      } else {
+        birthdayCatPinkLoadingPromise = null;
+        reject(new Error('Loaded /frames/birthday-cat-pink.png with 0 width'));
+      }
     };
     img.onerror = (err) => {
-      console.error('Failed to load /frames/birthday-cat-pink.png', err);
-      reject(err);
+      birthdayCatPinkLoadingPromise = null;
+      console.error('[HaloLuna] Failed to load /frames/birthday-cat-pink.png overlay asset:', err);
+      reject(new Error('Failed to load /frames/birthday-cat-pink.png'));
     };
+    img.src = '/frames/birthday-cat-pink.png';
   });
+
+  return birthdayCatPinkLoadingPromise;
 }
 
 // Hardware-accelerated Korean studio & film preset rendering (grain applied only on export)
@@ -326,13 +348,14 @@ export default function CanvasEditor({
   frames,
   allFrames,
   layout,
+  initialPreset,
   onAutoUpload,
   onShare,
   onReset,
 }: CanvasEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const previewWrapRef = useRef<HTMLDivElement>(null);
-  const hasAutoUploadedRef = useRef(false);
+  const lastUploadedPresetRef = useRef<string | null>(null);
   const dragState = useRef<{
     id: string;
     startMX: number;
@@ -342,7 +365,9 @@ export default function CanvasEditor({
   } | null>(null);
 
   const [activeTab, setActiveTab] = useState<'style' | 'stickers'>('style');
-  const [preset, setPreset] = useState<FramePreset>('birthday');
+  const [preset, setPreset] = useState<FramePreset>(
+    initialPreset || (layout === 'grid2x3' ? 'birthdayCatPink' : 'birthday')
+  );
   const [frameColor, setFrameColor] = useState<FrameColorId>('cream');
   const [location, setLocation] = useState('SEOUL STUDIO');
   const [nowPlaying, setNowPlaying] = useState('NewJeans - Hype Boy');
@@ -975,13 +1000,13 @@ export default function CanvasEditor({
       }
       ctx.restore();
 
-      // LAYER 2: Transparent PNG Frame Overlay
-      try {
-        const frameImg = await loadBirthdayCatPinkFrame();
-        ctx.drawImage(frameImg, 0, 0, w, h);
-      } catch (err) {
-        console.error('Failed to draw birthday-cat-pink.png overlay:', err);
+      // LAYER 2: Transparent PNG Frame Overlay (Guaranteed fully loaded before drawing)
+      const frameImg = await loadBirthdayCatPinkFrame();
+      if (!frameImg || !frameImg.complete || frameImg.naturalWidth === 0) {
+        console.error('[HaloLuna] Frame overlay birthday-cat-pink.png is missing or incomplete');
+        throw new Error('Frame overlay birthday-cat-pink.png is missing or incomplete');
       }
+      ctx.drawImage(frameImg, 0, 0, w, h);
 
       // LAYER 3: Dynamic Custom Age & Name Overlay
       const title = birthdayNameRef.current || "SARAH'S DAY";
@@ -2080,34 +2105,40 @@ export default function CanvasEditor({
     }
   }, [frames, preset, frameColor, layout, birthdayName, birthdayTheme, birthdayAge, birthdayPalette, triggerRender]);
 
-  // Single-save automatic upload trigger: once preview canvas finishes rendering, upload high-res composite EXACTLY ONCE
+  // Single-save automatic upload trigger: once preview canvas finishes rendering, upload high-res composite
   useEffect(() => {
-    if (!previewUrl || hasAutoUploadedRef.current) return;
-    hasAutoUploadedRef.current = true;
+    if (!previewUrl) return;
+    // Don't duplicate upload if this exact preset was already uploaded in this session
+    if (lastUploadedPresetRef.current === preset) return;
 
     const timer = setTimeout(async () => {
       try {
         await yieldToMain();
+        console.log(`[HaloLuna] Preparing high-res export composite for upload, preset: ${preset}`);
         // Generate high-resolution export canvas composite
         const highResDataUrl = await renderToCanvas(true);
-        if (!highResDataUrl) return;
+        if (!highResDataUrl) {
+          console.warn('[HaloLuna] High-res composite render returned null, skipping upload');
+          return;
+        }
 
         const canvas = canvasRef.current;
         if (!canvas) return;
 
         const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
         if (blob && blob.size > 0) {
+          lastUploadedPresetRef.current = preset;
           if (onAutoUpload) {
             onAutoUpload(blob, preset);
           } else {
             savePhotoToSupabase(blob, preset, locationRef.current || 'HaloLuna Studio')
-              .catch((err) => console.error('Supabase auto-upload error:', err));
+              .catch((err) => console.error('[HaloLuna] Supabase auto-upload error:', err));
           }
         }
       } catch (err) {
-        console.error('Single-save auto-upload failed:', err);
+        console.error('[HaloLuna] Single-save auto-upload failed:', err);
       }
-    }, 250);
+    }, 350);
 
     return () => clearTimeout(timer);
   }, [previewUrl, onAutoUpload, preset, renderToCanvas]);
@@ -2136,9 +2167,9 @@ export default function CanvasEditor({
       link.href = dataUrl;
       link.click();
 
-      // Fallback: Ensure photo is saved to Supabase / Admin dashboard if not already uploaded
-      if (!hasAutoUploadedRef.current) {
-        hasAutoUploadedRef.current = true;
+      // Fallback: Ensure photo is saved to Supabase / Admin dashboard if not already uploaded for this preset
+      if (lastUploadedPresetRef.current !== preset) {
+        lastUploadedPresetRef.current = preset;
         const canvas = canvasRef.current;
         if (canvas) {
           const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
@@ -2147,7 +2178,7 @@ export default function CanvasEditor({
               onAutoUpload(blob, preset);
             } else {
               savePhotoToSupabase(blob, preset, locationRef.current || 'HaloLuna Studio')
-                .catch((err) => console.error('Supabase download-save error:', err));
+                .catch((err) => console.error('[HaloLuna] Supabase download-save error:', err));
             }
           }
         }
