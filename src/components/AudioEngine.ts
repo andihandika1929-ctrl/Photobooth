@@ -1,13 +1,46 @@
 /**
  * AudioEngine.ts — Web Audio API synthesized sounds for photobooth
- * All sounds are procedurally generated — no external audio files required.
+ * Effects are procedurally generated. The optional ambient bed is the only
+ * external file, and nothing ever starts without a user gesture.
+ *
+ * Every voice is routed through a master bus, so one toggle silences the booth
+ * and the overall level stays gentle rather than startling.
  */
 
+/** Master level for the procedural effects. Deliberately soft. */
+const SFX_VOLUME = 0.32;
+/** Background bed, if a file is added later, stays barely audible. */
+const AMBIENT_VOLUME = 0.1;
+/** Ambient never auto-plays — guests found it disruptive. */
+const AMBIENT_AUTOPLAY = false;
+/** Placeholder path. Absent files fail silently. */
+const AMBIENT_SRC = '/audio/chill.mp3';
+const MUTE_KEY = 'haloluna:muted';
+
 let audioCtx: AudioContext | null = null;
+let masterGain: GainNode | null = null;
+let muted: boolean | null = null;
+let ambient: HTMLAudioElement | null = null;
+let ambientAvailable = true;
+
+export function getMuted(): boolean {
+  if (muted === null) {
+    muted = false;
+    if (typeof window !== 'undefined') {
+      try {
+        muted = window.localStorage.getItem(MUTE_KEY) === '1';
+      } catch {
+        // Storage blocked (private mode) — fall back to audible
+      }
+    }
+  }
+  return muted;
+}
 
 function getAudioContext(): AudioContext {
   if (!audioCtx || audioCtx.state === 'closed') {
     audioCtx = new AudioContext();
+    masterGain = null;
   }
   if (audioCtx.state === 'suspended') {
     audioCtx.resume();
@@ -15,11 +48,86 @@ function getAudioContext(): AudioContext {
   return audioCtx;
 }
 
+/** Shared output bus — connect every voice here, never to ctx.destination. */
+function getBus(): GainNode {
+  const ctx = getAudioContext();
+  if (!masterGain || masterGain.context !== ctx) {
+    masterGain = ctx.createGain();
+    masterGain.connect(ctx.destination);
+  }
+  masterGain.gain.value = getMuted() ? 0 : SFX_VOLUME;
+  return masterGain;
+}
+
+export function setMuted(next: boolean): void {
+  muted = next;
+  if (typeof window !== 'undefined') {
+    try {
+      window.localStorage.setItem(MUTE_KEY, next ? '1' : '0');
+    } catch {
+      // Ignore storage failures — the in-memory flag still applies
+    }
+  }
+  if (masterGain) {
+    masterGain.gain.value = next ? 0 : SFX_VOLUME;
+  }
+  if (next) {
+    stopAmbient();
+  }
+}
+
+/** Flips mute and returns the new state. Safe to call from a click handler. */
+export function toggleMuted(): boolean {
+  const next = !getMuted();
+  setMuted(next);
+  return next;
+}
+
+/**
+ * Start the low background bed. No-ops when muted, when the browser still
+ * wants a gesture, or when no audio file has been added to /public/audio.
+ */
+export function startAmbient(): void {
+  if (!AMBIENT_AUTOPLAY) return;
+  if (typeof window === 'undefined' || !ambientAvailable || getMuted()) return;
+  try {
+    if (!ambient) {
+      ambient = new Audio(AMBIENT_SRC);
+      ambient.loop = true;
+      ambient.addEventListener(
+        'error',
+        () => {
+          ambientAvailable = false;
+          ambient = null;
+        },
+        { once: true }
+      );
+    }
+    ambient.volume = AMBIENT_VOLUME;
+    void ambient.play().catch(() => {
+      // Autoplay refused or file missing — stay silent rather than retrying
+    });
+  } catch {
+    ambientAvailable = false;
+  }
+}
+
+export function stopAmbient(): void {
+  if (!ambient) return;
+  try {
+    ambient.pause();
+    ambient.currentTime = 0;
+  } catch {
+    // Nothing to do if the element was never ready
+  }
+}
+
 /**
  * Mechanical analog camera shutter click
  * Combines a white noise burst with a sharp transient envelope
  */
 export function playShutterClick(): void {
+  if (getMuted()) return;
   try {
     const ctx = getAudioContext();
     const bufferSize = ctx.sampleRate * 0.08;
@@ -47,7 +155,7 @@ export function playShutterClick(): void {
 
     source.connect(filter);
     filter.connect(gainNode);
-    gainNode.connect(ctx.destination);
+    gainNode.connect(getBus());
     source.start();
   } catch (e) {
     console.warn('AudioEngine: shutter click failed', e);
@@ -59,6 +167,7 @@ export function playShutterClick(): void {
  * High = 1, Mid = 2, Low = 3, gentle tick for counts > 3
  */
 export function playCountdownBeep(count: number): void {
+  if (getMuted()) return;
   try {
     const ctx = getAudioContext();
     const frequencies: Record<number, number> = { 3: 660, 2: 770, 1: 940 };
@@ -78,7 +187,7 @@ export function playCountdownBeep(count: number): void {
     gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
 
     oscillator.connect(gainNode);
-    gainNode.connect(ctx.destination);
+    gainNode.connect(getBus());
 
     oscillator.start(ctx.currentTime);
     oscillator.stop(ctx.currentTime + duration + 0.02);
@@ -91,6 +200,7 @@ export function playCountdownBeep(count: number): void {
  * Final shutter flash sound — a punchy "0" mark
  */
 export function playFlashSound(): void {
+  if (getMuted()) return;
   try {
     const ctx = getAudioContext();
 
@@ -112,7 +222,7 @@ export function playFlashSound(): void {
 
     osc.connect(filter);
     filter.connect(gainNode);
-    gainNode.connect(ctx.destination);
+    gainNode.connect(getBus());
 
     osc.start(ctx.currentTime);
     osc.stop(ctx.currentTime + 0.15);
@@ -129,9 +239,11 @@ export function playFlashSound(): void {
  * Simulates the mechanical whirr of a receipt printer
  */
 export function playPrintSound(durationMs: number = 1200): void {
+  if (getMuted()) return;
   try {
     const ctx = getAudioContext();
     const duration = durationMs / 1000;
+    const bus = getBus();
 
     // Motor hum oscillator
     const osc = ctx.createOscillator();
@@ -166,11 +278,11 @@ export function playPrintSound(durationMs: number = 1200): void {
     noiseGain.gain.setValueAtTime(0.6, ctx.currentTime);
 
     osc.connect(gainNode);
-    gainNode.connect(ctx.destination);
+    gainNode.connect(bus);
 
     noiseSource.connect(noiseFilter);
     noiseFilter.connect(noiseGain);
-    noiseGain.connect(ctx.destination);
+    noiseGain.connect(bus);
 
     osc.start(ctx.currentTime);
     osc.stop(ctx.currentTime + duration);
@@ -186,7 +298,7 @@ export function playPrintSound(durationMs: number = 1200): void {
  */
 export function initAudio(): void {
   try {
-    getAudioContext();
+    getBus();
   } catch (e) {
     console.warn('AudioEngine: init failed', e);
   }

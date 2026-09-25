@@ -18,7 +18,6 @@ import {
   Minus,
   X,
   Sparkles,
-  Layers,
   Smartphone,
 } from 'lucide-react';
 import { type FilterName } from './CameraViewport';
@@ -29,22 +28,14 @@ import { savePhotoToSupabase } from '@/utils/supabasePhotoPipeline';
 
 // ─── Types ───────────────────────────────────────────────
 export type FramePreset =
-  | 'editorial'
   | 'birthday'
-  | 'birthdayBow'
   | 'birthdayCatPink'
-  | 'kitty'
-  | 'cyberSparkle'
-  | 'coquette'
-  | 'thermal'
   | 'film35mm'
-  | 'y2k';
+  | 'retroTerracotta';
 
 export type LayoutType = 'strip3' | 'strip4' | 'grid2x2' | 'grid2x3';
 
 export type BirthdayPaletteId = 'burgundy' | 'espresso' | 'sage' | 'pink' | 'ivory' | 'charcoal';
-
-type FrameColorId = 'cream' | 'black' | 'olive' | 'blue';
 
 export interface PlacedSticker {
   id: string;
@@ -71,27 +62,11 @@ interface CanvasEditorProps {
 }
 
 // ─── Constants ────────────────────────────────────────────
-const CUTE_PRESETS: { id: FramePreset; label: string; emoji: string; desc: string }[] = [
-  { id: 'birthdayCatPink', label: 'Birthday Cat Pink (6-Shot)', emoji: '🐱', desc: 'Party cat, cake & 6-photo custom PNG' },
-  { id: 'birthday',     label: 'Editorial Birthday',     emoji: '🎂', desc: 'Modern Korean minimalist, bold age & typography' },
-  { id: 'birthdayBow',  label: 'Coquette Pink Bow',      emoji: '🎀', desc: 'Silk vector bows, bold caps & script' },
-  { id: 'kitty',        label: 'Kitty & Paws',           emoji: '🐱', desc: 'Cute ears, paws & happy cat' },
-  { id: 'cyberSparkle', label: 'Y2K Cyber Sparkle',      emoji: '✨', desc: 'Chrome stars, CD discs & hearts' },
-  { id: 'coquette',     label: 'Coquette Ribbon',        emoji: '🌸', desc: 'Pretty bows, cherries & lace' },
-  { id: 'thermal',      label: 'Thermal Receipt',        emoji: '🧾', desc: 'Jagged edges, barcode & mascot' },
-];
-
-const CLASSIC_PRESETS: { id: FramePreset; label: string; emoji: string; desc: string }[] = [
-  { id: 'editorial',    label: 'Clean Editorial',      emoji: '✦',  desc: 'Minimalist high-end studio' },
-  { id: 'film35mm',     label: '35mm Film Strip',      emoji: '🎞', desc: 'Kodak sprockets & metadata' },
-  { id: 'y2k',          label: 'Windows 98 UI',        emoji: '💾', desc: 'Retro desktop window & taskbar' },
-];
-
-const FRAME_COLORS: { id: FrameColorId; label: string; bg: string; text: string; accent: string; border: string }[] = [
-  { id: 'cream', label: 'Matte Cream',   bg: '#FDFBF7', text: '#1A1A1A', accent: '#8A7560', border: '#E0D8CC' },
-  { id: 'black', label: 'Jet Black',     bg: '#18181B', text: '#FAFAFA', accent: '#A1A1AA', border: '#27272A' },
-  { id: 'olive', label: 'Vintage Olive', bg: '#3F4E4F', text: '#F0EDE5', accent: '#C4B99A', border: '#4A5C5D' },
-  { id: 'blue',  label: 'Baby Blue',     bg: '#E0E7FF', text: '#1E1B4B', accent: '#6366F1', border: '#C7D2FE' },
+const FRAME_PRESETS: { id: FramePreset; label: string; emoji: string; desc: string }[] = [
+  { id: 'birthdayCatPink', label: 'Birthday Cat Pink', emoji: '🐱', desc: 'Party cat, cake & 6-photo custom PNG' },
+  { id: 'retroTerracotta', label: 'Retro Terracotta', emoji: '📎', desc: 'Scrapbook 4-cut with paperclips' },
+  { id: 'birthday', label: 'Editorial Birthday', emoji: '🎂', desc: 'Clean Korean strip, name & age at the bottom' },
+  { id: 'film35mm', label: '35mm Film Strip', emoji: '🎞', desc: 'Kodak sprockets & metadata' },
 ];
 
 const STICKER_DEFS = [
@@ -228,6 +203,29 @@ function getNoisePattern(ctx: CanvasRenderingContext2D): CanvasPattern | null {
   return ctx.createPattern(cachedNoiseCanvas, 'repeat');
 }
 
+// ─── Birthday Cat Pink geometry ───────────────────────────
+// The PNG asset is 1181 × 1772. Its last few rows fade into a soft edge, so we
+// crop them and extend the artwork's own blush (#FFE1EA) into a caption band
+// that holds the guest's name and age.
+const CAT_PINK_BASE_W = 1181;
+const CAT_PINK_FRAME_H = 1772;
+const CAT_PINK_EDGE_BLEED = 3;
+const CAT_PINK_CAPTION_H = 168;
+const CAT_PINK_ART_H = CAT_PINK_FRAME_H - CAT_PINK_EDGE_BLEED;
+const CAT_PINK_BASE_H = CAT_PINK_ART_H + CAT_PINK_CAPTION_H;
+const CAT_PINK_BLUSH = '#FFE1EA';
+
+// Retro Terracotta Scrapbook — native PNG is 1333 × 2000 with 4 transparent cutouts
+const RETRO_BASE_W = 1333;
+const RETRO_BASE_H = 2000;
+const RETRO_SLOTS = [
+  { x: 92, y: 220, w: 496, h: 704 },
+  { x: 746, y: 220, w: 496, h: 704 },
+  { x: 92, y: 996, w: 496, h: 700 },
+  { x: 746, y: 996, w: 496, h: 700 },
+];
+const RETRO_CAPTION_Y = 1848;
+
 // Cached transparent PNG frame image for instant rendering
 let cachedBirthdayCatPinkImg: HTMLImageElement | null = null;
 let birthdayCatPinkLoadingPromise: Promise<HTMLImageElement> | null = null;
@@ -274,6 +272,43 @@ function loadBirthdayCatPinkFrame(): Promise<HTMLImageElement> {
   return birthdayCatPinkLoadingPromise;
 }
 
+let cachedRetroImg: HTMLImageElement | null = null;
+let retroLoadingPromise: Promise<HTMLImageElement> | null = null;
+
+function loadRetroTerracottaFrame(): Promise<HTMLImageElement> {
+  if (cachedRetroImg && cachedRetroImg.complete && cachedRetroImg.naturalWidth > 0) {
+    return Promise.resolve(cachedRetroImg);
+  }
+  if (retroLoadingPromise) return retroLoadingPromise;
+
+  retroLoadingPromise = new Promise<HTMLImageElement>((resolve, reject) => {
+    const img = new Image();
+    img.onload = async () => {
+      try {
+        if ('decode' in img) await img.decode();
+      } catch {
+        // decode is best-effort
+      }
+      if (img.naturalWidth > 0) {
+        cachedRetroImg = img;
+        retroLoadingPromise = null;
+        resolve(img);
+      } else {
+        retroLoadingPromise = null;
+        reject(new Error('Loaded /frames/retro-orange-4shot.png with 0 width'));
+      }
+    };
+    img.onerror = (err) => {
+      retroLoadingPromise = null;
+      console.error('[HaloLuna] Failed to load /frames/retro-orange-4shot.png:', err);
+      reject(new Error('Failed to load /frames/retro-orange-4shot.png'));
+    };
+    img.src = '/frames/retro-orange-4shot.png';
+  });
+
+  return retroLoadingPromise;
+}
+
 // Preload cute fonts safely with fallback so canvas generator never hangs or throws
 let fontsLoaded = false;
 async function loadCuteBirthdayFonts(): Promise<void> {
@@ -282,7 +317,8 @@ async function loadCuteBirthdayFonts(): Promise<void> {
 
   try {
     await Promise.allSettled([
-      document.fonts.load('bold 48px Caveat'),
+      document.fonts.load('700 48px Caveat'),
+      document.fonts.load('700 96px Caveat'),
       document.fonts.load('700 48px DynaPuff'),
       document.fonts.load('48px Pacifico'),
       document.fonts.load('bold 48px "Playfair Display"'),
@@ -293,6 +329,113 @@ async function loadCuteBirthdayFonts(): Promise<void> {
   } catch (e) {
     console.warn("Font loading fallback:", e);
   }
+}
+
+function stickerHandFont(size: number) {
+  return `700 ${size}px Caveat, "DynaPuff", "Pacifico", cursive`;
+}
+
+/** Guest name only — strips leftover marketing suffixes, never invents a default. */
+function parseGuestName(raw: string): string {
+  let name = (raw || '').trim();
+  if (!name) return '';
+  if (/^it's\s+/i.test(name)) name = name.replace(/^it's\s+/i, '').trim();
+  if (/['’]s\s*day$/i.test(name)) name = name.replace(/['’]s\s*day$/i, '').trim();
+  else if (/['’]s\s*birthday$/i.test(name)) name = name.replace(/['’]s\s*birthday$/i, '').trim();
+  else if (/^happy\s+birthday\s+/i.test(name)) name = name.replace(/^happy\s+birthday\s+/i, '').trim();
+  else if (/\s+birthday$/i.test(name)) name = name.replace(/\s+birthday$/i, '').trim();
+  else if (/['’]s$/i.test(name)) name = name.replace(/['’]s$/i, '').trim();
+  if (!name) return '';
+  return name
+    .toLowerCase()
+    .replace(/(^|[\s'’-])([a-z])/g, (_m, sep, ch) => sep + ch.toUpperCase());
+}
+
+function parseOrdinalAge(raw: string): string {
+  const digits = (raw || '').replace(/\D/g, '');
+  if (!digits) return '';
+  const num = parseInt(digits, 10);
+  if (Number.isNaN(num) || num <= 0) return '';
+  const j = num % 10;
+  const k = num % 100;
+  const suffix =
+    j === 1 && k !== 11 ? 'st' : j === 2 && k !== 12 ? 'nd' : j === 3 && k !== 13 ? 'rd' : 'th';
+  return `${num}${suffix}`;
+}
+
+function strokeStickerWord(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  size: number,
+  fill: string,
+  outline: number,
+) {
+  ctx.font = stickerHandFont(size);
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.miterLimit = 2;
+  // Thick white outline first so the handwriting pops on any paper color
+  ctx.strokeStyle = '#FFFFFF';
+  ctx.lineWidth = outline;
+  ctx.strokeText(text, x, y);
+  ctx.strokeText(text, x, y);
+  ctx.fillStyle = fill;
+  ctx.fillText(text, x, y);
+}
+
+/**
+ * Korean-sticker caption: Caveat + thick white outline, seated at the BOTTOM
+ * of the strip. Draws only the guest's name and age — no promotional copy.
+ */
+function drawKoreanStickerCaption(
+  ctx: CanvasRenderingContext2D,
+  rawName: string,
+  rawAge: string,
+  centerX: number,
+  centerY: number,
+  maxWidth: number,
+  scale: number,
+  nameFill = '#FF69B4',
+  ageFill = '#FF69B4',
+  nameSize = 44 * scale,
+  ageSize = 26 * scale,
+) {
+  const name = parseGuestName(rawName);
+  const age = parseOrdinalAge(rawAge);
+  if (!name && !age) return;
+
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  let sizedName = nameSize;
+  if (name) {
+    ctx.font = stickerHandFont(sizedName);
+    const measured = ctx.measureText(name).width;
+    if (measured > maxWidth) sizedName *= maxWidth / measured;
+  }
+
+  const nameY = centerY - (name && age ? 16 * scale : 0);
+  if (name) {
+    ctx.save();
+    ctx.translate(centerX, nameY);
+    strokeStickerWord(ctx, name, 0, 0, sizedName, nameFill, Math.max(12, sizedName * 0.22));
+    ctx.restore();
+  }
+  if (age) {
+    strokeStickerWord(
+      ctx,
+      age,
+      centerX,
+      centerY + (name ? 22 * scale : 0),
+      ageSize,
+      ageFill,
+      Math.max(10, ageSize * 0.24),
+    );
+  }
+  ctx.restore();
 }
 
 // Hardware-accelerated Korean studio & film preset rendering (grain applied only on export)
@@ -388,15 +531,15 @@ export default function CanvasEditor({
 
   const [activeTab, setActiveTab] = useState<'style' | 'stickers'>('style');
   const [preset, setPreset] = useState<FramePreset>(
-    initialPreset || (layout === 'grid2x3' ? 'birthdayCatPink' : 'birthday')
+    initialPreset ||
+      (layout === 'grid2x3' ? 'birthdayCatPink' : layout === 'grid2x2' ? 'retroTerracotta' : 'birthday')
   );
-  const [frameColor, setFrameColor] = useState<FrameColorId>('cream');
   const [location, setLocation] = useState('SEOUL STUDIO');
   const [nowPlaying, setNowPlaying] = useState('NewJeans - Hype Boy');
-  const [birthdayNameInput, setBirthdayNameInput] = useState("SARAH'S DAY");
-  const [birthdayName, setBirthdayName] = useState("SARAH'S DAY");
+  const [birthdayNameInput, setBirthdayNameInput] = useState('');
+  const [birthdayName, setBirthdayName] = useState('');
   const [birthdayTheme, setBirthdayTheme] = useState<'cream' | 'black'>('cream');
-  const [birthdayAge, setBirthdayAge] = useState('21');
+  const [birthdayAge, setBirthdayAge] = useState('');
   const [birthdayPalette, setBirthdayPalette] = useState<BirthdayPaletteId>('ivory');
   const [renderProgress, setRenderProgress] = useState<number | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -407,7 +550,7 @@ export default function CanvasEditor({
   // Debounce birthday title input to keep UI snappy and prevent canvas re-render thrashing
   useEffect(() => {
     const timer = setTimeout(() => {
-      setBirthdayName(birthdayNameInput.trim() || "SARAH'S DAY");
+      setBirthdayName(birthdayNameInput.trim());
     }, 300);
     return () => clearTimeout(timer);
   }, [birthdayNameInput]);
@@ -418,7 +561,9 @@ export default function CanvasEditor({
   }, [placedStickers]);
 
   const isRenderingRef = useRef(false);
+  const exportLockRef = useRef(false);
   const hasRenderedRef = useRef(false);
+  const lastExportBlobRef = useRef<Blob | null>(null);
   const locationRef = useRef(location);
   const nowPlayingRef = useRef(nowPlaying);
   const birthdayNameRef = useRef(birthdayName);
@@ -432,8 +577,6 @@ export default function CanvasEditor({
   birthdayAgeRef.current = birthdayAge;
   birthdayPaletteRef.current = birthdayPalette;
 
-  const COLOR = FRAME_COLORS.find((c) => c.id === frameColor)!;
-
   // Pre-key all sticker images & preload custom PNG frame on mount into in-memory cache
   useEffect(() => {
     let mounted = true;
@@ -443,6 +586,7 @@ export default function CanvasEditor({
       }
     });
     loadBirthdayCatPinkFrame().catch(() => {});
+    loadRetroTerracottaFrame().catch(() => {});
     return () => {
       mounted = false;
     };
@@ -508,14 +652,32 @@ export default function CanvasEditor({
   // Proportional Dimensions: Downscaled for preview, 2x Retina for export
   const getDimensions = useCallback(
     (isExport: boolean = false) => {
-      if (preset === 'birthdayCatPink' || layout === 'grid2x3') {
+      if (preset === 'birthdayCatPink') {
         if (isExport) {
-          // Native high-resolution 1181 × 1772 print format matching PNG asset
-          return { w: 1181, h: 1772, s: 1.0 };
-        } else {
-          // Downscaled interactive preview canvas (1181 / 1772 ≈ 0.6665)
-          return { w: 390, h: 585, s: 390 / 1181 };
+          return { w: CAT_PINK_BASE_W, h: CAT_PINK_BASE_H, s: 1.0 };
         }
+        const previewW = 390;
+        return {
+          w: previewW,
+          h: Math.round((previewW / CAT_PINK_BASE_W) * CAT_PINK_BASE_H),
+          s: previewW / CAT_PINK_BASE_W,
+        };
+      }
+      if (preset === 'retroTerracotta') {
+        if (isExport) {
+          return { w: RETRO_BASE_W, h: RETRO_BASE_H, s: 1.0 };
+        }
+        const previewW = 390;
+        return {
+          w: previewW,
+          h: Math.round((previewW / RETRO_BASE_W) * RETRO_BASE_H),
+          s: previewW / RETRO_BASE_W,
+        };
+      }
+      if (layout === 'grid2x3') {
+        // Other presets on the 6-shot layout keep the plain 1181 × 1772 canvas
+        if (isExport) return { w: CAT_PINK_BASE_W, h: CAT_PINK_FRAME_H, s: 1.0 };
+        return { w: 390, h: 585, s: 390 / CAT_PINK_BASE_W };
       }
       if (isExport) {
         // High-DPI print-ready 300 DPI base: 1200×3600 strip4 (1:3), 1200×2800 strip3, 1200×1200 grid
@@ -554,54 +716,18 @@ export default function CanvasEditor({
 
       const palette = BIRTHDAY_PALETTES[birthdayPaletteRef.current] ?? BIRTHDAY_PALETTES.ivory;
       const bg = palette.bg;
-      const fg = palette.fg;
       const muted = palette.muted;
-      const accentGold = palette.accent;
       const borderCol = palette.accent + '44';
 
-      // Dimensions with clean Korean Life4Cuts aesthetic margins
-      const headerH = Math.round(h * (layout === 'grid2x2' ? 0.11 : 0.12));
-      const footerH = Math.round(h * (layout === 'grid2x2' ? 0.12 : 0.14));
-      const pad = Math.round(w * 0.09); // 9% horizontal breathing room
-      const gap = Math.round(w * 0.035); // 3.5% vertical gap between photos
+      // Slim top margin — name & age live in the footer only
+      const headerH = Math.round(h * (layout === 'grid2x2' ? 0.06 : 0.055));
+      const footerH = Math.round(h * (layout === 'grid2x2' ? 0.18 : 0.20));
+      const pad = Math.round(w * 0.09);
+      const gap = Math.round(w * 0.035);
 
-      // 1. Clean, flat, modern Korean minimalist canvas background
       ctx.save();
       ctx.fillStyle = bg;
       ctx.fillRect(0, 0, w, h);
-
-      // ── Header Typography (Clean & Bold Editorial) ──
-      const title = birthdayNameRef.current || "SARAH'S DAY";
-      const ageVal = birthdayAgeRef.current ? birthdayAgeRef.current.trim().replace(/^NO\.?\s*/i, '') : '';
-
-      if (ageVal) {
-        // Raw clean prominent Age Number (bold modern serif, NO prefix words)
-        ctx.save();
-        ctx.fillStyle = fg;
-        ctx.font = `bold 700 ${50 * s}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
-        if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${2 * s}px`;
-        ctx.textAlign = 'center';
-        ctx.fillText(ageVal, w / 2, headerH * 0.46);
-        ctx.restore();
-
-        // All-caps, modern, highly legible serif Event Name with clean tracking
-        ctx.save();
-        ctx.fillStyle = accentGold;
-        ctx.font = `bold 700 ${15 * s}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
-        if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${4 * s}px`;
-        ctx.textAlign = 'center';
-        ctx.fillText(title.toUpperCase(), w / 2, headerH * 0.78);
-        ctx.restore();
-      } else {
-        // Without age: Centered all-caps modern serif headline with generous tracking
-        ctx.save();
-        ctx.fillStyle = fg;
-        ctx.font = `bold 700 ${22 * s}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
-        if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${5 * s}px`;
-        ctx.textAlign = 'center';
-        ctx.fillText(title.toUpperCase(), w / 2, headerH * 0.58);
-        ctx.restore();
-      }
 
       // ── Crisp Photo Frames ──
       const count = layout === 'strip4' ? 4 : layout === 'strip3' ? 3 : 4;
@@ -641,322 +767,26 @@ export default function CanvasEditor({
         }
       }
 
-      // ── Clean & Elegant Footer (Generous Negative Space) ──
+      // ── Footer: guest name + age as Korean sticker type, then date ──
       const footerStartY = h - footerH;
 
-      // Custom name / headline in clean medium size (all-caps serif with tracking)
-      ctx.save();
-      ctx.fillStyle = fg;
-      ctx.font = `bold 700 ${13 * s}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
-      if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${3 * s}px`;
-      ctx.textAlign = 'center';
-      ctx.fillText(title.toUpperCase(), w / 2, footerStartY + footerH * 0.28);
-      ctx.restore();
-
-      // Simple clean date (e.g. "25.09.2026")
       ctx.save();
       ctx.fillStyle = muted;
       ctx.font = `500 ${8.5 * s}px Inter, -apple-system, sans-serif`;
       if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${2 * s}px`;
       ctx.textAlign = 'center';
-      ctx.fillText(fmtSimpleDate(), w / 2, footerStartY + footerH * 0.48);
+      ctx.fillText(fmtSimpleDate(), w / 2, footerStartY + footerH * 0.62);
       ctx.restore();
 
       // Subtle minimalist barcode accent
       const barW = 100 * s;
       const barH = 10 * s;
-      drawBarcode(ctx, w / 2 - barW / 2, footerStartY + footerH * 0.64, barW, barH, muted);
+      drawBarcode(ctx, w / 2 - barW / 2, footerStartY + footerH * 0.72, barW, barH, muted);
 
       // Clean subtle watermark at the very bottom
       drawHaloLunaWatermark(ctx, w, footerStartY + footerH * 0.86, muted, s);
 
       ctx.restore();
-    },
-    [layout]
-  );
-
-  // 2. Coquette Pink Bow Birthday 🎀
-  const drawPinkBowBirthday = useCallback(
-    async (
-      ctx: CanvasRenderingContext2D,
-      imgs: HTMLImageElement[],
-      w: number,
-      h: number,
-      s: number,
-      isExport: boolean = false,
-    ) => {
-      try {
-        await loadCuteBirthdayFonts();
-      } catch (e) {
-        console.warn('Font loading fallback:', e);
-      }
-
-      // Palette-aware background
-      const pal = BIRTHDAY_PALETTES[birthdayPaletteRef.current] ?? BIRTHDAY_PALETTES.pink;
-      const bowBg = pal.bg;
-      const bowFg = pal.fg;
-      const bowAccent = pal.accent;
-      const bowMuted = pal.muted;
-      ctx.fillStyle = bowBg;
-      ctx.fillRect(0, 0, w, h);
-
-      // Delicate outer double lace border
-      ctx.strokeStyle = '#FBCFE8';
-      ctx.lineWidth = 1.5 * s;
-      ctx.strokeRect(10 * s, 10 * s, w - 20 * s, h - 20 * s);
-
-      ctx.strokeStyle = '#F472B6';
-      ctx.lineWidth = 0.6 * s;
-      ctx.strokeRect(14 * s, 14 * s, w - 28 * s, h - 28 * s);
-
-      // Realistic silk vector bow renderer
-      const drawSilkBow = (bx: number, by: number, size: number, angle: number = 0) => {
-        ctx.save();
-        ctx.translate(bx, by);
-        ctx.rotate(angle);
-
-        // Ribbon Tails (behind loops)
-        const drawTail = (dir: number) => {
-          ctx.save();
-          ctx.beginPath();
-          ctx.moveTo(0, size * 0.2);
-          ctx.bezierCurveTo(
-            dir * size * 0.4,
-            size * 0.8,
-            dir * size * 0.6,
-            size * 1.4,
-            dir * size * 0.8,
-            size * 1.9
-          );
-          ctx.lineTo(dir * size * 0.55, size * 1.75);
-          ctx.lineTo(dir * size * 0.35, size * 1.9);
-          ctx.bezierCurveTo(
-            dir * size * 0.3,
-            size * 1.2,
-            dir * size * 0.15,
-            size * 0.6,
-            0,
-            size * 0.2
-          );
-          ctx.fillStyle = '#F472B6';
-          ctx.fill();
-
-          // Tail highlight streak
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-          ctx.lineWidth = 1 * s;
-          ctx.beginPath();
-          ctx.moveTo(dir * size * 0.1, size * 0.4);
-          ctx.quadraticCurveTo(dir * size * 0.35, size * 1.1, dir * size * 0.5, size * 1.6);
-          ctx.stroke();
-          ctx.restore();
-        };
-        drawTail(-1);
-        drawTail(1);
-
-        // Ribbon Loops
-        const drawLoop = (dir: number) => {
-          ctx.save();
-          // Main loop body
-          ctx.beginPath();
-          ctx.moveTo(0, 0);
-          ctx.bezierCurveTo(
-            dir * size * 1.2,
-            -size * 0.8,
-            dir * size * 1.7,
-            size * 0.5,
-            0,
-            size * 0.2
-          );
-          ctx.closePath();
-          ctx.fillStyle = '#EC4899';
-          ctx.fill();
-
-          // Inner loop shadow
-          ctx.beginPath();
-          ctx.moveTo(0, 0);
-          ctx.bezierCurveTo(
-            dir * size * 0.9,
-            -size * 0.4,
-            dir * size * 1.2,
-            size * 0.3,
-            0,
-            size * 0.15
-          );
-          ctx.fillStyle = '#DB2777';
-          ctx.fill();
-
-          // Silk sheen highlight
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.65)';
-          ctx.lineWidth = 1.5 * s;
-          ctx.beginPath();
-          ctx.moveTo(dir * size * 0.2, -size * 0.1);
-          ctx.bezierCurveTo(
-            dir * size * 0.8,
-            -size * 0.55,
-            dir * size * 1.3,
-            0,
-            dir * size * 0.8,
-            size * 0.25
-          );
-          ctx.stroke();
-          ctx.restore();
-        };
-        drawLoop(-1);
-        drawLoop(1);
-
-        // Center knot with wraps
-        ctx.fillStyle = '#BE185D';
-        ctx.beginPath();
-        ctx.arc(0, size * 0.1, size * 0.25, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-        ctx.beginPath();
-        ctx.ellipse(0, size * 0.05, size * 0.12, size * 0.18, 0, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.restore();
-      };
-
-      // Top corner silk bows
-      drawSilkBow(36 * s, 36 * s, 18 * s, 0.15);
-      drawSilkBow(w - 36 * s, 36 * s, 18 * s, -0.15);
-
-      // Photo Frames with Korean Life4Cuts margins
-      const headerH = Math.round(h * 0.13); // Enlarged header for bold editorial hierarchy
-      const footerH = Math.round(h * 0.20);
-      const pad = Math.round(w * 0.09);
-      const gap = Math.round(w * 0.035);
-      const topPadding = 18 * s; // Breathing room below header
-      const count = layout === 'strip4' ? 4 : layout === 'strip3' ? 3 : 4;
-
-      // Header Typography with Bold Editorial Hierarchy
-      const title = birthdayNameRef.current || "SARAH'S DAY";
-      const ageVal = birthdayAgeRef.current ? birthdayAgeRef.current.trim().replace(/^NO\.?\s*/i, '') : '';
-
-      if (ageVal) {
-        // Modern caps "HAPPY BIRTHDAY"
-        ctx.save();
-        ctx.fillStyle = bowFg;
-        ctx.font = `bold 700 ${15 * s}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
-        if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${3 * s}px`;
-        ctx.textAlign = 'center';
-        ctx.fillText('HAPPY BIRTHDAY', w / 2, headerH * 0.28);
-        ctx.restore();
-
-        // Raw clean prominent Age Number (bold modern serif, NO prefix words)
-        ctx.save();
-        ctx.fillStyle = bowAccent;
-        ctx.font = `bold 700 ${46 * s}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
-        if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${2 * s}px`;
-        ctx.textAlign = 'center';
-        ctx.fillText(ageVal, w / 2, headerH * 0.54);
-        ctx.restore();
-
-        // All-caps, modern, highly legible serif title with clean tracking
-        ctx.save();
-        ctx.fillStyle = bowFg;
-        ctx.font = `bold 700 ${15 * s}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
-        if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${3 * s}px`;
-        ctx.textAlign = 'center';
-        ctx.fillText(title.toUpperCase(), w / 2, headerH * 0.74);
-        ctx.restore();
-
-        // Subtitle
-        ctx.fillStyle = bowMuted;
-        ctx.font = `600 ${8 * s}px Inter, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.fillText('✦  A BEAUTIFUL DAY TO CELEBRATE YOU  ✦', w / 2, headerH * 0.88);
-      } else {
-        // Modern caps "HAPPY BIRTHDAY"
-        ctx.save();
-        ctx.fillStyle = bowFg;
-        ctx.font = `bold 700 ${17 * s}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
-        if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${3 * s}px`;
-        ctx.textAlign = 'center';
-        ctx.fillText('HAPPY BIRTHDAY', w / 2, headerH * 0.38);
-        ctx.restore();
-
-        // All-caps, modern, highly legible serif title with clean tracking
-        ctx.save();
-        ctx.fillStyle = bowAccent;
-        ctx.font = `bold 700 ${22 * s}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
-        if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${4 * s}px`;
-        ctx.textAlign = 'center';
-        ctx.fillText(title.toUpperCase(), w / 2, headerH * 0.65);
-        ctx.restore();
-
-        // Subtitle
-        ctx.fillStyle = bowMuted;
-        ctx.font = `600 ${8.5 * s}px Inter, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.fillText('✦  A BEAUTIFUL DAY TO CELEBRATE YOU  ✦', w / 2, headerH * 0.84);
-      }
-
-      if (layout === 'grid2x2') {
-        const cw = (w - pad * 2 - gap) / 2;
-        const ch = (h - headerH - footerH - topPadding - gap) / 2;
-        const pos = [
-          [0, 0],
-          [1, 0],
-          [0, 1],
-          [1, 1],
-        ];
-        for (let i = 0; i < 4; i++) {
-          if (!imgs[i]) continue;
-          const [c2, r] = pos[i];
-          const ix = pad + c2 * (cw + gap);
-          const iy = headerH + topPadding + r * (ch + gap);
-          drawGradedPhoto(ctx, imgs[i], ix, iy, cw, ch, 6 * s, isExport);
-          ctx.strokeStyle = '#FBCFE8';
-          ctx.lineWidth = 1.5 * s;
-          roundRect(ctx, ix, iy, cw, ch, 6 * s);
-          ctx.stroke();
-        }
-      } else {
-        const iw = w - pad * 2;
-        const ih = (h - headerH - footerH - topPadding - gap * (count - 1)) / count;
-        for (let i = 0; i < count; i++) {
-          if (!imgs[i]) continue;
-          const iy = headerH + topPadding + i * (ih + gap);
-          drawGradedPhoto(ctx, imgs[i], pad, iy, iw, ih, 6 * s, isExport);
-          ctx.strokeStyle = '#FBCFE8';
-          ctx.lineWidth = 1.5 * s;
-          roundRect(ctx, pad, iy, iw, ih, 6 * s);
-          ctx.stroke();
-        }
-      }
-
-      // Bottom Silk Bows (left and right)
-      drawSilkBow(40 * s, h - 52 * s, 16 * s, 0.1);
-      drawSilkBow(w - 40 * s, h - 52 * s, 16 * s, -0.1);
-
-      // Date stamp badge at bottom center
-      const badgeW = 160 * s;
-      const badgeH = 28 * s;
-      const badgeX = w / 2 - badgeW / 2;
-      const badgeY = h - 68 * s;
-
-      ctx.fillStyle = '#FCE7F3';
-      roundRect(ctx, badgeX, badgeY, badgeW, badgeH, 14 * s);
-      ctx.fill();
-
-      ctx.strokeStyle = '#F472B6';
-      ctx.lineWidth = 1 * s;
-      roundRect(ctx, badgeX, badgeY, badgeW, badgeH, 14 * s);
-      ctx.stroke();
-
-      ctx.fillStyle = '#9D174D';
-      ctx.font = `600 ${8.5 * s}px Inter, sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.fillText(fmtSimpleDate(), w / 2, badgeY + 13 * s);
-
-      ctx.font = `600 ${6.5 * s}px Inter, sans-serif`;
-      ctx.fillStyle = '#DB2777';
-      ctx.fillText('CHERISHED MEMORIES FOREVER', w / 2, badgeY + 22 * s);
-
-      // Watermark Signature
-      drawHaloLunaWatermark(ctx, w, h - 16 * s, bowMuted, s);
     },
     [layout]
   );
@@ -977,11 +807,12 @@ export default function CanvasEditor({
         console.warn('Font loading fallback:', e);
       }
 
-      // Base coordinates from the native 1181 × 1772 PNG frame asset
-      const baseW = 1181;
-      const baseH = 1772;
+      // Slot coordinates are expressed in the native PNG's pixel space; the
+      // canvas is taller than the artwork to make room for the caption band.
+      const baseW = CAT_PINK_BASE_W;
       const scaleX = w / baseW;
-      const scaleY = h / baseH;
+      const scaleY = h / CAT_PINK_BASE_H;
+      const artH = CAT_PINK_ART_H * scaleY;
 
       // 6 photo cutout slots (2 columns × 3 rows) with slight bleed under frame borders
       const SLOTS_6 = [
@@ -996,9 +827,9 @@ export default function CanvasEditor({
       ];
 
       // LAYER 1: Photos (drawn into cutout slots behind the frame)
-      // Soft blush pink canvas base
+      // Blush base matches the artwork exactly so the caption band is seamless
       ctx.save();
-      ctx.fillStyle = '#FFEDF1';
+      ctx.fillStyle = CAT_PINK_BLUSH;
       ctx.fillRect(0, 0, w, h);
 
       for (let i = 0; i < 6; i++) {
@@ -1020,148 +851,26 @@ export default function CanvasEditor({
       try {
         const frameImg = await loadBirthdayCatPinkFrame();
         if (frameImg && frameImg.complete && frameImg.naturalWidth > 0) {
-          ctx.drawImage(frameImg, 0, 0, w, h);
+          // Crop the artwork's faded bottom rows so it meets the band cleanly
+          const srcH = Math.round(frameImg.naturalHeight * (CAT_PINK_ART_H / CAT_PINK_FRAME_H));
+          ctx.drawImage(frameImg, 0, 0, frameImg.naturalWidth, srcH, 0, 0, w, artH);
         } else {
           console.warn('[HaloLuna] Frame overlay loaded with 0 width, using fallback');
           ctx.strokeStyle = '#F472B6';
           ctx.lineWidth = 8 * scaleX;
-          ctx.strokeRect(10 * scaleX, 10 * scaleY, w - 20 * scaleX, h - 20 * scaleY);
+          ctx.strokeRect(10 * scaleX, 10 * scaleY, w - 20 * scaleX, artH - 20 * scaleY);
         }
       } catch (frameErr) {
         console.warn('[HaloLuna] Frame overlay load error (drawing fallback frame):', frameErr);
         ctx.strokeStyle = '#F472B6';
         ctx.lineWidth = 8 * scaleX;
-        ctx.strokeRect(10 * scaleX, 10 * scaleY, w - 20 * scaleX, h - 20 * scaleY);
+        ctx.strokeRect(10 * scaleX, 10 * scaleY, w - 20 * scaleX, artH - 20 * scaleY);
       }
 
-      // LAYER 3: Dynamic Custom Birthday Scrapbook Headline & Stickers
-      const title = birthdayNameRef.current || "SARAH";
-      let personName = title.trim();
-      if (/['’]s\s*day$/i.test(personName)) {
-        personName = personName.replace(/['’]s\s*day$/i, '').trim();
-      } else if (/['’]s\s*birthday$/i.test(personName)) {
-        personName = personName.replace(/['’]s\s*birthday$/i, '').trim();
-      } else if (/birthday$/i.test(personName)) {
-        personName = personName.replace(/birthday$/i, '').trim();
-      } else if (/['’]s$/i.test(personName)) {
-        personName = personName.replace(/['’]s$/i, '').trim();
-      }
-      if (!personName) personName = 'Sarah';
-      // Format as Title Case for cute handwriting aesthetic (e.g. "Sarah" or "Andi")
-      const displayName = personName.charAt(0).toUpperCase() + personName.slice(1);
+      // Guest name/age is burned in renderToCanvas AFTER this preset so export
+      // and preview share the exact same pixels.
 
-      const rawAge = birthdayAgeRef.current ? birthdayAgeRef.current.trim().replace(/\D/g, '') : '';
-      let ordinalAge = '';
-      if (rawAge) {
-        const num = parseInt(rawAge, 10);
-        if (!isNaN(num)) {
-          const j = num % 10;
-          const k = num % 100;
-          const suffix = (j === 1 && k !== 11) ? 'st' : (j === 2 && k !== 12) ? 'nd' : (j === 3 && k !== 13) ? 'rd' : 'th';
-          ordinalAge = `${num}${suffix}`;
-        }
-      }
-
-      // Cohesive birthday headline with letters and numbers sharing exact same font family & weight
-      const line1 = `It's ${displayName}'s`;
-      const line2 = ordinalAge ? `${ordinalAge} Birthday! 🎂` : 'Birthday Party! 🎂';
-
-      // Scrapbook Sticker Center Position: centered horizontally at 590.5, sitting right above the cake at y ≈ 1115
-      const stickerX = 590.5 * scaleX;
-      const stickerY = 1115 * scaleY;
-      const cuteFontFamily = '"DynaPuff", "Caveat", "Pacifico", cursive, sans-serif';
-
-      ctx.save();
-      ctx.translate(stickerX, stickerY);
-      // Playful -3.2 degree scrapbook sticker tilt
-      ctx.rotate(-0.055);
-
-      let line1Size = 44 * scaleX;
-      let line2Size = 54 * scaleX;
-
-      ctx.font = `bold 700 ${line1Size}px ${cuteFontFamily}`;
-      const m1 = ctx.measureText(line1).width;
-      ctx.font = `bold 800 ${line2Size}px ${cuteFontFamily}`;
-      const m2 = ctx.measureText(line2).width;
-
-      // Allow natural 10-15% overlap of adjacent photo slots (~540px max width at base 1181)
-      const maxStickerW = 540 * scaleX;
-      const maxMeasured = Math.max(m1, m2);
-      if (maxMeasured > maxStickerW) {
-        const shrinkRatio = maxStickerW / maxMeasured;
-        line1Size *= shrinkRatio;
-        line2Size *= shrinkRatio;
-      }
-
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-
-      const line1YOffset = -26 * scaleY;
-      const line2YOffset = 30 * scaleY;
-
-      // 1. Soft Warm Drop Shadow (gives tactile die-cut sticker depth over photos & frame)
-      ctx.shadowColor = 'rgba(0, 0, 0, 0.18)';
-      ctx.shadowBlur = 12 * scaleX;
-      ctx.shadowOffsetX = 0;
-      ctx.shadowOffsetY = 6 * scaleY;
-
-      // 2. Thick Opaque White Sticker Border (ctx.strokeText with lineWidth = 16 * scaleX)
-      ctx.strokeStyle = '#FFFFFF';
-      ctx.lineWidth = 16 * scaleX;
-      ctx.lineJoin = 'round';
-      ctx.lineCap = 'round';
-
-      ctx.font = `bold 700 ${line1Size}px ${cuteFontFamily}`;
-      ctx.strokeText(line1, 0, line1YOffset);
-      ctx.font = `bold 800 ${line2Size}px ${cuteFontFamily}`;
-      ctx.strokeText(line2, 0, line2YOffset);
-
-      // 3. Crisp Secondary Stroke (clean white inner stroke, shadows cleared)
-      ctx.shadowColor = 'transparent';
-      ctx.lineWidth = 14 * scaleX;
-      ctx.font = `bold 700 ${line1Size}px ${cuteFontFamily}`;
-      ctx.strokeText(line1, 0, line1YOffset);
-      ctx.font = `bold 800 ${line2Size}px ${cuteFontFamily}`;
-      ctx.strokeText(line2, 0, line2YOffset);
-
-      // 4. Vibrant Cherry-Rose Text Fill
-      ctx.fillStyle = '#E11D48';
-      ctx.font = `bold 700 ${line1Size}px ${cuteFontFamily}`;
-      ctx.fillText(line1, 0, line1YOffset);
-      ctx.font = `bold 800 ${line2Size}px ${cuteFontFamily}`;
-      ctx.fillText(line2, 0, line2YOffset);
-      ctx.restore();
-
-      // 2. Custom Name Banner: clean and cute inside the bottom-left banner
-      ctx.save();
-      const bannerCenterX = 295 * scaleX;
-      const footerNameY = 1746 * scaleY;
-      const maxAllowedWidth = 510 * scaleX;
-
-      let footerFontSize = 26 * scaleX;
-      ctx.font = `bold 800 ${footerFontSize}px ${cuteFontFamily}`;
-      const footerText = `♡ ${displayName.toUpperCase()}'S SPECIAL DAY ♡`;
-      const measuredW = ctx.measureText(footerText).width;
-      if (measuredW > maxAllowedWidth) {
-        footerFontSize = Math.max(16 * scaleX, (maxAllowedWidth / measuredW) * footerFontSize);
-        ctx.font = `bold 800 ${footerFontSize}px ${cuteFontFamily}`;
-      }
-
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-
-      // Clean white stroke
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.98)';
-      ctx.lineWidth = 6 * scaleX;
-      ctx.lineJoin = 'round';
-      ctx.strokeText(footerText, bannerCenterX, footerNameY);
-
-      // Deep berry pink text fill
-      ctx.fillStyle = '#831843';
-      ctx.fillText(footerText, bannerCenterX, footerNameY);
-      ctx.restore();
-
-      // 3. Watermark: tiny subtle watermark under bottom-right column
+      // Tiny watermark tucked into the bottom-right of the band
       ctx.save();
       const wmx = w - 36 * scaleX;
       const wmy = h - 8 * scaleY;
@@ -1175,707 +884,47 @@ export default function CanvasEditor({
     []
   );
 
-  // 3. Kitty & Paws 🐱
-  const drawKitty = useCallback(
+  const drawRetroTerracotta = useCallback(
     async (
       ctx: CanvasRenderingContext2D,
       imgs: HTMLImageElement[],
       w: number,
       h: number,
-      s: number,
+      _s: number,
       isExport: boolean = false,
     ) => {
-      // Butter cream / soft lavender
-      ctx.fillStyle = '#FAF7EE';
+      const scaleX = w / RETRO_BASE_W;
+      const scaleY = h / RETRO_BASE_H;
+
+      ctx.fillStyle = '#C74913';
       ctx.fillRect(0, 0, w, h);
 
-      // Border line
-      ctx.strokeStyle = '#E8DFCE';
-      ctx.lineWidth = 1.5 * s;
-      ctx.strokeRect(12 * s, 12 * s, w - 24 * s, h - 24 * s);
-
-      // Peeking Cat Ears above top frame
-      const earLeftX = w / 2 - 80 * s;
-      const earRightX = w / 2 + 80 * s;
-      const earY = 82 * s;
-
-      const drawEar = (ex: number, isLeft: boolean) => {
-        ctx.fillStyle = '#E8DFCE';
-        ctx.beginPath();
-        ctx.moveTo(ex, earY);
-        ctx.lineTo(ex + (isLeft ? -24 * s : 24 * s), earY - 34 * s);
-        ctx.lineTo(ex + (isLeft ? 18 * s : -18 * s), earY - 6 * s);
-        ctx.closePath();
-        ctx.fill();
-
-        // Inner pink ear
-        ctx.fillStyle = '#FFCCD5';
-        ctx.beginPath();
-        ctx.moveTo(ex + (isLeft ? -4 * s : 4 * s), earY - 4 * s);
-        ctx.lineTo(ex + (isLeft ? -18 * s : 18 * s), earY - 26 * s);
-        ctx.lineTo(ex + (isLeft ? 10 * s : -10 * s), earY - 8 * s);
-        ctx.closePath();
-        ctx.fill();
-      };
-      drawEar(earLeftX, true);
-      drawEar(earRightX, false);
-
-      // Header Text
-      ctx.fillStyle = '#3D3B36';
-      ctx.font = `bold ${18 * s}px Inter, sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.fillText('( ˶ˆᵕˆ˶ )  meow ♡', w / 2, 70 * s);
-
-      // Paw prints stamped along outer left & right margins
-      const drawPaw = (px: number, py: number, r: number) => {
-        ctx.save();
-        ctx.fillStyle = '#D6CCB8';
-        // Main pad
-        ctx.beginPath();
-        ctx.ellipse(px, py, r * 1.1, r * 0.9, 0, 0, Math.PI * 2);
-        ctx.fill();
-        // 4 Toe pads
-        const toes = [
-          [-0.8, -0.9],
-          [-0.3, -1.2],
-          [0.3, -1.2],
-          [0.8, -0.9],
-        ];
-        toes.forEach(([tx, ty]) => {
-          ctx.beginPath();
-          ctx.ellipse(px + tx * r * 0.8, py + ty * r * 0.8, r * 0.4, r * 0.4, 0, 0, Math.PI * 2);
-          ctx.fill();
-        });
-        ctx.restore();
-      };
-
-      [0.2, 0.4, 0.6, 0.8].forEach((pct, idx) => {
-        drawPaw(18 * s, pct * h + (idx % 2) * 15 * s, 6 * s);
-        drawPaw(w - 18 * s, pct * h - (idx % 2) * 15 * s, 6 * s);
-      });
-
-      // Photos
-      const pad = 30 * s;
-      const gap = 12 * s;
-      const headerH = 92 * s;
-      const footerH = 135 * s;
-      const count = layout === 'strip4' ? 4 : layout === 'strip3' ? 3 : 4;
-
-      if (layout === 'grid2x2') {
-        const cw = (w - pad * 2 - gap) / 2;
-        const ch = (h - headerH - footerH - gap) / 2;
-        const pos = [
-          [0, 0],
-          [1, 0],
-          [0, 1],
-          [1, 1],
-        ];
-        for (let i = 0; i < 4; i++) {
-          if (!imgs[i]) continue;
-          const [c2, r] = pos[i];
-          const ix = pad + c2 * (cw + gap);
-          const iy = headerH + r * (ch + gap);
-          drawGradedPhoto(ctx, imgs[i], ix, iy, cw, ch, 6 * s, isExport);
-          ctx.strokeStyle = '#D6CCB8';
-          ctx.lineWidth = 1 * s;
-          roundRect(ctx, ix, iy, cw, ch, 6 * s);
-          ctx.stroke();
-        }
-      } else {
-        const iw = w - pad * 2;
-        const ih = (h - headerH - footerH - gap * (count - 1)) / count;
-        for (let i = 0; i < count; i++) {
-          if (!imgs[i]) continue;
-          const iy = headerH + i * (ih + gap);
-          drawGradedPhoto(ctx, imgs[i], pad, iy, iw, ih, 6 * s, isExport);
-          ctx.strokeStyle = '#D6CCB8';
-          ctx.lineWidth = 1 * s;
-          roundRect(ctx, pad, iy, iw, ih, 6 * s);
-          ctx.stroke();
-        }
+      for (let i = 0; i < RETRO_SLOTS.length; i++) {
+        const img = imgs[i] || imgs[i % Math.max(imgs.length, 1)];
+        if (!img) continue;
+        const slot = RETRO_SLOTS[i];
+        drawGradedPhoto(
+          ctx,
+          img,
+          Math.round(slot.x * scaleX),
+          Math.round(slot.y * scaleY),
+          Math.round(slot.w * scaleX),
+          Math.round(slot.h * scaleY),
+          0,
+          isExport,
+        );
       }
 
-      // Smiling Cat Doodle at Bottom Center
-      const catX = w / 2;
-      const catY = h - 68 * s;
-      const catR = 28 * s;
-
-      // Face
-      ctx.fillStyle = '#FFFFFF';
-      ctx.beginPath();
-      ctx.arc(catX, catY, catR, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = '#D6CCB8';
-      ctx.lineWidth = 1.5 * s;
-      ctx.stroke();
-
-      // Closed Smiling Eyes (^ ^)
-      ctx.strokeStyle = '#3D3B36';
-      ctx.lineWidth = 1.8 * s;
-      ctx.beginPath();
-      ctx.arc(catX - 10 * s, catY - 4 * s, 5 * s, Math.PI, 0);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(catX + 10 * s, catY - 4 * s, 5 * s, Math.PI, 0);
-      ctx.stroke();
-
-      // Pink Nose & Mouth
-      ctx.fillStyle = '#FF85A1';
-      ctx.beginPath();
-      ctx.arc(catX, catY + 3 * s, 2.5 * s, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.beginPath();
-      ctx.arc(catX - 3.5 * s, catY + 8 * s, 3.5 * s, 0, Math.PI);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(catX + 3.5 * s, catY + 8 * s, 3.5 * s, 0, Math.PI);
-      ctx.stroke();
-
-      // Rosy Pink Cheeks
-      ctx.fillStyle = 'rgba(255, 133, 161, 0.4)';
-      ctx.beginPath();
-      ctx.arc(catX - 15 * s, catY + 5 * s, 4 * s, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.beginPath();
-      ctx.arc(catX + 15 * s, catY + 5 * s, 4 * s, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Whiskers
-      ctx.strokeStyle = '#A89F90';
-      ctx.lineWidth = 1 * s;
-      ctx.beginPath();
-      ctx.moveTo(catX - 18 * s, catY);
-      ctx.lineTo(catX - 34 * s, catY - 3 * s);
-      ctx.moveTo(catX - 18 * s, catY + 4 * s);
-      ctx.lineTo(catX - 33 * s, catY + 6 * s);
-      ctx.moveTo(catX + 18 * s, catY);
-      ctx.lineTo(catX + 34 * s, catY - 3 * s);
-      ctx.moveTo(catX + 18 * s, catY + 4 * s);
-      ctx.lineTo(catX + 33 * s, catY + 6 * s);
-      ctx.stroke();
-
-      // Watermark
-      ctx.fillStyle = '#8A8275';
-      ctx.font = `600 ${8.5 * s}px "Courier New", monospace`;
-      ctx.textAlign = 'center';
-      ctx.fillText(SIGNATURE, w / 2, h - 16 * s);
+      try {
+        const frameImg = await loadRetroTerracottaFrame();
+        if (frameImg && frameImg.complete && frameImg.naturalWidth > 0) {
+          ctx.drawImage(frameImg, 0, 0, w, h);
+        }
+      } catch (err) {
+        console.warn('[HaloLuna] Retro terracotta overlay failed:', err);
+      }
     },
-    [layout]
-  );
-
-  // 3. Y2K Cyber Sparkle ✨
-  const drawCyberSparkle = useCallback(
-    async (
-      ctx: CanvasRenderingContext2D,
-      imgs: HTMLImageElement[],
-      w: number,
-      h: number,
-      s: number,
-      isExport: boolean = false,
-    ) => {
-      // Icy Silver-Blue
-      ctx.fillStyle = '#E8EEFF';
-      ctx.fillRect(0, 0, w, h);
-
-      // Star polygon helper (✦ ✧)
-      const drawSparkle = (sx: number, sy: number, r: number, color: string) => {
-        ctx.save();
-        ctx.fillStyle = color;
-        ctx.beginPath();
-        for (let i = 0; i < 8; i++) {
-          const radius = i % 2 === 0 ? r : r * 0.28;
-          const angle = (i * Math.PI) / 4 - Math.PI / 4;
-          if (i === 0) ctx.moveTo(sx + radius * Math.cos(angle), sy + radius * Math.sin(angle));
-          else ctx.lineTo(sx + radius * Math.cos(angle), sy + radius * Math.sin(angle));
-        }
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
-      };
-
-      // Cyber Sparkle stars
-      const stars = [
-        [35 * s, 35 * s, 18 * s, '#6366F1'],
-        [w - 35 * s, 35 * s, 18 * s, '#818CF8'],
-        [28 * s, h / 2, 14 * s, '#4F46E5'],
-        [w - 28 * s, h / 2, 14 * s, '#4F46E5'],
-        [w / 2, 28 * s, 12 * s, '#A5B4FC'],
-        [42 * s, h - 45 * s, 16 * s, '#818CF8'],
-        [w - 42 * s, h - 45 * s, 16 * s, '#6366F1'],
-      ];
-      stars.forEach(([sx, sy, r, col]) => drawSparkle(sx as number, sy as number, r as number, col as string));
-
-      // Header
-      ctx.fillStyle = '#312E81';
-      ctx.font = `bold ${19 * s}px "Courier New", monospace`;
-      ctx.textAlign = 'center';
-      ctx.fillText('✦ PHOTOBOOTH ✦', w / 2, 62 * s);
-
-      ctx.fillStyle = '#6366F1';
-      ctx.font = `600 ${10.5 * s}px "Courier New", monospace`;
-      ctx.fillText(`[ Y2K EDITION ]  ${fmtDate()}`, w / 2, 80 * s);
-
-      // Photos
-      const pad = 28 * s;
-      const gap = 12 * s;
-      const headerH = 100 * s;
-      const footerH = 120 * s;
-      const count = layout === 'strip4' ? 4 : layout === 'strip3' ? 3 : 4;
-
-      if (layout === 'grid2x2') {
-        const cw = (w - pad * 2 - gap) / 2;
-        const ch = (h - headerH - footerH - gap) / 2;
-        const pos = [
-          [0, 0],
-          [1, 0],
-          [0, 1],
-          [1, 1],
-        ];
-        for (let i = 0; i < 4; i++) {
-          if (!imgs[i]) continue;
-          const [c2, r] = pos[i];
-          const ix = pad + c2 * (cw + gap);
-          const iy = headerH + r * (ch + gap);
-          drawGradedPhoto(ctx, imgs[i], ix, iy, cw, ch, 0, isExport);
-          ctx.strokeStyle = '#A5B4FC';
-          ctx.lineWidth = 2 * s;
-          ctx.strokeRect(ix, iy, cw, ch);
-        }
-      } else {
-        const iw = w - pad * 2;
-        const ih = (h - headerH - footerH - gap * (count - 1)) / count;
-        for (let i = 0; i < count; i++) {
-          if (!imgs[i]) continue;
-          const iy = headerH + i * (ih + gap);
-          drawGradedPhoto(ctx, imgs[i], pad, iy, iw, ih, 0, isExport);
-          ctx.strokeStyle = '#A5B4FC';
-          ctx.lineWidth = 2 * s;
-          ctx.strokeRect(pad, iy, iw, ih);
-        }
-      }
-
-      // Mini CD / Disc Vectors at Bottom
-      const drawCD = (cdX: number, cdY: number) => {
-        ctx.save();
-        for (let r = 8; r <= 22; r += 4) {
-          ctx.strokeStyle = `rgba(99, 102, 241, ${0.7 - r * 0.02})`;
-          ctx.lineWidth = 1.5 * s;
-          ctx.beginPath();
-          ctx.arc(cdX, cdY, r * s, 0, Math.PI * 2);
-          ctx.stroke();
-        }
-        ctx.fillStyle = '#E8EEFF';
-        ctx.beginPath();
-        ctx.arc(cdX, cdY, 4 * s, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-      };
-      drawCD(80 * s, h - 55 * s);
-      drawCD(w - 80 * s, h - 55 * s);
-
-      // Heart outline center
-      ctx.save();
-      const hx = w / 2;
-      const hy = h - 60 * s;
-      const hs = 8 * s;
-      ctx.strokeStyle = '#818CF8';
-      ctx.lineWidth = 1.8 * s;
-      ctx.beginPath();
-      ctx.moveTo(hx, hy + hs);
-      ctx.bezierCurveTo(hx, hy - hs * 0.6, hx - hs * 1.8, hy - hs * 0.6, hx - hs * 1.8, hy + hs * 0.5);
-      ctx.bezierCurveTo(hx - hs * 1.8, hy + hs * 1.6, hx, hy + hs * 2.5, hx, hy + hs * 3);
-      ctx.bezierCurveTo(hx, hy + hs * 2.5, hx + hs * 1.8, hy + hs * 1.6, hx + hs * 1.8, hy + hs * 0.5);
-      ctx.bezierCurveTo(hx + hs * 1.8, hy - hs * 0.6, hx, hy - hs * 0.6, hx, hy + hs);
-      ctx.stroke();
-      ctx.restore();
-
-      // Watermark
-      ctx.fillStyle = '#4F46E5';
-      ctx.font = `600 ${8.5 * s}px "Courier New", monospace`;
-      ctx.textAlign = 'center';
-      ctx.fillText(SIGNATURE, w / 2, h - 16 * s);
-    },
-    [layout]
-  );
-
-  // 4. Coquette Ribbon 🎀
-  const drawCoquette = useCallback(
-    async (
-      ctx: CanvasRenderingContext2D,
-      imgs: HTMLImageElement[],
-      w: number,
-      h: number,
-      s: number,
-      isExport: boolean = false,
-    ) => {
-      // Strawberry Milk Pink
-      ctx.fillStyle = '#FCE7F3';
-      ctx.fillRect(0, 0, w, h);
-
-      // Delicate double lace border
-      ctx.strokeStyle = '#F9A8D4';
-      ctx.lineWidth = 1.5 * s;
-      ctx.strokeRect(10 * s, 10 * s, w - 20 * s, h - 20 * s);
-
-      ctx.strokeStyle = '#FBCFE8';
-      ctx.lineWidth = 0.8 * s;
-      ctx.strokeRect(14 * s, 14 * s, w - 28 * s, h - 28 * s);
-
-      // Ribbon / Bow Vector Helper
-      const drawBow = (bx: number, by: number, size: number) => {
-        ctx.save();
-        const drawLoop = (isMirrored: boolean) => {
-          ctx.fillStyle = '#F472B6';
-          ctx.beginPath();
-          ctx.moveTo(bx, by);
-          const dir = isMirrored ? -1 : 1;
-          ctx.bezierCurveTo(
-            bx + dir * size * 1.4,
-            by - size * 0.8,
-            bx + dir * size * 1.6,
-            by + size * 0.7,
-            bx,
-            by
-          );
-          ctx.fill();
-        };
-        drawLoop(false);
-        drawLoop(true);
-
-        // Center knot
-        ctx.fillStyle = '#DB2777';
-        ctx.beginPath();
-        ctx.arc(bx, by, size * 0.3, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Flowing ribbons
-        ctx.strokeStyle = '#F472B6';
-        ctx.lineWidth = 2 * s;
-        ctx.beginPath();
-        ctx.moveTo(bx, by + size * 0.3);
-        ctx.quadraticCurveTo(bx - size * 0.6, by + size * 1.2, bx - size * 0.8, by + size * 1.8);
-        ctx.moveTo(bx, by + size * 0.3);
-        ctx.quadraticCurveTo(bx + size * 0.6, by + size * 1.2, bx + size * 0.8, by + size * 1.8);
-        ctx.stroke();
-        ctx.restore();
-      };
-
-      drawBow(44 * s, 44 * s, 16 * s);
-      drawBow(w - 44 * s, 44 * s, 16 * s);
-
-      // Sweet Cherries helper
-      const drawCherry = (cx2: number, cy2: number) => {
-        ctx.save();
-        ctx.fillStyle = '#E11D48';
-        ctx.beginPath();
-        ctx.arc(cx2 - 4 * s, cy2, 4.5 * s, 0, Math.PI * 2);
-        ctx.arc(cx2 + 4 * s, cy2 + 2 * s, 4.5 * s, 0, Math.PI * 2);
-        ctx.fill();
-        // Stems
-        ctx.strokeStyle = '#16A34A';
-        ctx.lineWidth = 1 * s;
-        ctx.beginPath();
-        ctx.moveTo(cx2 - 4 * s, cy2 - 3 * s);
-        ctx.quadraticCurveTo(cx2 - 1 * s, cy2 - 10 * s, cx2 + 2 * s, cy2 - 12 * s);
-        ctx.moveTo(cx2 + 4 * s, cy2 - 1 * s);
-        ctx.quadraticCurveTo(cx2 + 2 * s, cy2 - 10 * s, cx2 + 2 * s, cy2 - 12 * s);
-        ctx.stroke();
-        ctx.restore();
-      };
-
-      drawCherry(w * 0.3, 24 * s);
-      drawCherry(w * 0.7, 24 * s);
-
-      // Header Typography
-      ctx.fillStyle = '#9D174D';
-      ctx.font = `italic 300 ${20 * s}px Georgia, serif`;
-      ctx.textAlign = 'center';
-      ctx.fillText('◌ memories ◌', w / 2, 72 * s);
-
-      ctx.fillStyle = '#DB2777';
-      ctx.font = `400 ${10.5 * s}px Georgia, serif`;
-      ctx.fillText('cherished forever  ♡', w / 2, 88 * s);
-
-      // Photos
-      const pad = 28 * s;
-      const gap = 12 * s;
-      const headerH = 104 * s;
-      const footerH = 120 * s;
-      const count = layout === 'strip4' ? 4 : layout === 'strip3' ? 3 : 4;
-
-      if (layout === 'grid2x2') {
-        const cw = (w - pad * 2 - gap) / 2;
-        const ch = (h - headerH - footerH - gap) / 2;
-        const pos = [
-          [0, 0],
-          [1, 0],
-          [0, 1],
-          [1, 1],
-        ];
-        for (let i = 0; i < 4; i++) {
-          if (!imgs[i]) continue;
-          const [c2, r] = pos[i];
-          const ix = pad + c2 * (cw + gap);
-          const iy = headerH + r * (ch + gap);
-          drawGradedPhoto(ctx, imgs[i], ix, iy, cw, ch, 8 * s, isExport);
-          ctx.strokeStyle = '#F9A8D4';
-          ctx.lineWidth = 1 * s;
-          roundRect(ctx, ix, iy, cw, ch, 8 * s);
-          ctx.stroke();
-        }
-      } else {
-        const iw = w - pad * 2;
-        const ih = (h - headerH - footerH - gap * (count - 1)) / count;
-        for (let i = 0; i < count; i++) {
-          if (!imgs[i]) continue;
-          const iy = headerH + i * (ih + gap);
-          drawGradedPhoto(ctx, imgs[i], pad, iy, iw, ih, 8 * s, isExport);
-          ctx.strokeStyle = '#F9A8D4';
-          ctx.lineWidth = 1 * s;
-          roundRect(ctx, pad, iy, iw, ih, 8 * s);
-          ctx.stroke();
-        }
-      }
-
-      // Bottom Bow Accent
-      drawBow(w / 2, h - 55 * s, 18 * s);
-
-      // Signature
-      ctx.fillStyle = '#BE185D';
-      ctx.font = `600 ${8.5 * s}px "Courier New", monospace`;
-      ctx.textAlign = 'center';
-      ctx.fillText(SIGNATURE, w / 2, h - 16 * s);
-    },
-    [layout]
-  );
-
-  // 5. Thermal Receipt Strip 🧾
-  const drawThermal = useCallback(
-    async (
-      ctx: CanvasRenderingContext2D,
-      imgs: HTMLImageElement[],
-      w: number,
-      h: number,
-      s: number,
-      isExport: boolean = false,
-    ) => {
-      // Vintage Paper Off-White
-      ctx.fillStyle = '#FAF8F5';
-      ctx.fillRect(0, 0, w, h);
-
-      const pad = 32 * s;
-      let y = 0;
-
-      // Serrated Top Jagged Edge
-      ctx.fillStyle = '#F0ECE1';
-      for (let x = 0; x < w; x += 14 * s) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x + 7 * s, 10 * s);
-        ctx.lineTo(x + 14 * s, 0);
-        ctx.fill();
-      }
-      y = 48 * s;
-
-      // Header
-      ctx.fillStyle = '#1E2022';
-      ctx.font = `bold ${18 * s}px "Courier New", monospace`;
-      ctx.textAlign = 'center';
-      ctx.fillText('★  MEMORY RECEIPT  ★', w / 2, y + 16 * s);
-      y += 36 * s;
-
-      ctx.font = `400 ${10.5 * s}px "Courier New", monospace`;
-      ctx.fillText('─────────────────────────────', w / 2, y);
-      y += 20 * s;
-
-      // Receipt Meta Rows
-      const currentLoc = locationRef.current || 'SEOUL STUDIO';
-      const count = layout === 'strip4' ? 4 : layout === 'strip3' ? 3 : 4;
-      const rows: [string, string][] = [
-        ['DATE', fmtDate()],
-        ['TIME', fmtTime()],
-        ['ORDER', `MEMORIES x ${count}`],
-        ['LOCATION', currentLoc],
-      ];
-
-      rows.forEach(([k, v]) => {
-        ctx.textAlign = 'left';
-        ctx.fillText(k, pad, y);
-        ctx.textAlign = 'right';
-        ctx.fillText(v, w - pad, y);
-        y += 20 * s;
-      });
-
-      ctx.textAlign = 'center';
-      ctx.fillText('─────────────────────────────', w / 2, y + 4 * s);
-      y += 24 * s;
-
-      // Now Playing with Mini Soundwave
-      const currentNP = nowPlayingRef.current;
-      if (currentNP) {
-        ctx.fillStyle = '#5A5852';
-        ctx.font = `500 ${10 * s}px "Courier New", monospace`;
-        ctx.fillText(`♪ ${currentNP.toUpperCase()}`, w / 2, y + 10 * s);
-
-        const barCount = 18;
-        const barW = 4 * s;
-        const barGap = 3 * s;
-        const totalW = barCount * (barW + barGap);
-        let bx = w / 2 - totalW / 2;
-        for (let i = 0; i < barCount; i++) {
-          const bh = (3 + Math.sin(i * 0.7) * 10 + 6) * s;
-          ctx.fillStyle = '#1E2022';
-          ctx.fillRect(bx, y + 20 * s, barW, bh);
-          bx += barW + barGap;
-        }
-        y += 46 * s;
-      }
-
-      // Photos
-      const imgW = w - pad * 2;
-      const imgH = Math.min(230 * s, (h - y - 180 * s) / count);
-
-      if (layout === 'grid2x2') {
-        const hW = (imgW - 8 * s) / 2;
-        for (let i = 0; i < Math.min(4, imgs.length); i++) {
-          const c2 = i % 2;
-          const r = Math.floor(i / 2);
-          drawGradedPhoto(ctx, imgs[i], pad + c2 * (hW + 8 * s), y + r * (imgH + 8 * s), hW, imgH, 0, isExport);
-        }
-        y += imgH * 2 + 16 * s;
-      } else {
-        for (let i = 0; i < Math.min(count, imgs.length); i++) {
-          drawGradedPhoto(ctx, imgs[i], pad, y, imgW, imgH, 0, isExport);
-          y += imgH + 12 * s;
-        }
-      }
-
-      // Wavy Smiling Face Receipt Mascot Doodle
-      y += 12 * s;
-      ctx.font = `bold ${14 * s}px "Courier New", monospace`;
-      ctx.textAlign = 'center';
-      ctx.fillText('( ◡‿◡ ) ★ HAVE A NICE DAY', w / 2, y + 10 * s);
-      y += 24 * s;
-
-      // Barcode
-      drawBarcode(ctx, pad + 12 * s, y, w - pad * 2 - 24 * s, 38 * s, '#1E2022');
-      y += 48 * s;
-
-      ctx.font = `400 ${9.5 * s}px "Courier New", monospace`;
-      ctx.fillText(`*${Math.random().toString(36).substring(2, 8).toUpperCase()}-KOREA*`, w / 2, y + 6 * s);
-
-      // Serrated Bottom Edge
-      ctx.fillStyle = '#F0ECE1';
-      for (let x = 0; x < w; x += 14 * s) {
-        ctx.beginPath();
-        ctx.moveTo(x, h);
-        ctx.lineTo(x + 7 * s, h - 10 * s);
-        ctx.lineTo(x + 14 * s, h);
-        ctx.fill();
-      }
-
-      // Signature Watermark
-      ctx.fillStyle = '#6E6B65';
-      ctx.font = `600 ${8.5 * s}px "Courier New", monospace`;
-      ctx.fillText(SIGNATURE, w / 2, h - 22 * s);
-    },
-    [layout]
-  );
-
-  // 6. Clean Editorial (Classic)
-  const drawEditorial = useCallback(
-    async (
-      ctx: CanvasRenderingContext2D,
-      imgs: HTMLImageElement[],
-      w: number,
-      h: number,
-      s: number,
-      isExport: boolean = false,
-    ) => {
-      ctx.fillStyle = COLOR.bg;
-      ctx.fillRect(0, 0, w, h);
-
-      // Korean Life4Cuts aesthetic proportions
-      const pad = Math.round(w * 0.09);
-      const gap = Math.round(w * 0.035);
-      const headerH = Math.round(h * 0.08);
-      const footerH = Math.round(h * 0.20);
-      const count = layout === 'strip4' ? 4 : layout === 'strip3' ? 3 : 4;
-
-      // Header
-      ctx.fillStyle = COLOR.text;
-      ctx.font = `300 ${18 * s}px Inter, sans-serif`;
-      ctx.textAlign = 'left';
-      ctx.fillText('HALOLUNA STUDIO', pad, headerH - 24 * s);
-
-      ctx.font = `400 ${9.5 * s}px "Courier New", monospace`;
-      ctx.fillStyle = COLOR.accent;
-      ctx.textAlign = 'right';
-      ctx.fillText(`${fmtDate()}  ${fmtTime()}`, w - pad, headerH - 24 * s);
-
-      ctx.strokeStyle = COLOR.border;
-      ctx.lineWidth = 1.2 * s;
-      ctx.beginPath();
-      ctx.moveTo(pad, headerH - 8 * s);
-      ctx.lineTo(w - pad, headerH - 8 * s);
-      ctx.stroke();
-
-      // Photos
-      if (layout === 'grid2x2') {
-        const cw = (w - pad * 2 - gap) / 2;
-        const ch = (h - headerH - footerH - gap) / 2;
-        const pos = [
-          [0, 0],
-          [1, 0],
-          [0, 1],
-          [1, 1],
-        ];
-        for (let i = 0; i < 4; i++) {
-          if (!imgs[i]) continue;
-          const [c2, r] = pos[i];
-          const ix = pad + c2 * (cw + gap);
-          const iy = headerH + r * (ch + gap);
-          drawGradedPhoto(ctx, imgs[i], ix, iy, cw, ch, 0, isExport);
-          ctx.strokeStyle = COLOR.border;
-          ctx.lineWidth = 1 * s;
-          ctx.strokeRect(ix, iy, cw, ch);
-        }
-      } else {
-        const iw = w - pad * 2;
-        const ih = (h - headerH - footerH - gap * (count - 1)) / count;
-        for (let i = 0; i < count; i++) {
-          if (!imgs[i]) continue;
-          const iy = headerH + i * (ih + gap);
-          drawGradedPhoto(ctx, imgs[i], pad, iy, iw, ih, 0, isExport);
-          ctx.strokeStyle = COLOR.border;
-          ctx.lineWidth = 1 * s;
-          ctx.strokeRect(pad, iy, iw, ih);
-        }
-      }
-
-      // Footer
-      const fy = h - footerH;
-      ctx.strokeStyle = COLOR.border;
-      ctx.lineWidth = 1.2 * s;
-      ctx.beginPath();
-      ctx.moveTo(pad, fy + 8 * s);
-      ctx.lineTo(w - pad, fy + 8 * s);
-      ctx.stroke();
-
-      const currentLoc = locationRef.current;
-      if (currentLoc) {
-        ctx.fillStyle = COLOR.accent;
-        ctx.font = `400 ${10.5 * s}px "Courier New", monospace`;
-        ctx.textAlign = 'left';
-        ctx.fillText(`⊕ ${currentLoc.toUpperCase()}`, pad, fy + 32 * s);
-      }
-
-      drawBarcode(ctx, w - pad - 80 * s, fy + 18 * s, 80 * s, 36 * s, COLOR.text);
-
-      drawHaloLunaWatermark(ctx, w, h - 16 * s, COLOR.accent, s);
-    },
-    [COLOR, layout]
+    []
   );
 
   // 7. 35mm Film Strip (Classic)
@@ -1946,87 +995,6 @@ export default function CanvasEditor({
     [layout]
   );
 
-  // 8. Y2K Windows 98 (Classic)
-  const drawY2K = useCallback(
-    async (
-      ctx: CanvasRenderingContext2D,
-      imgs: HTMLImageElement[],
-      w: number,
-      h: number,
-      s: number,
-      isExport: boolean = false,
-    ) => {
-      ctx.fillStyle = '#008080';
-      ctx.fillRect(0, 0, w, h);
-      const winPad = 18 * s;
-      const titleH = 32 * s;
-      const winW = w - winPad * 2;
-
-      ctx.fillStyle = '#D4D0C8';
-      ctx.fillRect(winPad, winPad, winW, h - winPad * 2);
-
-      const grad = ctx.createLinearGradient(winPad, winPad, winPad + winW, winPad + titleH);
-      grad.addColorStop(0, '#000080');
-      grad.addColorStop(1, '#1084D0');
-      ctx.fillStyle = grad;
-      ctx.fillRect(winPad, winPad, winW, titleH);
-
-      ctx.fillStyle = 'white';
-      ctx.font = `bold ${12 * s}px "Courier New", monospace`;
-      ctx.textAlign = 'left';
-      ctx.fillText('📷  PHOTOBOOTH.EXE', winPad + 8 * s, winPad + 21 * s);
-
-      const count = layout === 'strip4' ? 4 : layout === 'strip3' ? 3 : 4;
-      const cY = winPad + titleH + 8 * s;
-      const cP = 10 * s;
-      const imgArea = winW - cP * 2;
-
-      let imgY = cY + 28 * s;
-      if (layout === 'grid2x2') {
-        const hW = (imgArea - 8 * s) / 2;
-        const hH = hW * 0.75;
-        for (let i = 0; i < Math.min(4, imgs.length); i++) {
-          const c2 = i % 2;
-          const r = Math.floor(i / 2);
-          const ix = winPad + cP + c2 * (hW + 8 * s);
-          const iy = imgY + r * (hH + 8 * s);
-          ctx.fillStyle = '#888';
-          ctx.fillRect(ix - 2 * s, iy - 2 * s, hW + 4 * s, hH + 4 * s);
-          ctx.fillStyle = '#fff';
-          ctx.fillRect(ix - s, iy - s, hW + 2 * s, hH + 2 * s);
-          drawGradedPhoto(ctx, imgs[i], ix, iy, hW, hH, 0, isExport);
-        }
-      } else {
-        const iH = Math.floor((h - winPad * 2 - titleH - 75 * s - count * 6 * s) / count);
-        for (let i = 0; i < count; i++) {
-          if (!imgs[i]) continue;
-          ctx.fillStyle = '#888';
-          ctx.fillRect(winPad + cP - 2 * s, imgY - 2 * s, imgArea + 4 * s, iH + 4 * s);
-          ctx.fillStyle = '#fff';
-          ctx.fillRect(winPad + cP - s, imgY - s, imgArea + 2 * s, iH + 2 * s);
-          drawGradedPhoto(ctx, imgs[i], winPad + cP, imgY, imgArea, iH, 0, isExport);
-          imgY += iH + 6 * s;
-        }
-      }
-
-      // Taskbar
-      ctx.fillStyle = '#D4D0C8';
-      ctx.fillRect(0, h - 30 * s, w, 30 * s);
-      ctx.fillStyle = '#008000';
-      ctx.fillRect(3 * s, h - 27 * s, 65 * s, 24 * s);
-      ctx.fillStyle = 'white';
-      ctx.font = `bold ${11 * s}px "Courier New", monospace`;
-      ctx.textAlign = 'center';
-      ctx.fillText('▶ Start', 35 * s, h - 11 * s);
-
-      ctx.fillStyle = '#333';
-      ctx.font = `400 ${8.5 * s}px "Courier New", monospace`;
-      ctx.textAlign = 'right';
-      ctx.fillText(SIGNATURE, w - 8 * s, h - 11 * s);
-    },
-    [layout]
-  );
-
   // ═══════════════════════════════════════════════════════
   //  STICKER COMPOSITING ON HIGH-DPI CANVAS (EXPORT ONLY)
   // ═══════════════════════════════════════════════════════
@@ -2053,26 +1021,70 @@ export default function CanvasEditor({
   // ═══════════════════════════════════════════════════════
   //  NON-BLOCKING RENDER PIPELINE
   // ═══════════════════════════════════════════════════════
+  const burnGuestCaption = useCallback(
+    async (ctx: CanvasRenderingContext2D, w: number, h: number, s: number) => {
+      await loadCuteBirthdayFonts();
+      const name = birthdayNameRef.current;
+      const age = birthdayAgeRef.current;
+      if (!name && !age) return;
+
+      let centerY = h - Math.round(h * 0.075);
+      let scale = s;
+      let nameSize = 44 * s;
+      let ageSize = 26 * s;
+      let maxWidth = w * 0.84;
+
+      if (preset === 'birthdayCatPink') {
+        const scaleX = w / CAT_PINK_BASE_W;
+        const artH = CAT_PINK_ART_H * (h / CAT_PINK_BASE_H);
+        centerY = artH + (h - artH) / 2;
+        scale = scaleX;
+        nameSize = 96 * scaleX;
+        ageSize = 46 * scaleX;
+      } else if (preset === 'retroTerracotta') {
+        const scaleX = w / RETRO_BASE_W;
+        centerY = RETRO_CAPTION_Y * (h / RETRO_BASE_H);
+        scale = scaleX;
+        nameSize = 78 * scaleX;
+        ageSize = 40 * scaleX;
+        maxWidth = w * 0.88;
+      }
+
+      drawKoreanStickerCaption(
+        ctx,
+        name,
+        age,
+        w / 2,
+        centerY,
+        maxWidth,
+        scale,
+        '#FF69B4',
+        '#FF69B4',
+        nameSize,
+        ageSize,
+      );
+    },
+    [preset]
+  );
+
   const renderToCanvas = useCallback(
-    async (isExport: boolean = false): Promise<string | null> => {
-      const canvas = canvasRef.current;
-      if (!canvas || frames.length === 0) return null;
+    async (isExport: boolean = false): Promise<{ dataUrl: string; blob: Blob } | null> => {
+      if (frames.length === 0) return null;
 
       try {
         const { w, h, s } = getDimensions(isExport);
+        // Offscreen master — never share pixels with a concurrent preview pass
+        const canvas = document.createElement('canvas');
         canvas.width = w;
         canvas.height = h;
-
         const ctx = canvas.getContext('2d');
         if (!ctx) return null;
 
-        // If using 6-shot birthday cat pink preset and full set of captures is available, prioritize allFrames
         const effectiveFrames =
           preset === 'birthdayCatPink' && allFrames && allFrames.length >= 6
             ? allFrames
             : frames;
 
-        // Load all frames with safety timeout to prevent hanging
         const imgs = await Promise.all(
           effectiveFrames.map(
             (f) =>
@@ -2098,47 +1110,37 @@ export default function CanvasEditor({
           )
         );
 
-        // Render Chosen Preset
         switch (preset) {
           case 'birthdayCatPink':
             await drawBirthdayCatPink(ctx, imgs, w, h, s, isExport);
             break;
-          case 'birthday':
-            await drawCinemaTicketBirthday(ctx, imgs, w, h, s, isExport);
-            break;
-          case 'birthdayBow':
-            await drawPinkBowBirthday(ctx, imgs, w, h, s, isExport);
-            break;
-          case 'kitty':
-            await drawKitty(ctx, imgs, w, h, s, isExport);
-            break;
-          case 'cyberSparkle':
-            await drawCyberSparkle(ctx, imgs, w, h, s, isExport);
-            break;
-          case 'coquette':
-            await drawCoquette(ctx, imgs, w, h, s, isExport);
-            break;
-          case 'thermal':
-            await drawThermal(ctx, imgs, w, h, s, isExport);
+          case 'retroTerracotta':
+            await drawRetroTerracotta(ctx, imgs, w, h, s, isExport);
             break;
           case 'film35mm':
             await drawFilm(ctx, imgs, w, h, s, isExport);
             break;
-          case 'y2k':
-            await drawY2K(ctx, imgs, w, h, s, isExport);
-            break;
-          case 'editorial':
+          case 'birthday':
           default:
-            await drawEditorial(ctx, imgs, w, h, s, isExport);
+            await drawCinemaTicketBirthday(ctx, imgs, w, h, s, isExport);
             break;
         }
 
-        // Composite stickers onto canvas only for export (preview uses real-time DOM overlay)
         if (isExport) {
           await compositePlacedStickers(ctx, w, h);
         }
 
-        return canvas.toDataURL('image/png', isExport ? 0.98 : 0.85);
+        // Flatten caption into pixels FIRST — never snapshot before this returns
+        await burnGuestCaption(ctx, w, h, s);
+
+        const dataUrl = canvas.toDataURL('image/png');
+        const blob = await new Promise<Blob | null>((resolve) =>
+          canvas.toBlob(resolve, 'image/png')
+        );
+        if (!blob) return null;
+        lastExportBlobRef.current = isExport ? blob : lastExportBlobRef.current;
+
+        return { dataUrl, blob };
       } catch (err) {
         console.error('Non-blocking canvas render error:', err);
         return null;
@@ -2150,72 +1152,83 @@ export default function CanvasEditor({
       preset,
       getDimensions,
       drawBirthdayCatPink,
+      drawRetroTerracotta,
       drawCinemaTicketBirthday,
-      drawPinkBowBirthday,
-      drawKitty,
-      drawCyberSparkle,
-      drawCoquette,
-      drawThermal,
       drawFilm,
-      drawY2K,
-      drawEditorial,
       compositePlacedStickers,
+      burnGuestCaption,
     ]
   );
 
-  // Trigger preview render (downscaled, non-blocking)
-  const triggerRender = useCallback(async () => {
+  const triggerRender = useCallback(async (silent = false) => {
     if (isRenderingRef.current) return;
     isRenderingRef.current = true;
-    setRenderProgress(15);
+    if (!silent) setRenderProgress(15);
     try {
       await yieldToMain();
-      setRenderProgress(45);
-      const dataUrl = await renderToCanvas(false);
-      setRenderProgress(90);
+      if (!silent) setRenderProgress(45);
+      const result = await renderToCanvas(false);
+      if (!silent) setRenderProgress(90);
       await yieldToMain();
-      if (dataUrl) {
-        setPreviewUrl(dataUrl);
+      if (result?.dataUrl) {
+        setPreviewUrl(result.dataUrl);
+        if (!hasRenderedRef.current) {
+          playPrintSound(700);
+        }
         hasRenderedRef.current = true;
-        playPrintSound(700);
       }
     } catch (e) {
       console.error('triggerRender error:', e);
     } finally {
-      setRenderProgress(null);
+      if (!silent) setRenderProgress(null);
       isRenderingRef.current = false;
     }
   }, [renderToCanvas]);
 
-  // Auto-render preview once on mount or when preset, frameColor, layout, or birthday settings change
+  // Full preview only when the strip itself changes — never on each caption keystroke
   useEffect(() => {
     if (frames.length > 0) {
-      triggerRender();
+      triggerRender(false);
     }
-  }, [frames, preset, frameColor, layout, birthdayName, birthdayTheme, birthdayAge, birthdayPalette, triggerRender]);
+  }, [frames, preset, layout, birthdayPalette, triggerRender]);
 
-  // Helper to extract high-resolution export canvas blob
+  // Quiet caption refresh: keep the existing preview on screen while we redraw
+  useEffect(() => {
+    if (!hasRenderedRef.current) return;
+    const timer = setTimeout(() => {
+      void triggerRender(true);
+    }, 450);
+    return () => clearTimeout(timer);
+  }, [birthdayName, birthdayAge, triggerRender]);
+
+  const waitForRenderIdle = async () => {
+    let spins = 0;
+    while ((isRenderingRef.current || exportLockRef.current) && spins < 80) {
+      await new Promise((r) => setTimeout(r, 40));
+      spins += 1;
+    }
+  };
+
   const exportCanvasBlob = useCallback(async (): Promise<Blob | null> => {
     try {
-      await yieldToMain();
-      const highResDataUrl = await renderToCanvas(true);
-      if (!highResDataUrl) {
+      await waitForRenderIdle();
+      exportLockRef.current = true;
+      const result = await renderToCanvas(true);
+      if (!result?.blob) {
         console.error("ADMIN UPLOAD ERROR: renderToCanvas returned null");
         return null;
       }
-      const canvas = canvasRef.current;
-      if (!canvas) {
-        console.error("ADMIN UPLOAD ERROR: canvas element not found");
-        return null;
-      }
-      return await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+      lastExportBlobRef.current = result.blob;
+      return result.blob;
     } catch (err) {
       console.error("ADMIN UPLOAD ERROR: exportCanvasBlob failed", err);
       return null;
+    } finally {
+      exportLockRef.current = false;
     }
   }, [renderToCanvas]);
 
-  // 1. Initial Save: trigger ONCE when preview canvas is first rendered
+  // Initial cloud save once — caption sync happens on download / share, not per keystroke
   useEffect(() => {
     if (!previewUrl || initialSaveDoneRef.current) return;
     initialSaveDoneRef.current = true;
@@ -2252,37 +1265,32 @@ export default function CanvasEditor({
 
   // Download Handler (Full High-Resolution Export + Action Save to Supabase)
   const handleDownload = async () => {
-    if (isRenderingRef.current) return;
+    await waitForRenderIdle();
     isRenderingRef.current = true;
     setRenderProgress(15);
     try {
       await yieldToMain();
       setRenderProgress(45);
-      const dataUrl = await renderToCanvas(true);
+      const result = await renderToCanvas(true);
       setRenderProgress(95);
       await yieldToMain();
-      if (!dataUrl) {
+      if (!result) {
         console.error("ADMIN UPLOAD ERROR: Download render returned null");
         return;
       }
 
       const link = document.createElement('a');
       link.download = `haloluna-${preset}-${Date.now()}.png`;
-      link.href = dataUrl;
+      link.href = result.dataUrl;
       link.click();
 
-      // Action Save: Read CURRENT rendered canvas and update database session
-      const canvas = canvasRef.current;
-      if (canvas) {
-        const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
-        if (blob && blob.size > 0) {
-          console.log('[HaloLuna] Action Save: Updating session on download for preset', preset);
-          if (onAutoUpload) {
-            onAutoUpload(blob, preset, true);
-          } else {
-            savePhotoToSupabase(blob, preset, locationRef.current || 'HaloLuna Studio')
-              .catch((err) => console.error("ADMIN UPLOAD ERROR:", err));
-          }
+      if (result.blob.size > 0) {
+        console.log('[HaloLuna] Action Save: Updating session on download for preset', preset);
+        if (onAutoUpload) {
+          onAutoUpload(result.blob, preset, true);
+        } else {
+          savePhotoToSupabase(result.blob, preset, locationRef.current || 'HaloLuna Studio')
+            .catch((err) => console.error("ADMIN UPLOAD ERROR:", err));
         }
       }
     } catch (err) {
@@ -2295,22 +1303,22 @@ export default function CanvasEditor({
 
   // 9:16 Mobile Lockscreen Wallpaper Generator
   const handleMakeWallpaper = async () => {
-    if (isRenderingRef.current) return;
+    await waitForRenderIdle();
     isRenderingRef.current = true;
     setRenderProgress(15);
     try {
       await yieldToMain();
       setRenderProgress(35);
-      const stripDataUrl = await renderToCanvas(true);
+      const result = await renderToCanvas(true);
       setRenderProgress(70);
       await yieldToMain();
-      if (!stripDataUrl) return;
+      if (!result) return;
 
       const stripImg = await new Promise<HTMLImageElement>((resolve, reject) => {
         const img = new Image();
         img.onload = () => resolve(img);
         img.onerror = reject;
-        img.src = stripDataUrl;
+        img.src = result.dataUrl;
       });
 
       // Target Mobile Screen (9:16 ratio) - Standard high-res 1080 x 1920 px
@@ -2383,18 +1391,13 @@ export default function CanvasEditor({
       link.href = wallpaperUrl;
       link.click();
 
-      // Action Save: Read CURRENT rendered canvas and update database session
-      const canvas = canvasRef.current;
-      if (canvas) {
-        const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
-        if (blob && blob.size > 0) {
-          console.log('[HaloLuna] Action Save: Updating session on wallpaper export for preset', preset);
-          if (onAutoUpload) {
-            onAutoUpload(blob, preset, true);
-          } else {
-            savePhotoToSupabase(blob, preset, locationRef.current || 'HaloLuna Studio')
-              .catch((err) => console.error("ADMIN UPLOAD ERROR:", err));
-          }
+      if (result.blob.size > 0) {
+        console.log('[HaloLuna] Action Save: Updating session on wallpaper export for preset', preset);
+        if (onAutoUpload) {
+          onAutoUpload(result.blob, preset, true);
+        } else {
+          savePhotoToSupabase(result.blob, preset, locationRef.current || 'HaloLuna Studio')
+            .catch((err) => console.error("ADMIN UPLOAD ERROR:", err));
         }
       }
     } catch (err) {
@@ -2407,24 +1410,17 @@ export default function CanvasEditor({
 
   // Share Handler (Full High-Resolution Export)
   const handleShareClick = async () => {
-    if (isRenderingRef.current) return;
+    await waitForRenderIdle();
     isRenderingRef.current = true;
     setRenderProgress(15);
     try {
       await yieldToMain();
       setRenderProgress(45);
-      const dataUrl = await renderToCanvas(true);
+      const result = await renderToCanvas(true);
       setRenderProgress(95);
       await yieldToMain();
-      if (!dataUrl) return;
-
-      const canvas = canvasRef.current;
-      if (canvas) {
-        const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
-        if (blob) {
-          onShare(blob, preset);
-        }
-      }
+      if (!result) return;
+      onShare(result.blob, preset);
     } catch (err) {
       console.error('Share export failed:', err);
     } finally {
@@ -2523,7 +1519,7 @@ export default function CanvasEditor({
               </p>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {CUTE_PRESETS.map((p) => (
+              {FRAME_PRESETS.map((p) => (
                 <button
                   key={p.id}
                   onClick={() => handlePresetSelect(p.id)}
@@ -2549,41 +1545,40 @@ export default function CanvasEditor({
             </div>
           </div>
 
-          {/* Birthday Customization Panel (when Cinema Ticket, Pink Bow, or Birthday Cat Pink is selected) */}
-          {(preset === 'birthday' || preset === 'birthdayBow' || preset === 'birthdayCatPink') && (
-            <div className="p-4 bg-gradient-to-br from-amber-50/70 via-white to-pink-50/70 rounded-xl border border-amber-200/90 shadow-sm flex flex-col gap-3.5">
+          {(preset === 'birthday' || preset === 'birthdayCatPink' || preset === 'retroTerracotta' || preset === 'film35mm') && (
+            <form
+              onSubmit={(e) => e.preventDefault()}
+              className="p-4 bg-gradient-to-br from-amber-50/70 via-white to-pink-50/70 rounded-xl border border-amber-200/90 shadow-sm flex flex-col gap-3.5"
+            >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
                   <Sparkles size={14} className="text-amber-500" />
                   <span className="text-[11px] font-bold text-zinc-900 uppercase tracking-wider">
-                    {preset === 'birthdayCatPink'
-                      ? 'Birthday Cat Settings'
-                      : preset === 'birthday'
-                      ? 'Editorial Birthday Settings'
-                      : 'Pink Bow Settings'}
+                    Sticker caption (burned into the file)
                   </span>
                 </div>
                 <span className="text-[9.5px] font-mono font-bold text-amber-800 bg-amber-100/90 px-2 py-0.5 rounded-full border border-amber-200">
-                  {preset === 'birthdayCatPink' ? 'Custom 6-Photo PNG' : 'Korean Studio Redesign'}
+                  Name + age at the bottom
                 </span>
               </div>
 
-              {/* Custom Birthday Title / Name */}
               <div>
                 <label className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest block mb-1.5">
-                  Birthday Header Title / Name
+                  Name (printed at the bottom)
                 </label>
                 <input
                   type="text"
+                  name="guest-name"
+                  autoComplete="off"
                   value={birthdayNameInput}
                   onChange={(e) => setBirthdayNameInput(e.target.value)}
-                  placeholder="e.g. SARAH'S DAY"
+                  placeholder="e.g. Andi"
                   maxLength={32}
                   className="w-full text-xs font-semibold border border-zinc-300 rounded-lg px-3 py-2 bg-white outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition-all shadow-xs"
                 />
                 <div className="flex flex-wrap items-center gap-1.5 mt-2">
                   <span className="text-[10px] text-zinc-400 font-mono">Quick:</span>
-                  {["SARAH'S DAY", "HAPPY BIRTHDAY ANDI", "Hollie's Birthday", "Our Special Day"].map((sug) => (
+                  {['Andi', 'Hollie', 'Luna', 'Us'].map((sug) => (
                     <button
                       key={sug}
                       type="button"
@@ -2600,24 +1595,25 @@ export default function CanvasEditor({
                 </div>
               </div>
 
-              {/* Birthday Age Input */}
               <div>
                 <label className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest block mb-1.5">
-                  Age Number (e.g. 21, 24)
+                  Age (printed under the name)
                 </label>
                 <input
-                  type="number"
+                  type="text"
+                  name="guest-age"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  autoComplete="off"
                   value={birthdayAge}
-                  onChange={(e) => setBirthdayAge(e.target.value)}
+                  onChange={(e) => setBirthdayAge(e.target.value.replace(/\D/g, '').slice(0, 3))}
                   placeholder="e.g. 21"
-                  min={1}
-                  max={120}
                   className="w-full text-xs font-semibold border border-zinc-300 rounded-lg px-3 py-2 bg-white outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition-all shadow-xs"
                 />
               </div>
 
               {/* Aesthetic Solid Color Palette Selector (hidden for custom PNG frame) */}
-              {preset !== 'birthdayCatPink' && (
+              {preset === 'birthday' && (
                 <div>
                   <label className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest block mb-1.5">
                     Aesthetic Color Palette
@@ -2649,60 +1645,7 @@ export default function CanvasEditor({
                   </div>
                 </div>
               )}
-            </div>
-          )}
-
-          {/* Classic Studio Themes */}
-          <div>
-            <div className="flex items-center gap-1.5 mb-2.5">
-              <Layers size={13} className="text-zinc-500" />
-              <p className="text-[11px] font-bold text-zinc-700 uppercase tracking-widest">
-                Classic Studio
-              </p>
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              {CLASSIC_PRESETS.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => handlePresetSelect(p.id)}
-                  className={`p-2.5 text-center rounded-xl border transition-all ${
-                    preset === p.id
-                      ? 'bg-zinc-900 text-white border-zinc-900 shadow-md'
-                      : 'bg-white text-zinc-800 border-zinc-200/90 hover:border-zinc-400 hover:bg-zinc-50/80 shadow-sm'
-                  }`}
-                >
-                  <span className="text-lg block mb-1">{p.emoji}</span>
-                  <p className="text-xs font-semibold truncate">{p.label}</p>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Frame Color Picker (Editorial Preset) */}
-          {preset === 'editorial' && (
-            <div className="p-3 bg-white rounded-xl border border-zinc-200 shadow-sm">
-              <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest mb-2">
-                Editorial Frame Tone: {COLOR.label}
-              </p>
-              <div className="flex gap-2">
-                {FRAME_COLORS.map((c) => (
-                  <button
-                    key={c.id}
-                    onClick={() => {
-                      setFrameColor(c.id);
-                      setPreviewUrl(null);
-                    }}
-                    title={c.label}
-                    className={`flex-1 h-9 rounded-lg border-2 transition-all ${
-                      frameColor === c.id
-                        ? 'border-zinc-900 scale-105 shadow-md'
-                        : 'border-zinc-200 hover:border-zinc-400'
-                    }`}
-                    style={{ backgroundColor: c.bg }}
-                  />
-                ))}
-              </div>
-            </div>
+            </form>
           )}
 
           {/* Editable Custom Metadata */}
@@ -2836,7 +1779,7 @@ export default function CanvasEditor({
       )}
 
       {/* ── PROGRESS & DEVELOPING INDICATOR ── */}
-      {renderProgress !== null && (
+      {renderProgress !== null && !previewUrl && (
         <div className="w-full bg-white border border-zinc-200 rounded-2xl p-6 shadow-sm flex flex-col items-center justify-center text-center">
           <div className="w-10 h-10 border-2 border-zinc-300 border-t-zinc-900 rounded-full animate-spin mb-3" />
           <p className="text-xs font-bold tracking-widest uppercase text-zinc-800">
@@ -2855,7 +1798,7 @@ export default function CanvasEditor({
       )}
 
       {/* ── PHOTO STRIP PREVIEW WITH DRAGGABLE STICKERS ── */}
-      {previewUrl && renderProgress === null && (
+      {previewUrl && (
         <div className="flex flex-col gap-4 items-center w-full">
           <div
             ref={previewWrapRef}
@@ -2963,7 +1906,7 @@ export default function CanvasEditor({
 
           <div className="flex items-center justify-between w-full pt-2">
             <button
-              onClick={triggerRender}
+              onClick={() => triggerRender()}
               className="text-xs text-zinc-500 hover:text-zinc-900 underline underline-offset-4 transition-colors"
             >
               Re-render with changes
@@ -2981,7 +1924,7 @@ export default function CanvasEditor({
       {/* Render Strip Button when preview not yet rendered */}
       {!previewUrl && renderProgress === null && (
         <button
-          onClick={triggerRender}
+          onClick={() => triggerRender()}
           disabled={frames.length === 0}
           className="w-full btn-neo-dark flex items-center justify-center gap-2 py-4 text-sm font-bold rounded-xl shadow-md disabled:opacity-40 disabled:cursor-not-allowed"
         >

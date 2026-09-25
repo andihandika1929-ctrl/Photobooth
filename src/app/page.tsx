@@ -1,300 +1,105 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import CameraViewport, {
-  type FilterName,
-  COUNTDOWN_OPTIONS,
-  type CountdownDuration,
-  STUDIO_FILTERS,
-} from '@/components/CameraViewport';
-import CanvasEditor, { type LayoutType } from '@/components/CanvasEditor';
-import LoadingScreen from '@/components/LoadingScreen';
-import ShareModal from '@/components/ShareModal';
-import { initAudio } from '@/components/AudioEngine';
+import { ArrowRight, Camera, Check, Sparkles, Timer, Wand2 } from 'lucide-react';
 import {
-  Camera,
-  Grid,
-  AlignJustify,
-  Layers,
-  Sparkles,
-  Timer,
-  Check,
-  ArrowRight,
-  ArrowUp,
-  ArrowDown,
-  RotateCcw,
-  X,
-  Heart,
-} from 'lucide-react';
-import { savePhotoToSupabase } from '@/utils/supabasePhotoPipeline';
+  FRAME_THEMES,
+  persistFrameTheme,
+  slotsForLayout,
+  type FrameTheme,
+} from '@/lib/frames';
 
-type AppStep = 'capture' | 'select' | 'edit';
-
-interface CapturedFrame {
-  dataUrl: string;
-  filter: FilterName;
-}
-
-const STUDIO_SHOT_COUNT = 6;
-const TARGET_SELECTION_COUNT = 4;
-
-const LAYOUTS: { id: LayoutType; label: string; icon: React.ReactNode; frames: number }[] = [
-  { id: 'strip4',  label: '4-Frame Strip', icon: <Layers size={14} />,       frames: 4 },
-  { id: 'strip3',  label: '3-Frame Strip', icon: <AlignJustify size={14} />, frames: 3 },
-  { id: 'grid2x2', label: '2×2 Grid',      icon: <Grid size={14} />,         frames: 4 },
-  { id: 'grid2x3', label: '6-Shot (2×3)',  icon: <Grid size={14} />,         frames: 6 },
+const STEPS = [
+  { icon: <Sparkles size={13} />, label: 'Pick your frame' },
+  { icon: <Camera size={13} />, label: 'Strike six poses' },
+  { icon: <Wand2 size={13} />, label: 'Style & share' },
 ];
 
-export default function HomePage() {
-  const router = useRouter();
-  const [appLoaded, setAppLoaded] = useState(false);
-  const [step, setStep] = useState<AppStep>('capture');
-  const [layout, setLayout] = useState<LayoutType>('strip4');
-  const [countdownDuration, setCountdownDuration] = useState<CountdownDuration>(3);
-  const [capturedFrames, setCapturedFrames] = useState<CapturedFrame[]>([]);
-  const [selectedIndices, setSelectedIndices] = useState<number[]>([0, 1, 2, 3]);
-  const [shareUrl, setShareUrl] = useState<string | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [uploadToast, setUploadToast] = useState<string | null>(null);
-  const [showShareModal, setShowShareModal] = useState(false);
-  const hasUploadedRef = useRef(false);
-  const lastUploadedTemplateRef = useRef<string | null>(null);
-  const sessionPhotoIdRef = useRef<string | null>(null);
-  const sessionStoragePathRef = useRef<string | null>(null);
-
-  // Secret admin access via Ctrl+Shift+A / Cmd+Shift+A shortcut
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
-        e.preventDefault();
-        router.push('/admin');
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [router]);
-
-  // Target count of photos to select based on layout
-  const targetCount = layout === 'strip3' ? 3 : layout === 'grid2x3' ? 6 : TARGET_SELECTION_COUNT;
-
-  // Handle capture of each shot in the 6-shot sequence
-  const handleCapture = useCallback(
-    (dataUrl: string, filter: FilterName) => {
-      initAudio();
-      setCapturedFrames((prev) => {
-        const next = [...prev, { dataUrl, filter }];
-        if (next.length >= STUDIO_SHOT_COUNT) {
-          // All 6 photos captured! Pre-select up to targetCount and transition to Selection screen
-          setSelectedIndices([0, 1, 2, 3, 4, 5].slice(0, targetCount));
-          setTimeout(() => setStep('select'), 350);
-        }
-        return next;
-      });
-    },
-    [targetCount]
-  );
-
-  // Toggle selection of photo thumbnail in "Pick 4 out of 6"
-  const toggleSelectPhoto = useCallback(
-    (photoIndex: number) => {
-      setSelectedIndices((prev) => {
-        if (prev.includes(photoIndex)) {
-          // Deselect
-          return prev.filter((i) => i !== photoIndex);
-        } else {
-          // If already reached max, replace the last slot
-          if (prev.length >= targetCount) {
-            return [...prev.slice(0, targetCount - 1), photoIndex];
-          }
-          // Otherwise append
-          return [...prev, photoIndex];
-        }
-      });
-    },
-    [targetCount]
-  );
-
-  // Reordering slots in photostrip preview
-  const moveSlotUp = useCallback((slotIndex: number) => {
-    if (slotIndex <= 0) return;
-    setSelectedIndices((prev) => {
-      const next = [...prev];
-      const temp = next[slotIndex];
-      next[slotIndex] = next[slotIndex - 1];
-      next[slotIndex - 1] = temp;
-      return next;
-    });
-  }, []);
-
-  const moveSlotDown = useCallback((slotIndex: number) => {
-    setSelectedIndices((prev) => {
-      if (slotIndex >= prev.length - 1) return prev;
-      const next = [...prev];
-      const temp = next[slotIndex];
-      next[slotIndex] = next[slotIndex + 1];
-      next[slotIndex + 1] = temp;
-      return next;
-    });
-  }, []);
-
-  const removeSlot = useCallback((slotIndex: number) => {
-    setSelectedIndices((prev) => prev.filter((_, i) => i !== slotIndex));
-  }, []);
-
-  const handleRetakeSingle = useCallback((index: number) => {
-    hasUploadedRef.current = false;
-    lastUploadedTemplateRef.current = null;
-    sessionPhotoIdRef.current = null;
-    sessionStoragePathRef.current = null;
-    setCapturedFrames((prev) => prev.filter((_, i) => i !== index));
-    setSelectedIndices((prev) => prev.filter((i) => i !== index));
-    setStep('capture');
-  }, []);
-
-  const handleReset = useCallback(() => {
-    hasUploadedRef.current = false;
-    lastUploadedTemplateRef.current = null;
-    sessionPhotoIdRef.current = null;
-    sessionStoragePathRef.current = null;
-    setCapturedFrames([]);
-    setSelectedIndices([]);
-    setStep('capture');
-    setShareUrl(null);
-    setShowShareModal(false);
-  }, []);
-
-  // Automatic 2-way upload trigger: Initial save on render + Action save on download/wallpaper
-  const handleAutoUpload = useCallback(
-    async (blob: Blob, templateType: string, isActionSave: boolean = false) => {
-      console.log("[HaloLuna] Starting upload for frame:", templateType, "isActionSave:", isActionSave, "size:", blob?.size);
-
-      // If initial save already succeeded for this template and this is not an action save, skip redundant re-upload
-      if (!isActionSave && lastUploadedTemplateRef.current === templateType && hasUploadedRef.current) {
-        console.log("Already uploaded initial template", templateType, "in this session, skipping duplicate");
-        return;
-      }
-
-      hasUploadedRef.current = true;
-      lastUploadedTemplateRef.current = templateType;
-      setIsUploading(true);
-      setUploadError(null);
-
-      try {
-        const result = await savePhotoToSupabase(
-          blob,
-          templateType,
-          'HaloLuna Studio',
-          sessionPhotoIdRef.current || undefined,
-          sessionStoragePathRef.current || undefined
-        );
-        console.log("[HaloLuna] Upload result:", result);
-        if (result.success && result.id) {
-          sessionPhotoIdRef.current = result.id;
-          if (result.storage_path) {
-            sessionStoragePathRef.current = result.storage_path;
-          }
-          setShareUrl(`${window.location.origin}/result/${result.id}`);
-          if (isActionSave) {
-            setUploadToast('Photostrip synced to cloud!');
-            setTimeout(() => setUploadToast(null), 3000);
-          }
-        } else {
-          const errMsg = result.error || 'Upload returned unsuccessful';
-          console.error("ADMIN UPLOAD ERROR:", errMsg);
-          setUploadError('Cloud sync issue. Your local export is complete.');
-          if (!sessionPhotoIdRef.current) {
-            hasUploadedRef.current = false;
-            lastUploadedTemplateRef.current = null;
-          }
-        }
-      } catch (err) {
-        console.error("ADMIN UPLOAD ERROR:", err);
-        setUploadError('Cloud sync issue. Your local export is complete.');
-        if (!sessionPhotoIdRef.current) {
-          hasUploadedRef.current = false;
-          lastUploadedTemplateRef.current = null;
-        }
-      } finally {
-        setIsUploading(false);
-      }
-    },
-    []
-  );
-
-  // Manual share button trigger: uploads to Supabase (or reuses existing session)
-  const handleShare = useCallback(
-    async (blob: Blob, templateType: string) => {
-      setShowShareModal(true);
-
-      // If already uploaded and share link exists, reuse it without duplicate upload
-      if (shareUrl && sessionPhotoIdRef.current) return;
-
-      if (!isUploading) {
-        hasUploadedRef.current = true;
-        setIsUploading(true);
-        try {
-          const result = await savePhotoToSupabase(
-            blob,
-            templateType,
-            'HaloLuna Studio',
-            sessionPhotoIdRef.current || undefined,
-            sessionStoragePathRef.current || undefined
-          );
-          if (result.success && result.id) {
-            sessionPhotoIdRef.current = result.id;
-            if (result.storage_path) {
-              sessionStoragePathRef.current = result.storage_path;
-            }
-            setShareUrl(`${window.location.origin}/result/${result.id}`);
-          } else {
-            if (!sessionPhotoIdRef.current) {
-              hasUploadedRef.current = false;
-            }
-          }
-        } catch (err) {
-          if (!sessionPhotoIdRef.current) {
-            hasUploadedRef.current = false;
-          }
-          console.error("Supabase Save Error:", err);
-        } finally {
-          setIsUploading(false);
-        }
-      }
-    },
-    [shareUrl, isUploading]
-  );
-
-  const handleAppComplete = useCallback(() => {
-    setAppLoaded(true);
-  }, []);
-
-  // Filtered frames based on selected indices for the final CanvasEditor
-  const activeEditorFrames = selectedIndices
-    .map((idx) => capturedFrames[idx])
-    .filter(Boolean);
-
-  if (!appLoaded) {
-    return <LoadingScreen onComplete={handleAppComplete} />;
-  }
+/** Miniature paper strip that previews how the chosen frame will print. */
+function FramePreview({ theme }: { theme: FrameTheme }) {
+  const slots = slotsForLayout(theme.layout);
+  const isGrid = theme.layout.startsWith('grid');
 
   return (
-    <div className="min-h-screen w-full flex flex-col items-center justify-between bg-[#FDFBF7] text-zinc-900 relative">
-      {/* Subtle Dot-Matrix Texture */}
+    <div
+      className="relative w-[104px] rounded-2xl p-2.5 pb-7 shadow-[0_10px_24px_rgba(26,26,26,0.10)] transition-transform duration-500 ease-out group-hover:-rotate-3 group-hover:scale-[1.06]"
+      style={{ backgroundColor: theme.paper }}
+    >
+      <div className={isGrid ? 'grid grid-cols-2 gap-1' : 'flex flex-col gap-1'}>
+        {Array.from({ length: slots }).map((_, i) => (
+          <div
+            key={i}
+            className="rounded-[3px]"
+            style={{
+              aspectRatio: isGrid ? '1 / 1' : '4 / 3',
+              backgroundImage: `linear-gradient(140deg, ${theme.accent}, ${theme.wash})`,
+              opacity: 0.55 + i * 0.09,
+            }}
+          />
+        ))}
+      </div>
+      <span
+        className="absolute inset-x-0 bottom-2 text-center font-['Caveat'] font-bold leading-none"
+        style={{ color: theme.ink, fontSize: 12 }}
+      >
+        HaloLuna
+      </span>
+    </div>
+  );
+}
+
+export default function LandingPage() {
+  const router = useRouter();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [isEntering, setIsEntering] = useState(false);
+  const enterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const selectedTheme = FRAME_THEMES.find((theme) => theme.id === selectedId) ?? null;
+
+  useEffect(() => {
+    FRAME_THEMES.forEach((theme) => router.prefetch(`/booth?frame=${theme.id}`));
+    return () => {
+      if (enterTimerRef.current) clearTimeout(enterTimerRef.current);
+    };
+  }, [router]);
+
+  const chooseFrame = useCallback((themeId: string) => {
+    setSelectedId(themeId);
+    persistFrameTheme(themeId);
+  }, []);
+
+  const enterBooth = useCallback(
+    (themeId: string) => {
+      chooseFrame(themeId);
+      setIsEntering(true);
+      enterTimerRef.current = setTimeout(() => {
+        router.push(`/booth?frame=${themeId}`);
+      }, 280);
+    },
+    [chooseFrame, router]
+  );
+
+  return (
+    <div className="min-h-screen w-full flex flex-col bg-[#FDFBF7] text-zinc-900 relative">
+      <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
+        <div className="absolute -top-32 -left-24 w-[420px] h-[420px] rounded-full bg-[#FBE6EE] blur-[110px] opacity-60" />
+        <div className="absolute top-1/3 -right-32 w-[460px] h-[460px] rounded-full bg-[#E6EEFB] blur-[120px] opacity-55" />
+        <div className="absolute -bottom-40 left-1/3 w-[400px] h-[400px] rounded-full bg-[#F4EEDF] blur-[110px] opacity-70" />
+      </div>
+
       <div
-        className="fixed inset-0 pointer-events-none opacity-[0.14] z-0"
+        className="fixed inset-0 pointer-events-none opacity-[0.12] z-0"
         style={{
           backgroundImage: 'radial-gradient(circle, #C4B99A 1.2px, transparent 1.2px)',
           backgroundSize: '24px 24px',
         }}
       />
 
-      {/* ── HaloLuna Studio Header ── */}
-      <header className="w-full border-b border-[#E8DFCE] bg-[#FDFBF7]/90 backdrop-blur-md sticky top-0 z-30 shadow-xs">
-        <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
+      <header className="w-full border-b border-[#E8DFCE]/80 bg-[#FDFBF7]/80 backdrop-blur-md sticky top-0 z-30">
+        <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 bg-zinc-900 rounded-lg flex items-center justify-center text-white shadow-sm">
+            <div className="w-8 h-8 bg-zinc-900 rounded-2xl flex items-center justify-center text-white shadow-sm">
               <Camera size={16} />
             </div>
             <div>
@@ -302,7 +107,7 @@ export default function HomePage() {
                 <h1 className="font-extrabold text-sm tracking-widest uppercase text-zinc-900 leading-none">
                   HaloLuna
                 </h1>
-                <span className="text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-200">
+                <span className="hidden sm:inline text-[9px] font-bold tracking-wider px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-200">
                   gethaloluna.com
                 </span>
               </div>
@@ -312,460 +117,142 @@ export default function HomePage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5 text-[11px] font-mono text-zinc-500">
-              <Sparkles size={12} className="text-amber-500" />
-              <span className="hidden sm:inline font-semibold">HALOLUNA KOREAN STRIP</span>
-            </div>
+          <div className="flex items-center gap-1.5 text-[11px] font-mono text-zinc-500">
+            <Timer size={12} className="text-amber-500" />
+            <span className="hidden sm:inline font-semibold">2 MIN SESSION</span>
           </div>
         </div>
       </header>
 
-      {/* ── Main Container ── */}
-      <main className="w-full max-w-5xl mx-auto px-4 py-6 relative z-10 flex-1 flex flex-col">
-        {/* Step Indicator */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 pb-4 border-b border-[#E8DFCE]/80">
-          <div className="flex items-center gap-2 flex-wrap">
-            <button
-              onClick={() => setStep('capture')}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold transition-all ${
-                step === 'capture'
-                  ? 'bg-zinc-900 text-white shadow-sm'
-                  : 'bg-white text-zinc-600 border border-zinc-200 hover:border-zinc-400'
-              }`}
-            >
-              <span className="w-4 h-4 rounded-full bg-white/20 text-[10px] flex items-center justify-center">
-                1
-              </span>
-              <span>CAPTURE 6 SHOTS</span>
-            </button>
+      <main className="w-full max-w-5xl mx-auto px-4 sm:px-6 relative z-10 flex-1 pb-36 sm:pb-32">
+        <section className="pt-10 sm:pt-16 pb-8 sm:pb-12 text-center flex flex-col items-center">
+          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/80 border border-[#E8DFCE] text-[10px] font-bold uppercase tracking-[0.18em] text-zinc-600 shadow-xs">
+            <Sparkles size={11} className="text-amber-500" />
+            Step 1 of 3 — Choose a frame
+          </span>
 
-            <span className="text-zinc-300 font-bold">→</span>
+          <h2 className="font-['Playfair_Display'] text-4xl sm:text-6xl lg:text-7xl font-semibold tracking-tight mt-5 leading-[1.05]">
+            HaloLuna
+            <span className="block italic text-zinc-500">Studio</span>
+          </h2>
+          <p className="mt-3 font-['Caveat'] text-2xl sm:text-3xl font-bold text-rose-400 -rotate-1">
+            pose pretty, print forever
+          </p>
 
-            <button
-              onClick={() => {
-                if (capturedFrames.length > 0) setStep('select');
-              }}
-              disabled={capturedFrames.length === 0}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold transition-all ${
-                step === 'select'
-                  ? 'bg-zinc-900 text-white shadow-sm'
-                  : 'bg-white text-zinc-600 border border-zinc-200 hover:border-zinc-400 disabled:opacity-40 disabled:cursor-not-allowed'
-              }`}
-            >
-              <span className="w-4 h-4 rounded-full bg-white/20 text-[10px] flex items-center justify-center">
-                2
-              </span>
-              <span>PICK YOUR BEST {targetCount}</span>
-            </button>
+          <p className="mt-4 max-w-lg text-sm sm:text-base text-zinc-600 leading-relaxed px-2">
+            Six shots, four keepers, one strip you&apos;ll actually print. Choose the frame
+            you want to pose for and we&apos;ll set the studio up for you.
+          </p>
 
-            <span className="text-zinc-300 font-bold">→</span>
-
-            <button
-              onClick={() => {
-                if (selectedIndices.length === targetCount) setStep('edit');
-              }}
-              disabled={selectedIndices.length !== targetCount}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold transition-all ${
-                step === 'edit'
-                  ? 'bg-zinc-900 text-white shadow-sm'
-                  : 'bg-white text-zinc-600 border border-zinc-200 hover:border-zinc-400 disabled:opacity-40 disabled:cursor-not-allowed'
-              }`}
-            >
-              <span className="w-4 h-4 rounded-full bg-white/20 text-[10px] flex items-center justify-center">
-                3
-              </span>
-              <span>STYLE &amp; EXPORT</span>
-            </button>
-          </div>
-
-          {/* Frame Progress Count */}
-          <div className="flex items-center gap-1.5">
-            <span className="text-[11px] font-mono font-semibold text-zinc-500 mr-1">
-              {step === 'capture'
-                ? `Shot ${capturedFrames.length}/${STUDIO_SHOT_COUNT}`
-                : `${selectedIndices.length}/${targetCount} selected`}
-            </span>
-            {Array.from({ length: step === 'capture' ? STUDIO_SHOT_COUNT : targetCount }).map((_, i) => (
+          <div className="mt-7 flex flex-wrap items-center justify-center gap-2">
+            {STEPS.map((step, i) => (
               <div
-                key={i}
-                className={`w-2.5 h-2.5 rounded-full transition-all duration-300 ${
-                  step === 'capture'
-                    ? i < capturedFrames.length
-                      ? 'bg-zinc-900 scale-110 shadow-xs'
-                      : 'bg-zinc-200'
-                    : i < selectedIndices.length
-                    ? 'bg-amber-500 scale-110 shadow-xs'
-                    : 'bg-zinc-200'
-                }`}
-              />
+                key={step.label}
+                className="flex items-center gap-2 pl-2 pr-3.5 py-1.5 rounded-full bg-white/70 border border-[#E8DFCE] text-[11px] font-semibold text-zinc-700 shadow-xs backdrop-blur-xs"
+              >
+                <span className="w-5 h-5 rounded-full bg-zinc-900 text-white flex items-center justify-center shrink-0">
+                  {step.icon}
+                </span>
+                <span>{step.label}</span>
+                {i < STEPS.length - 1 && (
+                  <span className="hidden sm:inline text-zinc-300 -mr-1.5">→</span>
+                )}
+              </div>
             ))}
           </div>
-        </div>
+        </section>
 
-        {/* ── STEP 1: CAPTURE 6 SHOTS (GUIDED GETANGIE STYLE) ── */}
-        {step === 'capture' && (
-          <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-8 items-start flex-1">
-            <div className="flex flex-col gap-5 w-full">
-              {/* Settings Card: Strip Layout & Countdown Timer */}
-              <div className="bg-white/80 backdrop-blur-xs p-3.5 sm:p-4 rounded-2xl border border-[#E8DFCE] shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div className="flex-1">
-                  <p className="text-[11px] font-bold text-zinc-600 uppercase tracking-widest mb-2 flex items-center gap-1.5">
-                    Target Photostrip Layout
-                  </p>
-                  <div className="flex gap-2">
-                    {LAYOUTS.map((l) => (
-                      <button
-                        key={l.id}
-                        onClick={() => setLayout(l.id)}
-                        className={`pill-tab flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl border text-xs font-bold transition-all ${
-                          layout === l.id
-                            ? 'bg-zinc-900 text-white border-zinc-900 shadow-sm'
-                            : 'bg-[#FAF7F0] text-zinc-700 border-[#E8DFCE] hover:border-zinc-400 hover:bg-zinc-50 shadow-xs'
-                        }`}
-                      >
-                        {l.icon}
-                        <span>{l.label}</span>
-                      </button>
-                    ))}
+        <section>
+          <div className="flex items-end justify-between gap-4 mb-5 pb-3 border-b border-[#E8DFCE]/80">
+            <div>
+              <h3 className="text-base sm:text-lg font-bold tracking-tight">Today&apos;s frames</h3>
+              <p className="text-xs text-zinc-500 mt-0.5">
+                Tap a frame, then enter the booth. You can still restyle everything later.
+              </p>
+            </div>
+            <span className="hidden sm:block text-[11px] font-mono text-zinc-400 shrink-0">
+              {FRAME_THEMES.length} AVAILABLE
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8 max-w-5xl mx-auto items-stretch">
+            {FRAME_THEMES.map((theme) => {
+              const isSelected = selectedId === theme.id;
+              return (
+                <button
+                  key={theme.id}
+                  type="button"
+                  onClick={() => chooseFrame(theme.id)}
+                  onDoubleClick={() => enterBooth(theme.id)}
+                  aria-pressed={isSelected}
+                  className={`group relative flex flex-col h-full w-full text-left rounded-3xl border bg-white/80 backdrop-blur-xs p-5 overflow-hidden transition-all duration-300 ease-out cursor-pointer ${
+                    isSelected
+                      ? 'border-zinc-900 shadow-[0_16px_38px_rgba(26,26,26,0.15)] -translate-y-1 ring-2 ring-zinc-900/10'
+                      : 'border-[#E8DFCE] shadow-xs hover:-translate-y-1 hover:border-zinc-300 hover:shadow-[0_14px_32px_rgba(26,26,26,0.10)]'
+                  }`}
+                >
+                  <div
+                    className="absolute -top-16 -right-12 w-44 h-44 rounded-full blur-2xl opacity-70 transition-opacity duration-300 group-hover:opacity-100"
+                    style={{ backgroundColor: theme.wash }}
+                  />
+
+                  {theme.badge && (
+                    <span className="absolute top-4 left-4 z-10 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-200">
+                      {theme.badge}
+                    </span>
+                  )}
+
+                  <span
+                    className={`absolute top-4 right-4 z-10 w-7 h-7 rounded-full flex items-center justify-center transition-all duration-300 ${
+                      isSelected
+                        ? 'bg-zinc-900 text-white scale-100 shadow-md'
+                        : 'bg-white/90 text-zinc-300 border border-zinc-200 scale-90 group-hover:text-zinc-500'
+                    }`}
+                  >
+                    <Check size={13} strokeWidth={3} />
+                  </span>
+
+                  <div className="relative z-[1] flex justify-center items-center h-[220px] sm:h-[240px] py-6">
+                    <FramePreview theme={theme} />
                   </div>
-                </div>
 
-                <div>
-                  <p className="text-[11px] font-bold text-zinc-600 uppercase tracking-widest mb-2 flex items-center gap-1.5">
-                    <Timer size={13} className="text-zinc-500" />
-                    <span>Countdown Timer</span>
-                  </p>
-                  <div className="flex items-center gap-1.5 bg-[#FAF7F0] p-1 rounded-xl border border-[#E8DFCE]">
-                    {COUNTDOWN_OPTIONS.map((sec) => (
-                      <button
-                        key={sec}
-                        onClick={() => setCountdownDuration(sec)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                          countdownDuration === sec
-                            ? 'bg-zinc-900 text-white shadow-sm'
-                            : 'text-zinc-600 hover:text-zinc-900 hover:bg-white/80'
+                  <div className="relative z-[1] mt-auto flex flex-col min-h-[148px]">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base leading-none">{theme.emoji}</span>
+                      <h4 className="font-bold tracking-tight text-[15px]">{theme.name}</h4>
+                    </div>
+                    <p className="text-[11px] font-mono uppercase tracking-widest text-zinc-400 mt-1">
+                      {theme.tagline}
+                    </p>
+                    <p className="text-xs text-zinc-600 leading-relaxed mt-2.5 min-h-[2.5rem]">
+                      {theme.description}
+                    </p>
+
+                    <div className="flex items-center justify-between gap-2 mt-4 pt-3 border-t border-[#E8DFCE]/80">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                        {slotsForLayout(theme.layout)} cuts
+                      </span>
+                      <span
+                        className={`flex items-center gap-1 text-[11px] font-bold transition-all duration-300 ${
+                          isSelected
+                            ? 'text-zinc-900'
+                            : 'text-zinc-400 group-hover:text-zinc-900 group-hover:translate-x-0.5'
                         }`}
                       >
-                        {sec}s
-                      </button>
-                    ))}
+                        {isSelected ? 'Selected' : 'Choose'}
+                        <ArrowRight size={12} />
+                      </span>
+                    </div>
                   </div>
-                </div>
-              </div>
-
-              {/* Live Camera Viewport */}
-              <CameraViewport
-                onCapture={handleCapture}
-                isCapturing={capturedFrames.length < STUDIO_SHOT_COUNT}
-                capturedCount={capturedFrames.length}
-                totalFrames={STUDIO_SHOT_COUNT}
-                countdownDuration={countdownDuration}
-                onCountdownDurationChange={setCountdownDuration}
-                capturedThumbnails={capturedFrames.map((f) => f.dataUrl)}
-                onRetakeLast={() => setCapturedFrames((prev) => prev.slice(0, -1))}
-              />
-            </div>
-
-            {/* Right Column: Studio Reel of 6 Snaps */}
-            <div className="flex flex-col gap-4 w-full">
-              <div className="flex items-center justify-between">
-                <p className="text-[11px] font-bold text-zinc-700 uppercase tracking-widest flex items-center gap-1.5">
-                  <span>6 Studio Shots</span>
-                  <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-amber-100 text-amber-900">
-                    GetAngie Flow
-                  </span>
-                </p>
-                <span className="text-[11px] font-mono text-zinc-500">
-                  {capturedFrames.length === STUDIO_SHOT_COUNT ? '✓ All 6 Snapped' : `${capturedFrames.length}/${STUDIO_SHOT_COUNT}`}
-                </span>
-              </div>
-
-              {/* 6 Film Reel Slots */}
-              <div className="grid grid-cols-2 gap-2.5">
-                {Array.from({ length: STUDIO_SHOT_COUNT }).map((_, i) => {
-                  const frame = capturedFrames[i];
-                  return (
-                    <div key={i} className="transition-all duration-300">
-                      {frame ? (
-                        <div className="group relative rounded-lg bg-white p-1.5 pb-4 border border-[#E8DFCE] shadow-sm hover:shadow-md transition-all">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={frame.dataUrl}
-                            alt={`Shot ${i + 1}`}
-                            className="w-full aspect-square object-cover rounded-sm"
-                          />
-                          <div className="absolute inset-1.5 bottom-5 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100 rounded-sm">
-                            <button
-                              onClick={() => handleRetakeSingle(i)}
-                              className="bg-white text-zinc-900 text-[10px] font-bold px-2 py-1 rounded shadow border active:scale-95"
-                            >
-                              Retake
-                            </button>
-                          </div>
-                          <div className="mt-1 flex items-center justify-between text-[9px] font-mono text-zinc-500 px-1">
-                            <span>#{i + 1}</span>
-                            <span className="truncate max-w-[80px]">
-                              {STUDIO_FILTERS.find((f) => f.id === frame.filter)?.label || frame.filter}
-                            </span>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="rounded-lg bg-white/70 p-1.5 pb-4 border border-dashed border-[#DCD3C2] shadow-xs">
-                          <div className="aspect-square bg-[#F7F3EA] rounded-sm flex flex-col items-center justify-center text-zinc-400">
-                            <Camera size={16} className="opacity-40 mb-1" />
-                            <span className="text-[9px] font-mono font-medium">
-                              SHOT {i + 1}
-                            </span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Transition CTA when all 6 frames ready */}
-              {capturedFrames.length === STUDIO_SHOT_COUNT && (
-                <button
-                  onClick={() => setStep('select')}
-                  className="w-full btn-neo-dark flex items-center justify-center gap-2 py-3.5 text-xs font-bold uppercase tracking-widest rounded-xl shadow-md mt-2 transition-transform active:scale-[0.98]"
-                >
-                  <Check size={14} />
-                  Proceed to Pick Your Best {targetCount} →
                 </button>
-              )}
-            </div>
+              );
+            })}
           </div>
-        )}
-
-        {/* ── STEP 2: "PICK YOUR BEST 4" SELECTION SCREEN ── */}
-        {step === 'select' && (
-          <div className="flex flex-col gap-6 w-full flex-1">
-            {/* Guidance Banner */}
-            <div className="bg-white p-5 rounded-2xl border border-[#E8DFCE] shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <div className="flex items-center gap-2">
-                  <h2 className="text-base font-bold tracking-tight text-zinc-900">
-                    Select Your {targetCount} Best Shots
-                  </h2>
-                  <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
-                    {selectedIndices.length}/{targetCount} Selected
-                  </span>
-                </div>
-                <p className="text-xs text-zinc-600 mt-1">
-                  Choose your {targetCount} favorite photos from your studio session. Tap thumbnails to select, or reorder slots on the right.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  onClick={() => setStep('capture')}
-                  className="btn-neo text-xs py-2 px-3 flex items-center gap-1.5 rounded-xl"
-                >
-                  <RotateCcw size={12} />
-                  <span>Retake Studio Shots</span>
-                </button>
-                <button
-                  onClick={() => {
-                    if (selectedIndices.length === targetCount) setStep('edit');
-                  }}
-                  disabled={selectedIndices.length !== targetCount}
-                  className="btn-neo-dark text-xs py-2 px-4 flex items-center gap-1.5 rounded-xl disabled:opacity-40 disabled:cursor-not-allowed shadow-md"
-                >
-                  <span>Continue to Style &amp; Export</span>
-                  <ArrowRight size={13} />
-                </button>
-              </div>
-            </div>
-
-            {/* Selection Grid & Photostrip Assembly Preview */}
-            <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-8 items-start">
-              {/* 6 Studio Photo Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3.5">
-                {capturedFrames.map((frame, index) => {
-                  const isSelected = selectedIndices.includes(index);
-                  const orderIndex = selectedIndices.indexOf(index);
-                  return (
-                    <div
-                      key={index}
-                      onClick={() => toggleSelectPhoto(index)}
-                      className={`group relative rounded-2xl bg-white p-2 border-2 transition-all cursor-pointer select-none overflow-hidden ${
-                        isSelected
-                          ? 'border-zinc-900 shadow-lg ring-2 ring-zinc-900/10 scale-[1.02]'
-                          : 'border-zinc-200 hover:border-zinc-400 hover:shadow-md'
-                      }`}
-                    >
-                      <div className="relative aspect-square rounded-xl overflow-hidden bg-black/5">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={frame.dataUrl}
-                          alt={`Studio Shot ${index + 1}`}
-                          className="w-full h-full object-cover"
-                        />
-
-                        {/* Order Badge or Add Circle */}
-                        <div className="absolute top-2 right-2 z-10">
-                          {isSelected ? (
-                            <span className="w-7 h-7 rounded-full bg-zinc-900 text-white font-extrabold text-xs flex items-center justify-center shadow-lg border border-white">
-                              {orderIndex + 1}
-                            </span>
-                          ) : (
-                            <span className="w-7 h-7 rounded-full bg-white/90 text-zinc-600 font-bold text-xs flex items-center justify-center shadow border border-zinc-200 group-hover:bg-zinc-900 group-hover:text-white transition-colors">
-                              +
-                            </span>
-                          )}
-                        </div>
-
-                        {/* Shot number tag */}
-                        <div className="absolute bottom-2 left-2 bg-black/60 backdrop-blur-xs text-white text-[9.5px] font-mono px-2 py-0.5 rounded-md">
-                          Shot #{index + 1}
-                        </div>
-                      </div>
-
-                      <div className="mt-2 flex items-center justify-between px-1">
-                        <span className="text-[10px] font-bold text-zinc-700">
-                          {isSelected ? `Slot ${orderIndex + 1} of ${targetCount}` : 'Tap to select'}
-                        </span>
-                        <span className="text-[9.5px] font-mono text-zinc-400 uppercase">
-                          {STUDIO_FILTERS.find((f) => f.id === frame.filter)?.label || frame.filter}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Photostrip Assembly Preview & Slot Reordering */}
-              <div className="bg-[#FAF7F0] border border-[#E8DFCE] rounded-2xl p-5 shadow-sm flex flex-col gap-4">
-                <div className="flex items-center justify-between pb-3 border-b border-[#E8DFCE]">
-                  <p className="text-xs font-bold text-zinc-800 uppercase tracking-widest flex items-center gap-1.5">
-                    <Layers size={13} className="text-zinc-600" />
-                    <span>Strip Order ({selectedIndices.length}/{targetCount})</span>
-                  </p>
-                  <span className="text-[10px] font-mono text-zinc-500">
-                    {layout === 'grid2x2' ? '2×2 Grid' : `${targetCount}-Cut Strip`}
-                  </span>
-                </div>
-
-                {/* 4 Ordered Slots */}
-                <div className="flex flex-col gap-2.5">
-                  {Array.from({ length: targetCount }).map((_, slotIdx) => {
-                    const chosenFrameIndex = selectedIndices[slotIdx];
-                    const frame = chosenFrameIndex !== undefined ? capturedFrames[chosenFrameIndex] : null;
-
-                    return (
-                      <div
-                        key={slotIdx}
-                        className={`rounded-xl p-2.5 border transition-all ${
-                          frame
-                            ? 'bg-white border-zinc-300 shadow-xs flex items-center gap-3'
-                            : 'bg-white/50 border-dashed border-zinc-300 flex items-center justify-center py-4'
-                        }`}
-                      >
-                        {frame ? (
-                          <>
-                            {/* Number badge */}
-                            <span className="w-6 h-6 rounded-full bg-zinc-900 text-white font-bold text-[11px] flex items-center justify-center shrink-0">
-                              {slotIdx + 1}
-                            </span>
-
-                            {/* Thumbnail */}
-                            <div className="w-12 h-12 rounded-lg overflow-hidden shrink-0 bg-black/10">
-                              {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img
-                                src={frame.dataUrl}
-                                alt={`Slot ${slotIdx + 1}`}
-                                className="w-full h-full object-cover"
-                              />
-                            </div>
-
-                            {/* Info */}
-                            <div className="flex-1 min-w-0">
-                              <p className="text-xs font-bold text-zinc-800 leading-tight">
-                                Shot #{chosenFrameIndex + 1}
-                              </p>
-                              <p className="text-[10px] font-mono text-zinc-400 truncate">
-                                {STUDIO_FILTERS.find((f) => f.id === frame.filter)?.label || frame.filter}
-                              </p>
-                            </div>
-
-                            {/* Reordering / Swap Controls */}
-                            <div className="flex items-center gap-1 shrink-0">
-                              <button
-                                onClick={() => moveSlotUp(slotIdx)}
-                                disabled={slotIdx === 0}
-                                className="w-7 h-7 rounded-lg bg-zinc-100 hover:bg-zinc-200 disabled:opacity-30 disabled:hover:bg-zinc-100 text-zinc-700 flex items-center justify-center transition-colors"
-                                title="Move Slot Up"
-                              >
-                                <ArrowUp size={12} />
-                              </button>
-                              <button
-                                onClick={() => moveSlotDown(slotIdx)}
-                                disabled={slotIdx === selectedIndices.length - 1}
-                                className="w-7 h-7 rounded-lg bg-zinc-100 hover:bg-zinc-200 disabled:opacity-30 disabled:hover:bg-zinc-100 text-zinc-700 flex items-center justify-center transition-colors"
-                                title="Move Slot Down"
-                              >
-                                <ArrowDown size={12} />
-                              </button>
-                              <button
-                                onClick={() => removeSlot(slotIdx)}
-                                className="w-7 h-7 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 flex items-center justify-center transition-colors ml-0.5"
-                                title="Remove from Photostrip"
-                              >
-                                <X size={12} />
-                              </button>
-                            </div>
-                          </>
-                        ) : (
-                          <p className="text-[11px] font-mono text-zinc-400">
-                            + Tap an unselected shot to fill Slot {slotIdx + 1}
-                          </p>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Primary CTA */}
-                <button
-                  onClick={() => {
-                    if (selectedIndices.length === targetCount) setStep('edit');
-                  }}
-                  disabled={selectedIndices.length !== targetCount}
-                  className="w-full btn-neo-dark flex items-center justify-center gap-2 py-3.5 text-xs font-bold uppercase tracking-widest rounded-xl shadow-md transition-all disabled:opacity-40 disabled:cursor-not-allowed mt-2"
-                >
-                  <Sparkles size={14} />
-                  <span>
-                    {selectedIndices.length === targetCount
-                      ? 'Continue to Style & Stickers →'
-                      : `Pick ${targetCount - selectedIndices.length} More Shot${targetCount - selectedIndices.length > 1 ? 's' : ''}`}
-                  </span>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ── STEP 3: STYLE & EXPORT (CANVAS ENGINE) ── */}
-        {step === 'edit' && (
-          <div className="bg-[#FAF7F0] border border-[#E8DFCE] rounded-2xl p-5 sm:p-6 shadow-sm w-full">
-            <CanvasEditor
-              frames={activeEditorFrames}
-              allFrames={capturedFrames}
-              layout={layout}
-              initialPreset={layout === 'grid2x3' ? 'birthdayCatPink' : undefined}
-              onAutoUpload={handleAutoUpload}
-              onShare={handleShare}
-              onReset={handleReset}
-            />
-          </div>
-        )}
+        </section>
       </main>
 
-      {/* ── HaloLuna Studio Footer ── */}
-      <footer className="w-full border-t border-[#E8DFCE] py-5 px-4 bg-[#FDFBF7]/90 text-center relative z-20">
-        <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
+      <footer className="w-full border-t border-[#E8DFCE] py-5 px-4 bg-[#FDFBF7]/90 text-center relative z-10">
+        <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
           <p className="text-[11px] font-mono text-zinc-500">
             © 2026 HALOLUNA • GETHALOLUNA.COM • KOREAN AESTHETIC STUDIO
           </p>
@@ -783,34 +270,50 @@ export default function HomePage() {
         </div>
       </footer>
 
-      {/* Share / QR Modal */}
-      {showShareModal && (
-        <ShareModal
-          shareUrl={shareUrl}
-          isUploading={isUploading}
-          onClose={() => setShowShareModal(false)}
-        />
-      )}
-
-      {/* Visual Feedback Toasts for Cloud Sync */}
-      {uploadToast && (
-        <div className="fixed bottom-6 right-6 z-50 bg-zinc-900 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-2xl border border-white/20 flex items-center gap-2 animate-bounce">
-          <span className="text-emerald-400">✓</span>
-          <span>{uploadToast}</span>
-        </div>
-      )}
-
-      {uploadError && (
-        <div className="fixed bottom-6 right-6 z-50 bg-red-900/90 backdrop-blur-md text-white text-xs px-4 py-3 rounded-xl shadow-2xl border border-red-500/30 flex items-center gap-2.5">
-          <span>⚠️ {uploadError}</span>
-          <button
-            onClick={() => setUploadError(null)}
-            className="text-white/60 hover:text-white font-bold ml-1"
+      <div
+        className={`fixed inset-x-0 bottom-0 z-40 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 transition-all duration-500 ease-out ${
+          selectedTheme
+            ? 'translate-y-0 opacity-100'
+            : 'translate-y-full opacity-0 pointer-events-none'
+        }`}
+      >
+        <div className="max-w-2xl mx-auto flex items-center gap-3 rounded-3xl border border-[#E8DFCE] bg-white/90 backdrop-blur-lg shadow-[0_-4px_32px_rgba(26,26,26,0.12)] p-3 pl-4">
+          <span
+            className="w-10 h-10 rounded-2xl flex items-center justify-center text-lg shrink-0"
+            style={{ backgroundColor: selectedTheme?.wash ?? '#F3EEE4' }}
           >
-            ✕
+            {selectedTheme?.emoji}
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-zinc-400">
+              Your frame
+            </p>
+            <p className="text-sm font-bold tracking-tight truncate">{selectedTheme?.name}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => selectedTheme && enterBooth(selectedTheme.id)}
+            disabled={!selectedTheme || isEntering}
+            className="flex items-center gap-2 rounded-2xl bg-zinc-900 text-white px-4 sm:px-6 py-3 text-xs font-bold uppercase tracking-widest shadow-md transition-transform duration-150 hover:scale-[1.02] active:scale-95 disabled:opacity-60 shrink-0"
+          >
+            <Camera size={14} />
+            <span>{isEntering ? 'Opening…' : 'Enter booth'}</span>
           </button>
         </div>
-      )}
+      </div>
+
+      <div
+        className={`fixed inset-0 z-50 bg-[#FDFBF7] flex items-center justify-center transition-opacity duration-300 ${
+          isEntering ? 'opacity-100' : 'opacity-0 pointer-events-none'
+        }`}
+      >
+        <div className="flex flex-col items-center gap-3">
+          <Camera size={22} className="text-zinc-900 animate-pulse" />
+          <p className="text-[11px] font-mono uppercase tracking-[0.22em] text-zinc-500">
+            Warming up the studio
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
