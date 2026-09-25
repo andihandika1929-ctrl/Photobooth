@@ -95,6 +95,15 @@ const STICKER_DEFS = [
   { name: 'Smile',  src: '/sticker/Smile.png'  },
 ];
 
+const BIRTHDAY_PALETTES: Record<string, { bg: string; fg: string; accent: string; muted: string }> = {
+  burgundy: { bg: '#6B1D2F', fg: '#F5E6E8', accent: '#E8B4B8', muted: '#C4888E' },
+  mocca:    { bg: '#4A3528', fg: '#F0E8DF', accent: '#C9A882', muted: '#A68562' },
+  sage:     { bg: '#7C8B6A', fg: '#F3F5EE', accent: '#D4DBC4', muted: '#B0BA9A' },
+  pink:     { bg: '#E8B4B8', fg: '#4A1522', accent: '#BE185D', muted: '#9E1452' },
+  ivory:    { bg: '#F7F4EB', fg: '#2A2826', accent: '#8A7560', muted: '#7D776D' },
+  charcoal: { bg: '#1C1C1E', fg: '#E8DFCE', accent: '#E2B874', muted: '#9E968B' },
+};
+
 const SIGNATURE = 'DIRECTED BY ANDI HANDIKA • 2026';
 
 // ─── Utilities ────────────────────────────────────────────
@@ -190,6 +199,34 @@ function getNoisePattern(ctx: CanvasRenderingContext2D): CanvasPattern | null {
 }
 
 // Hardware-accelerated Korean studio & film preset rendering (grain applied only on export)
+// Object-fit: cover center-crop helper — preserves aspect ratio, no face distortion
+function drawImageCover(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  dx: number,
+  dy: number,
+  dw: number,
+  dh: number,
+) {
+  const imgAspect = img.naturalWidth / img.naturalHeight;
+  const dstAspect = dw / dh;
+  let sx: number, sy: number, sWidth: number, sHeight: number;
+  if (imgAspect > dstAspect) {
+    // Image is wider than destination — crop left/right
+    sHeight = img.naturalHeight;
+    sWidth = sHeight * dstAspect;
+    sx = (img.naturalWidth - sWidth) / 2;
+    sy = 0;
+  } else {
+    // Image is taller than destination — crop top/bottom
+    sWidth = img.naturalWidth;
+    sHeight = sWidth / dstAspect;
+    sx = 0;
+    sy = (img.naturalHeight - sHeight) / 2;
+  }
+  ctx.drawImage(img, sx, sy, sWidth, sHeight, dx, dy, dw, dh);
+}
+
 function drawGradedPhoto(
   ctx: CanvasRenderingContext2D,
   img: HTMLImageElement,
@@ -214,7 +251,7 @@ function drawGradedPhoto(
   } else {
     ctx.filter = 'none';
   }
-  ctx.drawImage(img, dx, dy, dw, dh);
+  drawImageCover(ctx, img, dx, dy, dw, dh);
   ctx.filter = 'none';
 
   // Apply procedural film grain only when requested (export mode)
@@ -256,6 +293,8 @@ export default function CanvasEditor({
   const [birthdayNameInput, setBirthdayNameInput] = useState("Hollie's Birthday");
   const [birthdayName, setBirthdayName] = useState("Hollie's Birthday");
   const [birthdayTheme, setBirthdayTheme] = useState<'cream' | 'black'>('cream');
+  const [birthdayAge, setBirthdayAge] = useState('');
+  const [birthdayPalette, setBirthdayPalette] = useState<'burgundy' | 'mocca' | 'sage' | 'pink' | 'ivory' | 'charcoal'>('ivory');
   const [renderProgress, setRenderProgress] = useState<number | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [placedStickers, setPlacedStickers] = useState<PlacedSticker[]>([]);
@@ -281,10 +320,14 @@ export default function CanvasEditor({
   const nowPlayingRef = useRef(nowPlaying);
   const birthdayNameRef = useRef(birthdayName);
   const birthdayThemeRef = useRef(birthdayTheme);
+  const birthdayAgeRef = useRef(birthdayAge);
+  const birthdayPaletteRef = useRef(birthdayPalette);
   locationRef.current = location;
   nowPlayingRef.current = nowPlaying;
   birthdayNameRef.current = birthdayName;
   birthdayThemeRef.current = birthdayTheme;
+  birthdayAgeRef.current = birthdayAge;
+  birthdayPaletteRef.current = birthdayPalette;
 
   const COLOR = FRAME_COLORS.find((c) => c.id === frameColor)!;
 
@@ -362,15 +405,15 @@ export default function CanvasEditor({
   const getDimensions = useCallback(
     (isExport: boolean = false) => {
       if (isExport) {
-        const s = 2; // 2x high-resolution canvas export
-        if (layout === 'grid2x2') return { w: 1000 * s, h: 1000 * s, s };
-        if (layout === 'strip4') return { w: 520 * s, h: 1900 * s, s };
-        return { w: 520 * s, h: 1540 * s, s }; // strip3
+        // High-DPI print-ready: 1200×3600 base (300 DPI strip), 1200×1200 grid
+        if (layout === 'grid2x2') return { w: 1200, h: 1200, s: 1.2 };
+        if (layout === 'strip4') return { w: 1200, h: 3600, s: 2.31 };
+        return { w: 1200, h: 2800, s: 2.31 }; // strip3
       } else {
-        // Downscaled interactive preview canvas
+        // Downscaled interactive preview canvas — comfortable for screen
         if (layout === 'grid2x2') return { w: 400, h: 400, s: 0.4 };
         if (layout === 'strip4') return { w: 390, h: 1425, s: 0.75 };
-        return { w: 390, h: 1155, s: 0.75 }; // strip3
+        return { w: 390, h: 1100, s: 0.75 }; // strip3
       }
     },
     [layout]
@@ -398,12 +441,13 @@ export default function CanvasEditor({
         }
       }
 
-      const isBlack = birthdayThemeRef.current === 'black';
-      const bg = isBlack ? '#141416' : '#FAF7EE';
-      const fg = isBlack ? '#E8DFCE' : '#2A2826';
-      const muted = isBlack ? '#9E968B' : '#7D776D';
-      const borderCol = isBlack ? '#2E2D2A' : '#E8DFCE';
-      const accentGold = isBlack ? '#E2B874' : '#B85D3B';
+      const palette = BIRTHDAY_PALETTES[birthdayPaletteRef.current] ?? BIRTHDAY_PALETTES.ivory;
+      const bg = palette.bg;
+      const fg = palette.fg;
+      const muted = palette.muted;
+      const accentGold = palette.accent;
+      const borderCol = palette.accent + '55';
+      const ageText = birthdayAgeRef.current ? `✦  AGE ${birthdayAgeRef.current}  ✦` : '✦  CELEBRATING SPECIAL MOMENTS  ✦';
 
       // Dimensions & ticket notch setup
       const headerH = 155 * s;
@@ -442,7 +486,7 @@ export default function CanvasEditor({
       // Clean horizontal row of circular negative cutouts / perforated dots dividing header & frames
       const dotR = 2.2 * s;
       const dotGap = 12 * s;
-      ctx.fillStyle = isBlack ? '#282725' : '#E2D9C5';
+      ctx.fillStyle = muted;
       for (let px = notchR + 14 * s; px < w - notchR - 14 * s; px += dotGap) {
         ctx.beginPath();
         ctx.arc(px, notchY, dotR, 0, Math.PI * 2);
@@ -479,8 +523,8 @@ export default function CanvasEditor({
       ctx.fillText(fmtCinemaDate(), w / 2, 112 * s);
 
       ctx.font = `600 ${7 * s}px Inter, sans-serif`;
-      ctx.fillStyle = isBlack ? '#B5ABA0' : '#8A847A';
-      ctx.fillText('✦  CELEBRATING SPECIAL MOMENTS  ✦', w / 2, 128 * s);
+      ctx.fillStyle = muted;
+      ctx.fillText(ageText, w / 2, 128 * s);
 
       // ── Crisp Photo Frames ──
       const pad = 24 * s;
@@ -571,7 +615,7 @@ export default function CanvasEditor({
       // ── Cinema Ticket Barcode & Serial Footer ──
       const barW = 140 * s;
       const barH = 14 * s;
-      drawBarcode(ctx, w / 2 - barW / 2, h - 35 * s, barW, barH, isBlack ? '#5A564F' : '#B0A798');
+      drawBarcode(ctx, w / 2 - barW / 2, h - 35 * s, barW, barH, muted);
 
       ctx.fillStyle = muted;
       ctx.font = `600 ${7.5 * s}px "Courier New", monospace`;
@@ -601,8 +645,13 @@ export default function CanvasEditor({
         }
       }
 
-      // Soft ballet cream background
-      ctx.fillStyle = '#FFF6F8';
+      // Palette-aware background
+      const pal = BIRTHDAY_PALETTES[birthdayPaletteRef.current] ?? BIRTHDAY_PALETTES.pink;
+      const bowBg = pal.bg;
+      const bowFg = pal.fg;
+      const bowAccent = pal.accent;
+      const bowMuted = pal.muted;
+      ctx.fillStyle = bowBg;
       ctx.fillRect(0, 0, w, h);
 
       // Delicate outer double lace border
@@ -729,19 +778,20 @@ export default function CanvasEditor({
 
       // Header Typography
       // Bold modern caps "HAPPY BIRTHDAY"
-      ctx.fillStyle = '#831843';
+      ctx.fillStyle = bowFg;
       ctx.font = `700 ${19 * s}px "Playfair Display", Georgia, serif`;
       ctx.textAlign = 'center';
       ctx.fillText('HAPPY BIRTHDAY', w / 2, 54 * s);
 
       // Paired with romantic cursive script accent
       const title = birthdayNameRef.current || "Hollie's Birthday";
-      ctx.fillStyle = '#BE185D';
+      ctx.fillStyle = bowAccent;
       ctx.font = `italic 400 ${29 * s}px "Pinyon Script", "Playfair Display", cursive`;
-      ctx.fillText(`♡ ${title} ♡`, w / 2, 85 * s);
+      const ageLabel = birthdayAgeRef.current ? ` • ${birthdayAgeRef.current}` : '';
+      ctx.fillText(`♡ ${title}${ageLabel} ♡`, w / 2, 85 * s);
 
       // Subtitle
-      ctx.fillStyle = '#DB2777';
+      ctx.fillStyle = bowMuted;
       ctx.font = `600 ${8 * s}px Inter, sans-serif`;
       ctx.fillText('✦  A BEAUTIFUL DAY TO CELEBRATE YOU  ✦', w / 2, 102 * s);
 
@@ -1849,7 +1899,7 @@ export default function CanvasEditor({
     if (frames.length > 0) {
       triggerRender();
     }
-  }, [frames, preset, frameColor, layout, birthdayName, birthdayTheme, triggerRender]);
+  }, [frames, preset, frameColor, layout, birthdayName, birthdayTheme, birthdayAge, birthdayPalette, triggerRender]);
 
   // Re-render when preset or frameColor changes
   const handlePresetSelect = (newPreset: FramePreset) => {
@@ -2078,6 +2128,53 @@ export default function CanvasEditor({
                       }`}
                     >
                       {sug}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Birthday Age Input */}
+              <div>
+                <label className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest block mb-1.5">
+                  Age (optional)
+                </label>
+                <input
+                  type="number"
+                  value={birthdayAge}
+                  onChange={(e) => setBirthdayAge(e.target.value)}
+                  placeholder="e.g. 21"
+                  min={1}
+                  max={120}
+                  className="w-full text-xs font-semibold border border-zinc-300 rounded-lg px-3 py-2 bg-white outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition-all shadow-xs"
+                />
+              </div>
+
+              {/* Color Palette Selector */}
+              <div>
+                <label className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest block mb-1.5">
+                  Color Palette
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {([
+                    { id: 'ivory',    label: 'Cream',    color: '#F7F4EB', text: '#2A2826' },
+                    { id: 'pink',     label: 'Pink',     color: '#E8B4B8', text: '#4A1522' },
+                    { id: 'burgundy', label: 'Burgundy', color: '#6B1D2F', text: '#F5E6E8' },
+                    { id: 'mocca',    label: 'Mocca',    color: '#4A3528', text: '#F0E8DF' },
+                    { id: 'sage',     label: 'Sage',     color: '#7C8B6A', text: '#F3F5EE' },
+                    { id: 'charcoal', label: 'Charcoal', color: '#1C1C1E', text: '#E8DFCE' },
+                  ] as const).map((pal) => (
+                    <button
+                      key={pal.id}
+                      type="button"
+                      onClick={() => setBirthdayPalette(pal.id)}
+                      className={`p-2 rounded-lg border-2 flex flex-col items-center justify-center gap-1 text-[9.5px] font-bold transition-all ${
+                        birthdayPalette === pal.id
+                          ? 'border-zinc-900 shadow-md scale-[1.04]'
+                          : 'border-zinc-200 hover:border-zinc-400'
+                      }`}
+                      style={{ backgroundColor: pal.color, color: pal.text }}
+                    >
+                      {pal.label}
                     </button>
                   ))}
                 </div>

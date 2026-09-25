@@ -92,6 +92,13 @@ export function getFilterCss(filterId?: FilterName): string {
   return STUDIO_FILTERS[0].css;
 }
 
+const POSE_GUIDES = [
+  'Pose 1: Senyum Manis 😊',
+  'Pose 2: Peace Sign by Cheek ✌️',
+  'Pose 3: Cheek Heart 🫶',
+  'Pose 4: Candid Tertawa 😂',
+];
+
 interface CameraViewportProps {
   onCapture: (imageDataUrl: string, filter: FilterName) => void;
   isCapturing: boolean;
@@ -99,6 +106,8 @@ interface CameraViewportProps {
   totalFrames: number;
   countdownDuration?: CountdownDuration;
   onCountdownDurationChange?: (duration: CountdownDuration) => void;
+  capturedThumbnails?: string[];
+  onRetakeLast?: () => void;
 }
 
 export default function CameraViewport({
@@ -108,6 +117,8 @@ export default function CameraViewport({
   totalFrames,
   countdownDuration = 5,
   onCountdownDurationChange,
+  capturedThumbnails = [],
+  onRetakeLast,
 }: CameraViewportProps) {
   const videoRef    = useRef<HTMLVideoElement>(null);
   const canvasRef   = useRef<HTMLCanvasElement>(null);
@@ -123,6 +134,7 @@ export default function CameraViewport({
   const [isMirrored,   setIsMirrored]   = useState(true);
   const [isLoading,    setIsLoading]    = useState(true);
   const [countKey,     setCountKey]     = useState(0); // forces re-render for animation reset
+  const [poseState,    setPoseState]    = useState<'idle' | 'posing'>('idle'); // 'posing' = waiting for user to click Next
 
   const transitionTimerRef = useRef<NodeJS.Timeout | null>(null);
   const lastCapturedCountRef = useRef(capturedCount);
@@ -238,20 +250,20 @@ export default function CameraViewport({
     }, 1000);
   }, [countdown, isCapturing, countdownDuration, captureFrame]);
 
-  // Auto-transition countdown between frames
+  // After each captured shot: pause and show pose guide instead of auto-advancing
   useEffect(() => {
     if (capturedCount > lastCapturedCountRef.current && capturedCount < totalFrames && isCapturing) {
-      if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
-      transitionTimerRef.current = setTimeout(() => {
-        startCountdown();
-      }, 1500);
+      setPoseState('posing');
+    }
+    if (capturedCount === 0) {
+      setPoseState('idle');
     }
     lastCapturedCountRef.current = capturedCount;
 
     return () => {
       if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
     };
-  }, [capturedCount, totalFrames, isCapturing, startCountdown]);
+  }, [capturedCount, totalFrames, isCapturing]);
 
   const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -486,6 +498,69 @@ export default function CameraViewport({
         <div className="mx-auto h-1.5 w-32 bg-[#B0A890] rounded-b-sm" />
       </div>
 
+      {/* Shot Tracker Thumbnails */}
+      {capturedThumbnails.length > 0 && (
+        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-1">
+          {Array.from({ length: totalFrames }).map((_, i) => {
+            const thumb = capturedThumbnails[i];
+            const isCurrent = i === capturedThumbnails.length && isCapturing;
+            return (
+              <div
+                key={i}
+                className={`shrink-0 w-14 h-14 rounded-lg overflow-hidden border-2 transition-all ${
+                  thumb
+                    ? 'border-amber-400 shadow-md shadow-amber-400/30'
+                    : isCurrent
+                    ? 'border-white/60 border-dashed bg-white/5'
+                    : 'border-white/10 bg-white/5'
+                }`}
+              >
+                {thumb ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={thumb} alt={`Shot ${i + 1}`} className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-[10px] font-mono text-white/30">
+                    {i + 1}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Pose Guide + Next/Retake actions when in posing state */}
+      {poseState === 'posing' && isCapturing && countdown === null && (
+        <div className="w-full flex flex-col gap-2.5 p-3.5 bg-white/10 rounded-2xl border border-white/15 backdrop-blur-sm">
+          <p className="text-center text-white/90 text-xs font-bold uppercase tracking-widest">
+            📸 Shot {capturedCount}/{totalFrames} captured!
+          </p>
+          <p className="text-center text-amber-300 text-sm font-semibold">
+            {POSE_GUIDES[capturedCount] ?? `Pose ${capturedCount + 1}: Ekspresikan Dirimu!`}
+          </p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => {
+                if (onRetakeLast) onRetakeLast();
+                setPoseState('idle');
+              }}
+              className="flex-1 py-2.5 rounded-xl border border-white/25 text-white/80 text-xs font-bold hover:bg-white/10 transition-all"
+            >
+              🔄 Ulangi Foto Ini
+            </button>
+            <button
+              onClick={() => {
+                setPoseState('idle');
+                startCountdown();
+              }}
+              className="flex-1 py-2.5 rounded-xl bg-white text-zinc-900 text-xs font-bold shadow-md hover:bg-amber-50 transition-all"
+            >
+              ➡️ Lanjut Foto Berikutnya
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Shutter button */}
       <button
         onClick={() => {
@@ -493,19 +568,22 @@ export default function CameraViewport({
             clearTimeout(transitionTimerRef.current);
             transitionTimerRef.current = null;
           }
+          setPoseState('idle');
           startCountdown();
         }}
-        disabled={!isCapturing || countdown !== null}
+        disabled={!isCapturing || countdown !== null || poseState === 'posing'}
         className="w-full btn-neo-dark flex items-center justify-center gap-2.5 py-3.5 text-sm font-semibold tracking-wide disabled:opacity-40 disabled:cursor-not-allowed disabled:translate-x-0 disabled:translate-y-0 disabled:shadow-[2px_2px_0px_#8A7560]"
       >
         <Zap size={16} />
         {countdown !== null
           ? `Capturing in ${countdown}...`
+          : poseState === 'posing'
+          ? 'Choose action above ↑'
           : !isCapturing
           ? 'All frames captured!'
           : capturedCount > 0
           ? `Next Shot (${capturedCount + 1}/${totalFrames}) • ${countdownDuration}s`
-          : `Take Shot (${capturedCount}/${totalFrames}) • ${countdownDuration}s`}
+          : `Ambil Foto 1/${totalFrames} • ${countdownDuration}s`}
       </button>
 
       <input

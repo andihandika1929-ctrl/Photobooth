@@ -293,6 +293,8 @@ export default function HomePage() {
                 totalFrames={totalFrames}
                 countdownDuration={countdownDuration}
                 onCountdownDurationChange={setCountdownDuration}
+                capturedThumbnails={capturedFrames.map(f => f.dataUrl)}
+                onRetakeLast={() => setCapturedFrames(prev => prev.slice(0, -1))}
               />
             ) : (
               <div className="bg-[#FAF7F0] border border-[#E8DFCE] rounded-2xl p-5 sm:p-6 shadow-sm">
