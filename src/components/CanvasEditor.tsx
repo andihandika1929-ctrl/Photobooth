@@ -31,6 +31,7 @@ export type FramePreset =
   | 'editorial'
   | 'birthday'
   | 'birthdayBow'
+  | 'birthdayCatPink'
   | 'kitty'
   | 'cyberSparkle'
   | 'coquette'
@@ -38,7 +39,7 @@ export type FramePreset =
   | 'film35mm'
   | 'y2k';
 
-export type LayoutType = 'strip3' | 'strip4' | 'grid2x2';
+export type LayoutType = 'strip3' | 'strip4' | 'grid2x2' | 'grid2x3';
 
 export type BirthdayPaletteId = 'burgundy' | 'espresso' | 'sage' | 'pink' | 'ivory' | 'charcoal';
 
@@ -60,6 +61,7 @@ interface CapturedFrame {
 
 interface CanvasEditorProps {
   frames: CapturedFrame[];
+  allFrames?: CapturedFrame[];
   layout: LayoutType;
   onShare: (blob: Blob, templateType: string) => void;
   onReset: () => void;
@@ -67,6 +69,7 @@ interface CanvasEditorProps {
 
 // ─── Constants ────────────────────────────────────────────
 const CUTE_PRESETS: { id: FramePreset; label: string; emoji: string; desc: string }[] = [
+  { id: 'birthdayCatPink', label: 'Birthday Cat Pink (6-Shot)', emoji: '🐱', desc: 'Party cat, cake & 6-photo custom PNG' },
   { id: 'birthday',     label: 'Editorial Birthday',     emoji: '🎂', desc: 'Modern Korean minimalist, bold age & typography' },
   { id: 'birthdayBow',  label: 'Coquette Pink Bow',      emoji: '🎀', desc: 'Silk vector bows, bold caps & script' },
   { id: 'kitty',        label: 'Kitty & Paws',           emoji: '🐱', desc: 'Cute ears, paws & happy cat' },
@@ -222,6 +225,31 @@ function getNoisePattern(ctx: CanvasRenderingContext2D): CanvasPattern | null {
   return ctx.createPattern(cachedNoiseCanvas, 'repeat');
 }
 
+// Cached transparent PNG frame image for instant rendering
+let cachedBirthdayCatPinkImg: HTMLImageElement | null = null;
+function loadBirthdayCatPinkFrame(): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    if (
+      cachedBirthdayCatPinkImg &&
+      cachedBirthdayCatPinkImg.complete &&
+      cachedBirthdayCatPinkImg.naturalWidth > 0
+    ) {
+      return resolve(cachedBirthdayCatPinkImg);
+    }
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.src = '/frames/birthday-cat-pink.png';
+    img.onload = () => {
+      cachedBirthdayCatPinkImg = img;
+      resolve(img);
+    };
+    img.onerror = (err) => {
+      console.error('Failed to load /frames/birthday-cat-pink.png', err);
+      reject(err);
+    };
+  });
+}
+
 // Hardware-accelerated Korean studio & film preset rendering (grain applied only on export)
 // Object-fit: cover center-crop helper — preserves aspect ratio, no face distortion
 function drawImageCover(
@@ -294,6 +322,7 @@ function drawGradedPhoto(
 // ─── Main Component ───────────────────────────────────────
 export default function CanvasEditor({
   frames,
+  allFrames,
   layout,
   onShare,
   onReset,
@@ -354,7 +383,7 @@ export default function CanvasEditor({
 
   const COLOR = FRAME_COLORS.find((c) => c.id === frameColor)!;
 
-  // Pre-key all sticker images on mount into in-memory cache for transparent drawer thumbnails
+  // Pre-key all sticker images & preload custom PNG frame on mount into in-memory cache
   useEffect(() => {
     let mounted = true;
     preloadAllStickers(STICKER_DEFS).then((map) => {
@@ -362,6 +391,7 @@ export default function CanvasEditor({
         setStickerThumbnails(map);
       }
     });
+    loadBirthdayCatPinkFrame().catch(() => {});
     return () => {
       mounted = false;
     };
@@ -427,6 +457,15 @@ export default function CanvasEditor({
   // Proportional Dimensions: Downscaled for preview, 2x Retina for export
   const getDimensions = useCallback(
     (isExport: boolean = false) => {
+      if (preset === 'birthdayCatPink' || layout === 'grid2x3') {
+        if (isExport) {
+          // Native high-resolution 1181 × 1772 print format matching PNG asset
+          return { w: 1181, h: 1772, s: 1.0 };
+        } else {
+          // Downscaled interactive preview canvas (1181 / 1772 ≈ 0.6665)
+          return { w: 390, h: 585, s: 390 / 1181 };
+        }
+      }
       if (isExport) {
         // High-DPI print-ready 300 DPI base: 1200×3600 strip4 (1:3), 1200×2800 strip3, 1200×1200 grid
         if (layout === 'grid2x2') return { w: 1200, h: 1200, s: 1.2 };
@@ -439,7 +478,7 @@ export default function CanvasEditor({
         return { w: 390, h: 910, s: 0.75 }; // strip3
       }
     },
-    [layout]
+    [layout, preset]
   );
 
   // ═══════════════════════════════════════════════════════
@@ -873,6 +912,131 @@ export default function CanvasEditor({
       drawHaloLunaWatermark(ctx, w, h - 16 * s, bowMuted, s);
     },
     [layout]
+  );
+
+  // 3. Birthday Cat Pink 6-Shot Custom PNG Frame Template 🐱🎂
+  const drawBirthdayCatPink = useCallback(
+    async (
+      ctx: CanvasRenderingContext2D,
+      imgs: HTMLImageElement[],
+      w: number,
+      h: number,
+      s: number,
+      isExport: boolean = false,
+    ) => {
+      if (typeof document !== 'undefined' && document.fonts) {
+        try {
+          await document.fonts.ready;
+        } catch {
+          // ignore font loading fallback
+        }
+      }
+
+      // Base coordinates from the native 1181 × 1772 PNG frame asset
+      const baseW = 1181;
+      const baseH = 1772;
+      const scaleX = w / baseW;
+      const scaleY = h / baseH;
+
+      // 6 photo cutout slots (2 columns × 3 rows) with slight bleed under frame borders
+      const SLOTS_6 = [
+        // Left Column (top to bottom)
+        { x: 30,  y: 38,   w: 536, h: 460 },
+        { x: 30,  y: 530,  w: 536, h: 464 },
+        { x: 30,  y: 1026, w: 536, h: 460 },
+        // Right Column (top to bottom - staggered vertically)
+        { x: 622, y: 290,  w: 540, h: 460 },
+        { x: 622, y: 782,  w: 540, h: 460 },
+        { x: 622, y: 1274, w: 540, h: 464 },
+      ];
+
+      // LAYER 1: Photos (drawn into cutout slots behind the frame)
+      // Soft blush pink canvas base
+      ctx.save();
+      ctx.fillStyle = '#FFEDF1';
+      ctx.fillRect(0, 0, w, h);
+
+      for (let i = 0; i < 6; i++) {
+        const img = imgs[i] || imgs[i % imgs.length];
+        if (!img) continue;
+
+        const slot = SLOTS_6[i];
+        const dx = Math.round(slot.x * scaleX);
+        const dy = Math.round(slot.y * scaleY);
+        const dw = Math.round(slot.w * scaleX);
+        const dh = Math.round(slot.h * scaleY);
+
+        // Anti-distortion center-crop
+        drawGradedPhoto(ctx, img, dx, dy, dw, dh, 0, isExport);
+      }
+      ctx.restore();
+
+      // LAYER 2: Transparent PNG Frame Overlay
+      try {
+        const frameImg = await loadBirthdayCatPinkFrame();
+        ctx.drawImage(frameImg, 0, 0, w, h);
+      } catch (err) {
+        console.error('Failed to draw birthday-cat-pink.png overlay:', err);
+      }
+
+      // LAYER 3: Dynamic Custom Age & Name Overlay
+      const title = birthdayNameRef.current || "SARAH'S DAY";
+      const ageVal = birthdayAgeRef.current ? birthdayAgeRef.current.trim().replace(/^NO\.?\s*/i, '') : '';
+
+      // 1. Age Display: rendered dynamically above the birthday cake illustration in the middle
+      if (ageVal) {
+        const cakeCenterX = 588.5 * scaleX;
+        const cakeTopY = 1100 * scaleY;
+        const ageY = cakeTopY - 8 * scaleY; // floating right above the cake cherries
+
+        ctx.save();
+        ctx.font = `bold 800 ${36 * scaleX}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+
+        // Clean crisp white outline for pop/readability
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 4.5 * scaleX;
+        ctx.strokeText(ageVal, cakeCenterX, ageY);
+
+        // Bold playful serif cherry/berry color matching birthday cake theme
+        ctx.fillStyle = '#9F1239';
+        ctx.fillText(ageVal, cakeCenterX, ageY);
+        ctx.restore();
+      }
+
+      // 2. Name Display: rendered neatly near the footer accent (below the bottom-left birthday banner)
+      ctx.save();
+      const bannerCenterX = 290 * scaleX;
+      const footerNameY = 1746 * scaleY;
+
+      ctx.font = `bold 700 ${14 * scaleX}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
+      if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${3 * scaleX}px`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      // Clean white stroke
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+      ctx.lineWidth = 3.5 * scaleX;
+      ctx.strokeText(title.toUpperCase(), bannerCenterX, footerNameY);
+
+      // Deep berry pink text fill
+      ctx.fillStyle = '#831843';
+      ctx.fillText(title.toUpperCase(), bannerCenterX, footerNameY);
+      ctx.restore();
+
+      // 3. Watermark: tiny subtle watermark at the very bottom edge
+      const wmx = w / 2;
+      const wmy = h - 8 * scaleY;
+      ctx.save();
+      ctx.fillStyle = 'rgba(159, 18, 57, 0.45)';
+      ctx.font = `500 ${7 * scaleX}px Inter, -apple-system, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText('haloluna • gethaloluna.com', wmx, wmy);
+      ctx.restore();
+    },
+    []
   );
 
   // 3. Kitty & Paws 🐱
@@ -1766,9 +1930,15 @@ export default function CanvasEditor({
         const ctx = canvas.getContext('2d');
         if (!ctx) return null;
 
+        // If using 6-shot birthday cat pink preset and full set of captures is available, prioritize allFrames
+        const effectiveFrames =
+          preset === 'birthdayCatPink' && allFrames && allFrames.length >= 6
+            ? allFrames
+            : frames;
+
         // Load all frames with safety timeout to prevent hanging
         const imgs = await Promise.all(
-          frames.map(
+          effectiveFrames.map(
             (f) =>
               new Promise<HTMLImageElement>((resolve) => {
                 const img = new Image();
@@ -1794,6 +1964,9 @@ export default function CanvasEditor({
 
         // Render Chosen Preset
         switch (preset) {
+          case 'birthdayCatPink':
+            await drawBirthdayCatPink(ctx, imgs, w, h, s, isExport);
+            break;
           case 'birthday':
             await drawCinemaTicketBirthday(ctx, imgs, w, h, s, isExport);
             break;
@@ -1837,8 +2010,10 @@ export default function CanvasEditor({
     },
     [
       frames,
+      allFrames,
       preset,
       getDimensions,
+      drawBirthdayCatPink,
       drawCinemaTicketBirthday,
       drawPinkBowBirthday,
       drawKitty,
@@ -1944,9 +2119,12 @@ export default function CanvasEditor({
       const wCtx = wallCanvas.getContext('2d');
       if (!wCtx) return;
 
-      // Fill background with selected palette color
+      // Fill background with selected palette color (or sweet blush pink for Birthday Cat Pink)
+      const isCatPink = preset === 'birthdayCatPink';
       const palette = BIRTHDAY_PALETTES[birthdayPaletteRef.current] ?? BIRTHDAY_PALETTES.ivory;
-      wCtx.fillStyle = palette.bg;
+      const wallBg = isCatPink ? '#FFF0F5' : palette.bg;
+      const wallFg = isCatPink ? '#831843' : palette.fg;
+      wCtx.fillStyle = wallBg;
       wCtx.fillRect(0, 0, wallW, wallH);
 
       // Subtle atmospheric radial gradient
@@ -1981,7 +2159,7 @@ export default function CanvasEditor({
 
       // Top lockscreen branding
       wCtx.save();
-      wCtx.fillStyle = palette.fg;
+      wCtx.fillStyle = wallFg;
       wCtx.globalAlpha = 0.55;
       wCtx.font = '600 20px Inter, sans-serif';
       wCtx.textAlign = 'center';
@@ -2153,18 +2331,22 @@ export default function CanvasEditor({
             </div>
           </div>
 
-          {/* Birthday Customization Panel (when Cinema Ticket or Pink Bow is selected) */}
-          {(preset === 'birthday' || preset === 'birthdayBow') && (
+          {/* Birthday Customization Panel (when Cinema Ticket, Pink Bow, or Birthday Cat Pink is selected) */}
+          {(preset === 'birthday' || preset === 'birthdayBow' || preset === 'birthdayCatPink') && (
             <div className="p-4 bg-gradient-to-br from-amber-50/70 via-white to-pink-50/70 rounded-xl border border-amber-200/90 shadow-sm flex flex-col gap-3.5">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
                   <Sparkles size={14} className="text-amber-500" />
                   <span className="text-[11px] font-bold text-zinc-900 uppercase tracking-wider">
-                    {preset === 'birthday' ? 'Editorial Birthday Settings' : 'Pink Bow Settings'}
+                    {preset === 'birthdayCatPink'
+                      ? 'Birthday Cat Settings'
+                      : preset === 'birthday'
+                      ? 'Editorial Birthday Settings'
+                      : 'Pink Bow Settings'}
                   </span>
                 </div>
                 <span className="text-[9.5px] font-mono font-bold text-amber-800 bg-amber-100/90 px-2 py-0.5 rounded-full border border-amber-200">
-                  Korean Studio Redesign
+                  {preset === 'birthdayCatPink' ? 'Custom 6-Photo PNG' : 'Korean Studio Redesign'}
                 </span>
               </div>
 
@@ -2216,37 +2398,39 @@ export default function CanvasEditor({
                 />
               </div>
 
-              {/* Aesthetic Solid Color Palette Selector */}
-              <div>
-                <label className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest block mb-1.5">
-                  Aesthetic Color Palette
-                </label>
-                <div className="grid grid-cols-3 gap-2">
-                  {([
-                    { id: 'burgundy', label: 'Burgundy',      color: '#6B1D2F', text: '#F5E6E8' },
-                    { id: 'espresso', label: 'Warm Espresso', color: '#4A3528', text: '#F0E8DF' },
-                    { id: 'sage',     label: 'Sage Green',    color: '#7C8B6A', text: '#F3F5EE' },
-                    { id: 'pink',     label: 'Baby Pink',     color: '#E8B4B8', text: '#4A1522' },
-                    { id: 'ivory',    label: 'Cream / Ivory', color: '#F7F4EB', text: '#2A2826' },
-                    { id: 'charcoal', label: 'Deep Charcoal', color: '#1C1C1E', text: '#E8DFCE' },
-                  ] as const).map((pal) => (
-                    <button
-                      key={pal.id}
-                      type="button"
-                      onClick={() => setBirthdayPalette(pal.id)}
-                      className={`p-2.5 rounded-xl border-2 flex flex-col items-center justify-center gap-1 text-[10px] font-bold transition-all shadow-xs ${
-                        birthdayPalette === pal.id
-                          ? 'border-zinc-900 ring-2 ring-zinc-900/30 shadow-md scale-[1.04]'
-                          : 'border-zinc-200 hover:border-zinc-400'
-                      }`}
-                      style={{ backgroundColor: pal.color, color: pal.text }}
-                    >
-                      <span className="w-3.5 h-3.5 rounded-full border border-black/10 shrink-0" style={{ backgroundColor: pal.color }} />
-                      <span className="truncate w-full text-center">{pal.label}</span>
-                    </button>
-                  ))}
+              {/* Aesthetic Solid Color Palette Selector (hidden for custom PNG frame) */}
+              {preset !== 'birthdayCatPink' && (
+                <div>
+                  <label className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest block mb-1.5">
+                    Aesthetic Color Palette
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {([
+                      { id: 'burgundy', label: 'Burgundy',      color: '#6B1D2F', text: '#F5E6E8' },
+                      { id: 'espresso', label: 'Warm Espresso', color: '#4A3528', text: '#F0E8DF' },
+                      { id: 'sage',     label: 'Sage Green',    color: '#7C8B6A', text: '#F3F5EE' },
+                      { id: 'pink',     label: 'Baby Pink',     color: '#E8B4B8', text: '#4A1522' },
+                      { id: 'ivory',    label: 'Cream / Ivory', color: '#F7F4EB', text: '#2A2826' },
+                      { id: 'charcoal', label: 'Deep Charcoal', color: '#1C1C1E', text: '#E8DFCE' },
+                    ] as const).map((pal) => (
+                      <button
+                        key={pal.id}
+                        type="button"
+                        onClick={() => setBirthdayPalette(pal.id)}
+                        className={`p-2.5 rounded-xl border-2 flex flex-col items-center justify-center gap-1 text-[10px] font-bold transition-all shadow-xs ${
+                          birthdayPalette === pal.id
+                            ? 'border-zinc-900 ring-2 ring-zinc-900/30 shadow-md scale-[1.04]'
+                            : 'border-zinc-200 hover:border-zinc-400'
+                        }`}
+                        style={{ backgroundColor: pal.color, color: pal.text }}
+                      >
+                        <span className="w-3.5 h-3.5 rounded-full border border-black/10 shrink-0" style={{ backgroundColor: pal.color }} />
+                        <span className="truncate w-full text-center">{pal.label}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
 

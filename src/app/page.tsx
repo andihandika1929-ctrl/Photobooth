@@ -43,6 +43,7 @@ const LAYOUTS: { id: LayoutType; label: string; icon: React.ReactNode; frames: n
   { id: 'strip4',  label: '4-Frame Strip', icon: <Layers size={14} />,       frames: 4 },
   { id: 'strip3',  label: '3-Frame Strip', icon: <AlignJustify size={14} />, frames: 3 },
   { id: 'grid2x2', label: '2×2 Grid',      icon: <Grid size={14} />,         frames: 4 },
+  { id: 'grid2x3', label: '6-Shot (2×3)',  icon: <Grid size={14} />,         frames: 6 },
 ];
 
 export default function HomePage() {
@@ -71,7 +72,7 @@ export default function HomePage() {
   }, [router]);
 
   // Target count of photos to select based on layout
-  const targetCount = layout === 'strip3' ? 3 : TARGET_SELECTION_COUNT;
+  const targetCount = layout === 'strip3' ? 3 : layout === 'grid2x3' ? 6 : TARGET_SELECTION_COUNT;
 
   // Handle capture of each shot in the 6-shot sequence
   const handleCapture = useCallback(
@@ -80,8 +81,8 @@ export default function HomePage() {
       setCapturedFrames((prev) => {
         const next = [...prev, { dataUrl, filter }];
         if (next.length >= STUDIO_SHOT_COUNT) {
-          // All 6 photos captured! Pre-select first 4 and transition to Selection screen
-          setSelectedIndices([0, 1, 2, 3].slice(0, targetCount));
+          // All 6 photos captured! Pre-select up to targetCount and transition to Selection screen
+          setSelectedIndices([0, 1, 2, 3, 4, 5].slice(0, targetCount));
           setTimeout(() => setStep('select'), 350);
         }
         return next;
@@ -667,6 +668,7 @@ export default function HomePage() {
           <div className="bg-[#FAF7F0] border border-[#E8DFCE] rounded-2xl p-5 sm:p-6 shadow-sm w-full">
             <CanvasEditor
               frames={activeEditorFrames}
+              allFrames={capturedFrames}
               layout={layout}
               onShare={handleShare}
               onReset={handleReset}
