@@ -26,11 +26,13 @@ export async function savePhotoToSupabase(
   existingStoragePath?: string
 ): Promise<SavePhotoResult> {
   const selectedFrame = currentTemplate || 'classic-strip';
-  console.log("Starting upload for frame:", selectedFrame, "existingId:", existingId);
+  const cleanExistingId = (existingId && existingId !== 'undefined' && existingId !== 'null' && existingId.trim() !== '') ? existingId.trim() : undefined;
+  const cleanStoragePath = (existingStoragePath && existingStoragePath !== 'undefined' && existingStoragePath !== 'null' && existingStoragePath.trim() !== '') ? existingStoragePath.trim() : undefined;
+  console.log("Starting upload for frame:", selectedFrame, "cleanExistingId:", cleanExistingId);
   console.log("Upload payload size:", blob?.size);
 
   const supabase = createClient();
-  const storage_path = existingStoragePath || `strip_${Date.now()}_${Math.random().toString(36).substring(7)}.png`;
+  const storage_path = cleanStoragePath || `strip_${Date.now()}_${Math.random().toString(36).substring(7)}.png`;
 
   try {
     // 1. Upload to Supabase Storage: bucket 'photos' with upsert
@@ -49,8 +51,8 @@ export async function savePhotoToSupabase(
     } = supabase.storage.from('photos').getPublicUrl(storage_path);
 
     // 3. Upsert or Update DB record
-    let recordId = existingId;
-    if (existingId) {
+    let recordId = cleanExistingId;
+    if (cleanExistingId) {
       const { data: updated, error: updateErr } = await supabase
         .from('photos')
         .update({
@@ -59,7 +61,7 @@ export async function savePhotoToSupabase(
           template_type: selectedFrame,
           location_tag: locationTag || 'Jakarta Studio',
         })
-        .eq('id', existingId)
+        .eq('id', cleanExistingId)
         .select('id, image_url, storage_path, template_type, location_tag, created_at')
         .maybeSingle();
 
@@ -108,8 +110,8 @@ export async function savePhotoToSupabase(
       fd.append('file', blob, storage_path);
       fd.append('templateType', selectedFrame);
       fd.append('locationTag', locationTag || 'Jakarta Studio');
-      if (existingId) {
-        fd.append('existingId', existingId);
+      if (cleanExistingId) {
+        fd.append('existingId', cleanExistingId);
       }
       if (storage_path) {
         fd.append('storagePath', storage_path);

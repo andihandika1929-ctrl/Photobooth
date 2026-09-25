@@ -274,31 +274,25 @@ function loadBirthdayCatPinkFrame(): Promise<HTMLImageElement> {
   return birthdayCatPinkLoadingPromise;
 }
 
-// Preload cute fonts and ensure document.fonts.ready before rendering canvas text
-let fontsLoadingPromise: Promise<void> | null = null;
-function loadCuteBirthdayFonts(): Promise<void> {
-  if (typeof document === 'undefined' || !document.fonts) {
-    return Promise.resolve();
+// Preload cute fonts safely with fallback so canvas generator never hangs or throws
+let fontsLoaded = false;
+async function loadCuteBirthdayFonts(): Promise<void> {
+  if (fontsLoaded) return;
+  if (typeof document === 'undefined' || !document.fonts) return;
+
+  try {
+    await Promise.allSettled([
+      document.fonts.load('bold 48px Caveat'),
+      document.fonts.load('700 48px DynaPuff'),
+      document.fonts.load('48px Pacifico'),
+      document.fonts.load('bold 48px "Playfair Display"'),
+      document.fonts.load('bold 48px "Bodoni Moda"'),
+    ]);
+    await document.fonts.ready;
+    fontsLoaded = true;
+  } catch (e) {
+    console.warn("Font loading fallback:", e);
   }
-  if (fontsLoadingPromise) return fontsLoadingPromise;
-
-  fontsLoadingPromise = (async () => {
-    try {
-      await Promise.all([
-        document.fonts.load('bold 700 48px DynaPuff'),
-        document.fonts.load('bold 800 56px DynaPuff'),
-        document.fonts.load('bold 700 36px Caveat'),
-        document.fonts.load('400 36px Pacifico'),
-        document.fonts.load('bold 700 48px "Playfair Display"'),
-        document.fonts.load('bold 700 48px "Bodoni Moda"'),
-      ]);
-      await document.fonts.ready;
-    } catch (e) {
-      console.warn('[HaloLuna] Font loading fallback:', e);
-    }
-  })();
-
-  return fontsLoadingPromise;
 }
 
 // Hardware-accelerated Korean studio & film preset rendering (grain applied only on export)
@@ -383,8 +377,7 @@ export default function CanvasEditor({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const previewWrapRef = useRef<HTMLDivElement>(null);
   const lastUploadedPresetRef = useRef<string | null>(null);
-  const lastSyncedKeyRef = useRef<string | null>(null);
-  const isSyncingRef = useRef(false);
+  const initialSaveDoneRef = useRef(false);
   const dragState = useRef<{
     id: string;
     startMX: number;
@@ -553,7 +546,11 @@ export default function CanvasEditor({
       s: number,
       isExport: boolean = false,
     ) => {
-      await loadCuteBirthdayFonts();
+      try {
+        await loadCuteBirthdayFonts();
+      } catch (e) {
+        console.warn('Font loading fallback:', e);
+      }
 
       const palette = BIRTHDAY_PALETTES[birthdayPaletteRef.current] ?? BIRTHDAY_PALETTES.ivory;
       const bg = palette.bg;
@@ -688,7 +685,11 @@ export default function CanvasEditor({
       s: number,
       isExport: boolean = false,
     ) => {
-      await loadCuteBirthdayFonts();
+      try {
+        await loadCuteBirthdayFonts();
+      } catch (e) {
+        console.warn('Font loading fallback:', e);
+      }
 
       // Palette-aware background
       const pal = BIRTHDAY_PALETTES[birthdayPaletteRef.current] ?? BIRTHDAY_PALETTES.pink;
@@ -970,7 +971,11 @@ export default function CanvasEditor({
       s: number,
       isExport: boolean = false,
     ) => {
-      await loadCuteBirthdayFonts();
+      try {
+        await loadCuteBirthdayFonts();
+      } catch (e) {
+        console.warn('Font loading fallback:', e);
+      }
 
       // Base coordinates from the native 1181 × 1772 PNG frame asset
       const baseW = 1181;
@@ -1011,13 +1016,23 @@ export default function CanvasEditor({
       }
       ctx.restore();
 
-      // LAYER 2: Transparent PNG Frame Overlay (Guaranteed fully loaded before drawing)
-      const frameImg = await loadBirthdayCatPinkFrame();
-      if (!frameImg || !frameImg.complete || frameImg.naturalWidth === 0) {
-        console.error('[HaloLuna] Frame overlay birthday-cat-pink.png is missing or incomplete');
-        throw new Error('Frame overlay birthday-cat-pink.png is missing or incomplete');
+      // LAYER 2: Transparent PNG Frame Overlay (Guaranteed safe fallback)
+      try {
+        const frameImg = await loadBirthdayCatPinkFrame();
+        if (frameImg && frameImg.complete && frameImg.naturalWidth > 0) {
+          ctx.drawImage(frameImg, 0, 0, w, h);
+        } else {
+          console.warn('[HaloLuna] Frame overlay loaded with 0 width, using fallback');
+          ctx.strokeStyle = '#F472B6';
+          ctx.lineWidth = 8 * scaleX;
+          ctx.strokeRect(10 * scaleX, 10 * scaleY, w - 20 * scaleX, h - 20 * scaleY);
+        }
+      } catch (frameErr) {
+        console.warn('[HaloLuna] Frame overlay load error (drawing fallback frame):', frameErr);
+        ctx.strokeStyle = '#F472B6';
+        ctx.lineWidth = 8 * scaleX;
+        ctx.strokeRect(10 * scaleX, 10 * scaleY, w - 20 * scaleX, h - 20 * scaleY);
       }
-      ctx.drawImage(frameImg, 0, 0, w, h);
 
       // LAYER 3: Dynamic Custom Birthday Scrapbook Headline & Stickers
       const title = birthdayNameRef.current || "SARAH";
@@ -2179,97 +2194,63 @@ export default function CanvasEditor({
     }
   }, [frames, preset, frameColor, layout, birthdayName, birthdayTheme, birthdayAge, birthdayPalette, triggerRender]);
 
-  // Content key fingerprint for tracking changes that require Supabase / Admin synchronization
-  const currentSyncKey = `${preset}_${birthdayName}_${birthdayAge}_${birthdayPalette}_${birthdayTheme}_${frameColor}_${location}`;
+  // Helper to extract high-resolution export canvas blob
+  const exportCanvasBlob = useCallback(async (): Promise<Blob | null> => {
+    try {
+      await yieldToMain();
+      const highResDataUrl = await renderToCanvas(true);
+      if (!highResDataUrl) {
+        console.error("ADMIN UPLOAD ERROR: renderToCanvas returned null");
+        return null;
+      }
+      const canvas = canvasRef.current;
+      if (!canvas) {
+        console.error("ADMIN UPLOAD ERROR: canvas element not found");
+        return null;
+      }
+      return await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+    } catch (err) {
+      console.error("ADMIN UPLOAD ERROR: exportCanvasBlob failed", err);
+      return null;
+    }
+  }, [renderToCanvas]);
 
-  // Single-save automatic upload trigger: once preview canvas finishes rendering, upload high-res composite
+  // 1. Initial Save: trigger ONCE when preview canvas is first rendered
   useEffect(() => {
-    if (!previewUrl) return;
-    // Don't duplicate initial upload if this exact preset was already uploaded in this session
-    if (lastUploadedPresetRef.current === preset && lastSyncedKeyRef.current) return;
+    if (!previewUrl || initialSaveDoneRef.current) return;
+    initialSaveDoneRef.current = true;
 
     const timer = setTimeout(async () => {
-      if (isSyncingRef.current) return;
-      isSyncingRef.current = true;
       try {
-        await yieldToMain();
-        console.log(`[HaloLuna] Preparing high-res export composite for upload, preset: ${preset}`);
-        // Generate high-resolution export canvas composite
-        const highResDataUrl = await renderToCanvas(true);
-        if (!highResDataUrl) {
-          console.warn('[HaloLuna] High-res composite render returned null, skipping upload');
-          return;
-        }
-
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-
-        const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
+        console.log('[HaloLuna] Initial Save: exporting canvas blob for preset', preset);
+        const blob = await exportCanvasBlob();
         if (blob && blob.size > 0) {
-          lastUploadedPresetRef.current = preset;
-          lastSyncedKeyRef.current = currentSyncKey;
+          console.log('[HaloLuna] Initial Save: triggering onAutoUpload for preset', preset);
           if (onAutoUpload) {
             onAutoUpload(blob, preset, false);
           } else {
             savePhotoToSupabase(blob, preset, locationRef.current || 'HaloLuna Studio')
-              .catch((err) => console.error('[HaloLuna] Supabase auto-upload error:', err));
+              .catch((err) => console.error("ADMIN UPLOAD ERROR:", err));
           }
+        } else {
+          console.error("ADMIN UPLOAD ERROR: Initial export blob was null or empty");
         }
       } catch (err) {
-        console.error('[HaloLuna] Single-save auto-upload failed:', err);
-      } finally {
-        isSyncingRef.current = false;
+        console.error("ADMIN UPLOAD ERROR: Initial save failed:", err);
       }
     }, 400);
 
     return () => clearTimeout(timer);
-  }, [previewUrl, onAutoUpload, preset, renderToCanvas, currentSyncKey]);
-
-  // Debounced sync to Supabase/Admin when user edits inputs (800ms - 1.2s delay)
-  useEffect(() => {
-    // Only trigger if initial upload has already occurred and the content has actually changed
-    if (!lastSyncedKeyRef.current) return;
-    if (lastSyncedKeyRef.current === currentSyncKey) return;
-
-    const syncTimer = setTimeout(async () => {
-      if (isSyncingRef.current) return;
-      isSyncingRef.current = true;
-      try {
-        await yieldToMain();
-        console.log(`[HaloLuna] Debounced sync triggering for updated inputs: ${currentSyncKey}`);
-        const highResDataUrl = await renderToCanvas(true);
-        if (!highResDataUrl) return;
-
-        const canvas = canvasRef.current;
-        if (!canvas) return;
-
-        const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
-        if (blob && blob.size > 0) {
-          lastSyncedKeyRef.current = currentSyncKey;
-          if (onAutoUpload) {
-            onAutoUpload(blob, preset, true);
-          } else {
-            savePhotoToSupabase(blob, preset, locationRef.current || 'HaloLuna Studio')
-              .catch((err) => console.error('[HaloLuna] Supabase debounced-sync error:', err));
-          }
-        }
-      } catch (err) {
-        console.error('[HaloLuna] Debounced sync failed:', err);
-      } finally {
-        isSyncingRef.current = false;
-      }
-    }, 950);
-
-    return () => clearTimeout(syncTimer);
-  }, [currentSyncKey, onAutoUpload, preset, renderToCanvas]);
+  }, [previewUrl, preset, onAutoUpload, exportCanvasBlob]);
 
   // Re-render when preset or frameColor changes
   const handlePresetSelect = (newPreset: FramePreset) => {
     if (newPreset === preset) return;
     setPreset(newPreset);
+    initialSaveDoneRef.current = false;
   };
 
-  // Download Handler (Full High-Resolution Export + Supabase DB sync)
+  // Download Handler (Full High-Resolution Export + Action Save to Supabase)
   const handleDownload = async () => {
     if (isRenderingRef.current) return;
     isRenderingRef.current = true;
@@ -2280,31 +2261,32 @@ export default function CanvasEditor({
       const dataUrl = await renderToCanvas(true);
       setRenderProgress(95);
       await yieldToMain();
-      if (!dataUrl) return;
+      if (!dataUrl) {
+        console.error("ADMIN UPLOAD ERROR: Download render returned null");
+        return;
+      }
 
       const link = document.createElement('a');
       link.download = `haloluna-${preset}-${Date.now()}.png`;
       link.href = dataUrl;
       link.click();
 
-      // Ensure finalized download state is synced to Supabase / Admin dashboard
+      // Action Save: Read CURRENT rendered canvas and update database session
       const canvas = canvasRef.current;
       if (canvas) {
         const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
         if (blob && blob.size > 0) {
-          lastSyncedKeyRef.current = currentSyncKey;
-          lastUploadedPresetRef.current = preset;
+          console.log('[HaloLuna] Action Save: Updating session on download for preset', preset);
           if (onAutoUpload) {
             onAutoUpload(blob, preset, true);
           } else {
             savePhotoToSupabase(blob, preset, locationRef.current || 'HaloLuna Studio')
-              .catch((err) => console.error('[HaloLuna] Supabase download-save error:', err));
+              .catch((err) => console.error("ADMIN UPLOAD ERROR:", err));
           }
         }
       }
-
     } catch (err) {
-      console.error('Download export failed:', err);
+      console.error("ADMIN UPLOAD ERROR: Download failed", err);
     } finally {
       setRenderProgress(null);
       isRenderingRef.current = false;
@@ -2401,18 +2383,17 @@ export default function CanvasEditor({
       link.href = wallpaperUrl;
       link.click();
 
-      // Ensure finalized photostrip state is saved/updated in Supabase / Admin dashboard
+      // Action Save: Read CURRENT rendered canvas and update database session
       const canvas = canvasRef.current;
       if (canvas) {
         const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
         if (blob && blob.size > 0) {
-          lastSyncedKeyRef.current = currentSyncKey;
-          lastUploadedPresetRef.current = preset;
+          console.log('[HaloLuna] Action Save: Updating session on wallpaper export for preset', preset);
           if (onAutoUpload) {
             onAutoUpload(blob, preset, true);
           } else {
             savePhotoToSupabase(blob, preset, locationRef.current || 'HaloLuna Studio')
-              .catch((err) => console.error('[HaloLuna] Supabase wallpaper-sync error:', err));
+              .catch((err) => console.error("ADMIN UPLOAD ERROR:", err));
           }
         }
       }

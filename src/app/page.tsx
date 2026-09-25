@@ -56,6 +56,8 @@ export default function HomePage() {
   const [selectedIndices, setSelectedIndices] = useState<number[]>([0, 1, 2, 3]);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadToast, setUploadToast] = useState<string | null>(null);
   const [showShareModal, setShowShareModal] = useState(false);
   const hasUploadedRef = useRef(false);
   const lastUploadedTemplateRef = useRef<string | null>(null);
@@ -163,21 +165,21 @@ export default function HomePage() {
     setShowShareModal(false);
   }, []);
 
-  // Automatic upload and debounced sync trigger: uploads/upserts to Supabase (guarded per template / session)
+  // Automatic 2-way upload trigger: Initial save on render + Action save on download/wallpaper
   const handleAutoUpload = useCallback(
-    async (blob: Blob, templateType: string, isSyncUpdate: boolean = false) => {
-      console.log("Starting upload for frame:", templateType, "isSyncUpdate:", isSyncUpdate);
-      console.log("Upload payload size:", blob?.size);
+    async (blob: Blob, templateType: string, isActionSave: boolean = false) => {
+      console.log("[HaloLuna] Starting upload for frame:", templateType, "isActionSave:", isActionSave, "size:", blob?.size);
 
-      // If initial upload was already done for this template and this is not a sync update, skip duplicate
-      if (!isSyncUpdate && lastUploadedTemplateRef.current === templateType && hasUploadedRef.current) {
-        console.log("Already uploaded template", templateType, "in this session, skipping duplicate");
+      // If initial save already succeeded for this template and this is not an action save, skip redundant re-upload
+      if (!isActionSave && lastUploadedTemplateRef.current === templateType && hasUploadedRef.current) {
+        console.log("Already uploaded initial template", templateType, "in this session, skipping duplicate");
         return;
       }
 
       hasUploadedRef.current = true;
       lastUploadedTemplateRef.current = templateType;
       setIsUploading(true);
+      setUploadError(null);
 
       try {
         const result = await savePhotoToSupabase(
@@ -187,26 +189,33 @@ export default function HomePage() {
           sessionPhotoIdRef.current || undefined,
           sessionStoragePathRef.current || undefined
         );
-        console.log("Upload result:", result);
+        console.log("[HaloLuna] Upload result:", result);
         if (result.success && result.id) {
           sessionPhotoIdRef.current = result.id;
           if (result.storage_path) {
             sessionStoragePathRef.current = result.storage_path;
           }
           setShareUrl(`${window.location.origin}/result/${result.id}`);
+          if (isActionSave) {
+            setUploadToast('Photostrip synced to cloud!');
+            setTimeout(() => setUploadToast(null), 3000);
+          }
         } else {
-          // If upload failed and we don't have a session ID yet, allow retry
+          const errMsg = result.error || 'Upload returned unsuccessful';
+          console.error("ADMIN UPLOAD ERROR:", errMsg);
+          setUploadError('Cloud sync issue. Your local export is complete.');
           if (!sessionPhotoIdRef.current) {
             hasUploadedRef.current = false;
             lastUploadedTemplateRef.current = null;
           }
         }
       } catch (err) {
+        console.error("ADMIN UPLOAD ERROR:", err);
+        setUploadError('Cloud sync issue. Your local export is complete.');
         if (!sessionPhotoIdRef.current) {
           hasUploadedRef.current = false;
           lastUploadedTemplateRef.current = null;
         }
-        console.error('Supabase Auto-Upload Error:', err);
       } finally {
         setIsUploading(false);
       }
@@ -781,6 +790,26 @@ export default function HomePage() {
           isUploading={isUploading}
           onClose={() => setShowShareModal(false)}
         />
+      )}
+
+      {/* Visual Feedback Toasts for Cloud Sync */}
+      {uploadToast && (
+        <div className="fixed bottom-6 right-6 z-50 bg-zinc-900 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-2xl border border-white/20 flex items-center gap-2 animate-bounce">
+          <span className="text-emerald-400">✓</span>
+          <span>{uploadToast}</span>
+        </div>
+      )}
+
+      {uploadError && (
+        <div className="fixed bottom-6 right-6 z-50 bg-red-900/90 backdrop-blur-md text-white text-xs px-4 py-3 rounded-xl shadow-2xl border border-red-500/30 flex items-center gap-2.5">
+          <span>⚠️ {uploadError}</span>
+          <button
+            onClick={() => setUploadError(null)}
+            className="text-white/60 hover:text-white font-bold ml-1"
+          >
+            ✕
+          </button>
+        </div>
       )}
     </div>
   );

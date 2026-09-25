@@ -20,15 +20,18 @@ export async function POST(request: NextRequest) {
     const file = formData.get('file') as File | null;
     const templateType = (formData.get('templateType') || formData.get('framePreset') || 'classic-strip') as string;
     const locationTag = (formData.get('locationTag') || formData.get('location') || 'Jakarta Studio') as string;
-    const existingId = (formData.get('existingId') || formData.get('id')) as string | null;
-    let storage_path = (formData.get('storagePath') || formData.get('existingStoragePath')) as string | null;
+    const rawExistingId = (formData.get('existingId') || formData.get('id')) as string | null;
+    const existingId = (rawExistingId && rawExistingId !== 'undefined' && rawExistingId !== 'null' && rawExistingId.trim() !== '') ? rawExistingId.trim() : null;
 
-    if (!file) {
-      return NextResponse.json({ error: 'No file provided' }, { status: 400 });
-    }
+    let rawStoragePath = (formData.get('storagePath') || formData.get('existingStoragePath')) as string | null;
+    let storage_path = (rawStoragePath && rawStoragePath !== 'undefined' && rawStoragePath !== 'null' && rawStoragePath.trim() !== '') ? rawStoragePath.trim() : null;
 
     if (!storage_path) {
       storage_path = `strip_${Date.now()}_${Math.random().toString(36).substring(7)}.png`;
+    }
+
+    if (!file) {
+      return NextResponse.json({ error: 'No file provided' }, { status: 400 });
     }
     const buffer = Buffer.from(await file.arrayBuffer());
 
