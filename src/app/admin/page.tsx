@@ -51,6 +51,11 @@ export default function AdminDashboardPage() {
   const [selectedPreset, setSelectedPreset] = useState<string>('all');
   const [confirmDelete, setConfirmDelete] = useState<PhotoRecord | null>(null);
 
+  // Multi-Select & Bulk Delete State
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const [showBulkConfirm, setShowBulkConfirm] = useState(false);
+
   // ── Auth Lifecycle (getSession & onAuthStateChange) ──────
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session: currentSession } }) => {
@@ -166,12 +171,88 @@ export default function AdminDashboardPage() {
       }
 
       setPhotos((prev) => prev.filter((p) => p.id !== photo.id));
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(photo.id);
+        return next;
+      });
       setConfirmDelete(null);
     } catch (err) {
       console.error('Delete error:', err);
       alert('Delete request failed.');
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  // ── Multi-Select Helpers ──
+  const toggleSelectOne = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedIds.size === filteredPhotos.length && filteredPhotos.length > 0) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredPhotos.map((p) => p.id)));
+    }
+  };
+
+  const handleClearSelection = () => {
+    setSelectedIds(new Set());
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    setIsBulkDeleting(true);
+    try {
+      const selectedList = photos.filter((p) => selectedIds.has(p.id));
+      const ids = selectedList.map((p) => p.id);
+      const storagePaths = selectedList
+        .map((p) => p.storage_path)
+        .filter((sp): sp is string => Boolean(sp));
+
+      // 1. Remove files from storage
+      if (storagePaths.length > 0) {
+        const { error: storageErr } = await supabase.storage
+          .from('photos')
+          .remove(storagePaths);
+        if (storageErr) console.warn('Bulk storage delete warning:', storageErr);
+      }
+
+      // 2. Remove records from database
+      const { error: dbErr } = await supabase
+        .from('photos')
+        .delete()
+        .in('id', ids);
+
+      // Fallback to admin delete API endpoint if needed
+      if (dbErr) {
+        console.warn('Supabase DB delete failed, using /api/admin/delete:', dbErr);
+        const res = await fetch('/api/admin/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ids, storagePaths }),
+        });
+        if (!res.ok) throw new Error('Bulk delete failed');
+      }
+
+      setPhotos((prev) => prev.filter((p) => !selectedIds.has(p.id)));
+      setSelectedIds(new Set());
+      setShowBulkConfirm(false);
+    } catch (err) {
+      console.error('Bulk delete error:', err);
+      alert('Failed to delete selected photos.');
+    } finally {
+      setIsBulkDeleting(false);
     }
   };
 
@@ -501,6 +582,41 @@ export default function AdminDashboardPage() {
           </div>
         </div>
 
+        {/* ── Multi-Select Master Control Bar ── */}
+        {!loading && filteredPhotos.length > 0 && (
+          <div className="bg-white border border-[#E8DFCE] rounded-xl px-4 py-2.5 shadow-xs flex items-center justify-between">
+            <label className="flex items-center gap-2.5 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={selectedIds.size > 0 && selectedIds.size === filteredPhotos.length}
+                onChange={handleSelectAll}
+                className="w-4 h-4 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900 cursor-pointer accent-zinc-900"
+              />
+              <span className="text-xs font-bold text-zinc-700 tracking-wide">
+                Select All ({filteredPhotos.length})
+              </span>
+            </label>
+
+            {selectedIds.size > 0 ? (
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-mono font-semibold text-zinc-600">
+                  {selectedIds.size} of {filteredPhotos.length} selected
+                </span>
+                <button
+                  onClick={handleClearSelection}
+                  className="text-xs font-bold text-zinc-500 hover:text-zinc-900 underline"
+                >
+                  Clear
+                </button>
+              </div>
+            ) : (
+              <span className="text-[11px] font-mono text-zinc-400">
+                Click checkboxes to select multiple photos for bulk deletion
+              </span>
+            )}
+          </div>
+        )}
+
         {/* ── Photo Gallery Grid ── */}
         {loading ? (
           <div className="flex flex-col items-center justify-center py-24 text-center">
@@ -529,6 +645,7 @@ export default function AdminDashboardPage() {
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {filteredPhotos.map((photo) => {
+              const isSelected = selectedIds.has(photo.id);
               const formattedDate = new Date(photo.created_at).toLocaleString('en-US', {
                 month: 'short',
                 day: 'numeric',
@@ -540,7 +657,9 @@ export default function AdminDashboardPage() {
               return (
                 <div
                   key={photo.id}
-                  className="bg-white border border-[#E8DFCE] rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all flex flex-col group"
+                  className={`bg-white border rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-all flex flex-col group relative ${
+                    isSelected ? 'ring-2 ring-zinc-900 border-zinc-900 shadow-md' : 'border-[#E8DFCE]'
+                  }`}
                 >
                   {/* Photo Preview Container - using item.image_url */}
                   <div className="relative aspect-[3/4] bg-[#FAF7F0] overflow-hidden flex items-center justify-center p-3 border-b border-[#E8DFCE]">
@@ -558,6 +677,24 @@ export default function AdminDashboardPage() {
                         {photo.template_type}
                       </span>
                     </div>
+
+                    {/* Card Multi-Select Checkbox */}
+                    <label
+                      onClick={(e) => e.stopPropagation()}
+                      className={`absolute top-2.5 right-2.5 z-10 w-6 h-6 rounded-md backdrop-blur-xs border flex items-center justify-center cursor-pointer shadow-xs transition-all ${
+                        isSelected
+                          ? 'bg-zinc-900 border-zinc-900 text-white'
+                          : 'bg-white/90 border-zinc-300 hover:border-zinc-800'
+                      }`}
+                      title="Select photo"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleSelectOne(photo.id)}
+                        className="w-3.5 h-3.5 rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900 cursor-pointer accent-zinc-900"
+                      />
+                    </label>
                   </div>
 
                   {/* Metadata and Actions */}
@@ -619,7 +756,42 @@ export default function AdminDashboardPage() {
         )}
       </main>
 
-      {/* ── Confirmation Modal ── */}
+      {/* ── Floating Bulk Action Toolbar ── */}
+      {selectedIds.size > 0 && (
+        <aside
+          aria-label="Bulk actions"
+          className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-zinc-900 text-white px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-4 border border-zinc-700 backdrop-blur-md animate-fade-in max-w-[90vw]"
+        >
+          <div className="flex items-center gap-2">
+            <span className="w-6 h-6 rounded-full bg-white/20 text-white text-xs font-mono font-bold flex items-center justify-center">
+              {selectedIds.size}
+            </span>
+            <span className="text-xs font-semibold whitespace-nowrap">
+              {selectedIds.size === 1 ? '1 item selected' : `${selectedIds.size} items selected`}
+            </span>
+          </div>
+
+          <div className="h-4 w-px bg-zinc-700" />
+
+          <button
+            onClick={handleClearSelection}
+            className="text-xs font-medium text-zinc-300 hover:text-white transition-colors"
+          >
+            Clear
+          </button>
+
+          <button
+            onClick={() => setShowBulkConfirm(true)}
+            disabled={isBulkDeleting}
+            className="px-3.5 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm transition-all"
+          >
+            <Trash2 size={13} />
+            <span>Delete Selected</span>
+          </button>
+        </aside>
+      )}
+
+      {/* ── Single Item Confirmation Modal ── */}
       {confirmDelete && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in">
           <div className="bg-white border border-zinc-200 rounded-2xl p-6 max-w-sm w-full shadow-2xl text-center">
@@ -646,6 +818,47 @@ export default function AdminDashboardPage() {
                 className="flex-1 py-2.5 px-3 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-semibold shadow-sm disabled:opacity-50"
               >
                 {deletingId === confirmDelete.id ? 'Deleting...' : 'Confirm Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Bulk Delete Confirmation Modal ── */}
+      {showBulkConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white border border-zinc-200 rounded-2xl p-6 max-w-sm w-full shadow-2xl text-center">
+            <div className="w-12 h-12 rounded-full bg-red-100 text-red-600 mx-auto flex items-center justify-center mb-3">
+              <AlertTriangle size={22} />
+            </div>
+            <h3 className="font-bold text-sm uppercase tracking-wider text-zinc-900 mb-1">
+              Bulk Delete {selectedIds.size} Photos?
+            </h3>
+            <p className="text-xs text-zinc-500 mb-5 leading-relaxed">
+              Are you sure you want to permanently delete {selectedIds.size} selected photo strip{selectedIds.size > 1 ? 's' : ''}?
+              This will remove the image files from cloud storage and database permanently.
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowBulkConfirm(false)}
+                disabled={isBulkDeleting}
+                className="flex-1 py-2.5 px-3 rounded-lg border border-zinc-200 text-xs font-semibold text-zinc-700 hover:bg-zinc-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleBulkDelete}
+                disabled={isBulkDeleting}
+                className="flex-1 py-2.5 px-3 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-semibold shadow-sm disabled:opacity-50 flex items-center justify-center gap-1.5"
+              >
+                {isBulkDeleting ? (
+                  <>
+                    <RefreshCw size={12} className="animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <span>Delete {selectedIds.size} Photos</span>
+                )}
               </button>
             </div>
           </div>

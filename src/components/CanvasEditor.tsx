@@ -25,7 +25,6 @@ import { type FilterName } from './CameraViewport';
 import { playPrintSound } from './AudioEngine';
 import { v4 as uuidv4 } from 'uuid';
 import { getKeyedSticker, getKeyedStickerSync, preloadAllStickers } from '@/utils/stickerCache';
-import { savePhotoToSupabase } from '@/utils/supabasePhotoPipeline';
 
 // ─── Types ───────────────────────────────────────────────
 export type FramePreset =
@@ -63,7 +62,6 @@ interface CanvasEditorProps {
   frames: CapturedFrame[];
   layout: LayoutType;
   onShare: (blob: Blob, templateType: string) => void;
-  onPreviewReady?: (blob: Blob, templateType: string) => void;
   onReset: () => void;
 }
 
@@ -291,7 +289,6 @@ export default function CanvasEditor({
   frames,
   layout,
   onShare,
-  onPreviewReady,
   onReset,
 }: CanvasEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -469,10 +466,11 @@ export default function CanvasEditor({
       const ageText = birthdayAgeRef.current ? `✦  AGE ${birthdayAgeRef.current}  ✦` : '✦  CELEBRATING SPECIAL MOMENTS  ✦';
 
       // Dimensions & ticket notch setup with Korean Life4Cuts aesthetic margins
-      const headerH = Math.round(h * 0.09);
+      const headerH = Math.round(h * 0.13); // Enlarged header for bold editorial hierarchy
       const footerH = Math.round(h * 0.20);
       const pad = Math.round(w * 0.09); // 9% horizontal margins (8-10%)
       const gap = Math.round(w * 0.035); // 3.5% vertical gap (3-4%)
+      const topPadding = 20 * s; // Generous breathing room below ticket notch
       const notchY = headerH;
       const notchR = Math.round(w * 0.025);
 
@@ -523,25 +521,37 @@ export default function CanvasEditor({
       ctx.lineTo(w - pad, 40 * s);
       ctx.stroke();
 
-      // Cursive / Serif script header with custom Age & Name
+      // Bold Editorial Serif Header with Custom Age & Name
       const title = birthdayNameRef.current || "SARAH'S DAY";
       const ageVal = birthdayAgeRef.current ? birthdayAgeRef.current.trim() : '';
 
       if (ageVal) {
-        // Prominent serif Age Accent in Bodoni Moda / Playfair Display
+        // Prominent editorial serif Age Accent in Bodoni Moda / Playfair Display
+        const displayAge = ageVal.toUpperCase().startsWith('NO.') ? ageVal.toUpperCase() : `NO. ${ageVal}`;
+        ctx.save();
         ctx.fillStyle = accentGold;
-        ctx.font = `italic 700 ${28 * s}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
+        ctx.font = `italic 700 ${46 * s}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
+        if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${2 * s}px`;
         ctx.textAlign = 'center';
-        ctx.fillText(`NO. ${ageVal}`, w / 2, headerH * 0.44);
+        ctx.fillText(displayAge, w / 2, headerH * 0.44);
+        ctx.restore();
 
+        // Event Title with letter-spacing tracking
+        ctx.save();
         ctx.fillStyle = fg;
-        ctx.font = `italic 400 ${22 * s}px "Pinyon Script", "Playfair Display", cursive`;
-        ctx.fillText(title, w / 2, headerH * 0.70);
-      } else {
-        ctx.fillStyle = fg;
-        ctx.font = `italic 400 ${30 * s}px "Pinyon Script", "Playfair Display", Georgia, cursive`;
+        ctx.font = `bold 700 ${22 * s}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
+        if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${4 * s}px`;
         ctx.textAlign = 'center';
-        ctx.fillText(title, w / 2, headerH * 0.58);
+        ctx.fillText(title.toUpperCase(), w / 2, headerH * 0.70);
+        ctx.restore();
+      } else {
+        ctx.save();
+        ctx.fillStyle = fg;
+        ctx.font = `bold 700 ${26 * s}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
+        if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${4 * s}px`;
+        ctx.textAlign = 'center';
+        ctx.fillText(title.toUpperCase(), w / 2, headerH * 0.54);
+        ctx.restore();
       }
 
       // Minimalist date stamp underneath
@@ -555,7 +565,7 @@ export default function CanvasEditor({
 
       if (layout === 'grid2x2') {
         const cw = (w - pad * 2 - gap) / 2;
-        const ch = (h - headerH - footerH - gap) / 2;
+        const ch = (h - headerH - footerH - topPadding - gap) / 2;
         const pos = [
           [0, 0],
           [1, 0],
@@ -566,7 +576,7 @@ export default function CanvasEditor({
           if (!imgs[i]) continue;
           const [c2, r] = pos[i];
           const ix = pad + c2 * (cw + gap);
-          const iy = headerH + 12 * s + r * (ch + gap);
+          const iy = headerH + topPadding + r * (ch + gap);
           drawGradedPhoto(ctx, imgs[i], ix, iy, cw, ch, 5 * s, isExport);
           ctx.strokeStyle = borderCol;
           ctx.lineWidth = 1.2 * s;
@@ -575,10 +585,10 @@ export default function CanvasEditor({
         }
       } else {
         const iw = w - pad * 2;
-        const ih = (h - headerH - footerH - 12 * s - gap * (count - 1)) / count;
+        const ih = (h - headerH - footerH - topPadding - gap * (count - 1)) / count;
         for (let i = 0; i < count; i++) {
           if (!imgs[i]) continue;
-          const iy = headerH + 12 * s + i * (ih + gap);
+          const iy = headerH + topPadding + i * (ih + gap);
           drawGradedPhoto(ctx, imgs[i], pad, iy, iw, ih, 5 * s, isExport);
           ctx.strokeStyle = borderCol;
           ctx.lineWidth = 1.2 * s;
@@ -806,35 +816,79 @@ export default function CanvasEditor({
       drawSilkBow(36 * s, 36 * s, 18 * s, 0.15);
       drawSilkBow(w - 36 * s, 36 * s, 18 * s, -0.15);
 
-      // Header Typography
-      // Bold modern caps "HAPPY BIRTHDAY"
-      ctx.fillStyle = bowFg;
-      ctx.font = `700 ${19 * s}px "Playfair Display", Georgia, serif`;
-      ctx.textAlign = 'center';
-      ctx.fillText('HAPPY BIRTHDAY', w / 2, 54 * s);
-
-      // Paired with romantic cursive script accent
-      const title = birthdayNameRef.current || "Hollie's Birthday";
-      ctx.fillStyle = bowAccent;
-      ctx.font = `italic 400 ${29 * s}px "Pinyon Script", "Playfair Display", cursive`;
-      const ageLabel = birthdayAgeRef.current ? ` • ${birthdayAgeRef.current}` : '';
-      ctx.fillText(`♡ ${title}${ageLabel} ♡`, w / 2, 85 * s);
-
-      // Subtitle
-      ctx.fillStyle = bowMuted;
-      ctx.font = `600 ${8 * s}px Inter, sans-serif`;
-      ctx.fillText('✦  A BEAUTIFUL DAY TO CELEBRATE YOU  ✦', w / 2, 102 * s);
-
       // Photo Frames with Korean Life4Cuts margins
-      const headerH = Math.round(h * 0.09);
+      const headerH = Math.round(h * 0.13); // Enlarged header for bold editorial hierarchy
       const footerH = Math.round(h * 0.20);
       const pad = Math.round(w * 0.09);
       const gap = Math.round(w * 0.035);
+      const topPadding = 18 * s; // Breathing room below header
       const count = layout === 'strip4' ? 4 : layout === 'strip3' ? 3 : 4;
+
+      // Header Typography with Bold Editorial Hierarchy
+      const title = birthdayNameRef.current || "Hollie's Birthday";
+      const ageVal = birthdayAgeRef.current ? birthdayAgeRef.current.trim() : '';
+
+      if (ageVal) {
+        // Modern caps "HAPPY BIRTHDAY"
+        ctx.save();
+        ctx.fillStyle = bowFg;
+        ctx.font = `bold 700 ${15 * s}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
+        if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${3 * s}px`;
+        ctx.textAlign = 'center';
+        ctx.fillText('HAPPY BIRTHDAY', w / 2, headerH * 0.28);
+        ctx.restore();
+
+        // Prominent serif Age Accent in Bodoni Moda / Playfair Display
+        const displayAge = ageVal.toUpperCase().startsWith('NO.') ? ageVal.toUpperCase() : `NO. ${ageVal}`;
+        ctx.save();
+        ctx.fillStyle = bowAccent;
+        ctx.font = `italic 700 ${44 * s}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
+        if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${2 * s}px`;
+        ctx.textAlign = 'center';
+        ctx.fillText(displayAge, w / 2, headerH * 0.54);
+        ctx.restore();
+
+        // Romantic cursive script title
+        ctx.save();
+        ctx.fillStyle = bowFg;
+        ctx.font = `italic 400 ${26 * s}px "Pinyon Script", "Playfair Display", cursive`;
+        ctx.textAlign = 'center';
+        ctx.fillText(`♡ ${title} ♡`, w / 2, headerH * 0.74);
+        ctx.restore();
+
+        // Subtitle
+        ctx.fillStyle = bowMuted;
+        ctx.font = `600 ${8 * s}px Inter, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText('✦  A BEAUTIFUL DAY TO CELEBRATE YOU  ✦', w / 2, headerH * 0.88);
+      } else {
+        // Modern caps "HAPPY BIRTHDAY"
+        ctx.save();
+        ctx.fillStyle = bowFg;
+        ctx.font = `bold 700 ${17 * s}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
+        if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${3 * s}px`;
+        ctx.textAlign = 'center';
+        ctx.fillText('HAPPY BIRTHDAY', w / 2, headerH * 0.38);
+        ctx.restore();
+
+        // Romantic cursive script accent
+        ctx.save();
+        ctx.fillStyle = bowAccent;
+        ctx.font = `italic 400 ${32 * s}px "Pinyon Script", "Playfair Display", cursive`;
+        ctx.textAlign = 'center';
+        ctx.fillText(`♡ ${title} ♡`, w / 2, headerH * 0.65);
+        ctx.restore();
+
+        // Subtitle
+        ctx.fillStyle = bowMuted;
+        ctx.font = `600 ${8.5 * s}px Inter, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText('✦  A BEAUTIFUL DAY TO CELEBRATE YOU  ✦', w / 2, headerH * 0.84);
+      }
 
       if (layout === 'grid2x2') {
         const cw = (w - pad * 2 - gap) / 2;
-        const ch = (h - headerH - footerH - gap) / 2;
+        const ch = (h - headerH - footerH - topPadding - gap) / 2;
         const pos = [
           [0, 0],
           [1, 0],
@@ -845,7 +899,7 @@ export default function CanvasEditor({
           if (!imgs[i]) continue;
           const [c2, r] = pos[i];
           const ix = pad + c2 * (cw + gap);
-          const iy = headerH + r * (ch + gap);
+          const iy = headerH + topPadding + r * (ch + gap);
           drawGradedPhoto(ctx, imgs[i], ix, iy, cw, ch, 6 * s, isExport);
           ctx.strokeStyle = '#FBCFE8';
           ctx.lineWidth = 1.5 * s;
@@ -854,10 +908,10 @@ export default function CanvasEditor({
         }
       } else {
         const iw = w - pad * 2;
-        const ih = (h - headerH - footerH - gap * (count - 1)) / count;
+        const ih = (h - headerH - footerH - topPadding - gap * (count - 1)) / count;
         for (let i = 0; i < count; i++) {
           if (!imgs[i]) continue;
-          const iy = headerH + i * (ih + gap);
+          const iy = headerH + topPadding + i * (ih + gap);
           drawGradedPhoto(ctx, imgs[i], pad, iy, iw, ih, 6 * s, isExport);
           ctx.strokeStyle = '#FBCFE8';
           ctx.lineWidth = 1.5 * s;
@@ -1892,24 +1946,6 @@ export default function CanvasEditor({
         setPreviewUrl(dataUrl);
         hasRenderedRef.current = true;
         playPrintSound(700);
-
-        // Non-blocking background upload to Supabase storage with full high-res rendering
-        if (onPreviewReady) {
-          setTimeout(async () => {
-            try {
-              await renderToCanvas(true);
-              const canvas = canvasRef.current;
-              if (canvas) {
-                const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
-                if (blob) {
-                  onPreviewReady(blob, preset);
-                }
-              }
-            } catch (err) {
-              console.error("Supabase Save Error: high-res canvas conversion failed:", err);
-            }
-          }, 120);
-        }
       }
     } catch (e) {
       console.error('triggerRender error:', e);
@@ -1917,7 +1953,7 @@ export default function CanvasEditor({
       setRenderProgress(null);
       isRenderingRef.current = false;
     }
-  }, [renderToCanvas, onPreviewReady, preset]);
+  }, [renderToCanvas]);
 
   // Auto-render preview once on mount or when preset, frameColor, layout, or birthday settings change
   useEffect(() => {
@@ -1950,15 +1986,6 @@ export default function CanvasEditor({
       link.href = dataUrl;
       link.click();
 
-      // Convert canvas to Blob & save to Supabase using exact database schema
-      const canvas = canvasRef.current;
-      if (canvas) {
-        const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
-        if (blob) {
-          savePhotoToSupabase(blob, preset, location || 'Jakarta Studio')
-            .catch((err) => console.error("Supabase Save Error:", err));
-        }
-      }
     } catch (err) {
       console.error('Download export failed:', err);
     } finally {

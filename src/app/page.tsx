@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import CameraViewport, {
   type FilterName,
@@ -56,6 +56,7 @@ export default function HomePage() {
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [showShareModal, setShowShareModal] = useState(false);
+  const hasUploadedRef = useRef(false);
 
   // Secret admin access via Ctrl+Shift+A / Cmd+Shift+A shortcut
   useEffect(() => {
@@ -143,6 +144,7 @@ export default function HomePage() {
   }, []);
 
   const handleReset = useCallback(() => {
+    hasUploadedRef.current = false;
     setCapturedFrames([]);
     setSelectedIndices([]);
     setStep('capture');
@@ -150,37 +152,26 @@ export default function HomePage() {
     setShowShareModal(false);
   }, []);
 
-  // Background high-res Supabase upload triggered when preview is ready
-  const handlePreviewReady = useCallback(
-    async (blob: Blob, templateType: string) => {
-      try {
-        setIsUploading(true);
-        const result = await savePhotoToSupabase(blob, templateType, 'HaloLuna Studio');
-        if (result.success && result.id) {
-          setShareUrl(`${window.location.origin}/result/${result.id}`);
-        }
-      } catch (err) {
-        console.error("Supabase Save Error:", err);
-      } finally {
-        setIsUploading(false);
-      }
-    },
-    []
-  );
-
-  // Manual share button trigger
+  // Manual share button trigger: uploads to Supabase EXACTLY ONCE per session
   const handleShare = useCallback(
     async (blob: Blob, templateType: string) => {
       setShowShareModal(true);
 
-      if (!shareUrl && !isUploading) {
+      // If already uploaded and share link exists, reuse it without duplicate upload
+      if (shareUrl) return;
+
+      if (!isUploading && !hasUploadedRef.current) {
+        hasUploadedRef.current = true;
         setIsUploading(true);
         try {
           const result = await savePhotoToSupabase(blob, templateType, 'HaloLuna Studio');
           if (result.success && result.id) {
             setShareUrl(`${window.location.origin}/result/${result.id}`);
+          } else {
+            hasUploadedRef.current = false;
           }
         } catch (err) {
+          hasUploadedRef.current = false;
           console.error("Supabase Save Error:", err);
         } finally {
           setIsUploading(false);
@@ -678,7 +669,6 @@ export default function HomePage() {
               frames={activeEditorFrames}
               layout={layout}
               onShare={handleShare}
-              onPreviewReady={handlePreviewReady}
               onReset={handleReset}
             />
           </div>
