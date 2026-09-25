@@ -1147,9 +1147,9 @@ export default function CanvasEditor({
               ctx.font = 'bold 50px Caveat, cursive';
               ctx.strokeStyle = '#FFFFFF';
               ctx.lineWidth = 6;
-              ctx.strokeText(guestName, w / 2, h - 70);
+              ctx.strokeText(guestName, w / 2, h - 30);
               ctx.fillStyle = '#FF69B4';
-              ctx.fillText(guestName, w / 2, h - 70);
+              ctx.fillText(guestName, w / 2, h - 30);
             }
 
             // Age line (e.g. "21st", "29th")
@@ -1163,9 +1163,9 @@ export default function CanvasEditor({
               ctx.font = 'bold 30px Caveat, cursive';
               ctx.strokeStyle = '#FFFFFF';
               ctx.lineWidth = 4;
-              ctx.strokeText(ageLabel, w / 2, h - 30);
+              ctx.strokeText(ageLabel, w / 2, h - 10);
               ctx.fillStyle = '#FF69B4';
-              ctx.fillText(ageLabel, w / 2, h - 30);
+              ctx.fillText(ageLabel, w / 2, h - 10);
             }
 
             ctx.restore();
