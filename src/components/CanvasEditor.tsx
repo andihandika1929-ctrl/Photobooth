@@ -25,6 +25,7 @@ import { type FilterName } from './CameraViewport';
 import { playPrintSound } from './AudioEngine';
 import { v4 as uuidv4 } from 'uuid';
 import { getKeyedSticker, getKeyedStickerSync, preloadAllStickers } from '@/utils/stickerCache';
+import { savePhotoToSupabase } from '@/utils/supabasePhotoPipeline';
 
 // ─── Types ───────────────────────────────────────────────
 export type FramePreset =
@@ -63,6 +64,7 @@ interface CanvasEditorProps {
   frames: CapturedFrame[];
   allFrames?: CapturedFrame[];
   layout: LayoutType;
+  onAutoUpload?: (blob: Blob, templateType: string) => void;
   onShare: (blob: Blob, templateType: string) => void;
   onReset: () => void;
 }
@@ -324,11 +326,13 @@ export default function CanvasEditor({
   frames,
   allFrames,
   layout,
+  onAutoUpload,
   onShare,
   onReset,
 }: CanvasEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const previewWrapRef = useRef<HTMLDivElement>(null);
+  const hasAutoUploadedRef = useRef(false);
   const dragState = useRef<{
     id: string;
     startMX: number;
@@ -983,55 +987,73 @@ export default function CanvasEditor({
       const title = birthdayNameRef.current || "SARAH'S DAY";
       const ageVal = birthdayAgeRef.current ? birthdayAgeRef.current.trim().replace(/^NO\.?\s*/i, '') : '';
 
-      // 1. Age Display: rendered dynamically above the birthday cake illustration in the middle
+      // 1. Age Number Display: prominent, bold, playful birthday candle numbers right above the cake illustration
       if (ageVal) {
         const cakeCenterX = 588.5 * scaleX;
-        const cakeTopY = 1100 * scaleY;
-        const ageY = cakeTopY - 8 * scaleY; // floating right above the cake cherries
+        const cakeCandleBaseY = 1184 * scaleY; // sits right above cake top & candle wicks
 
         ctx.save();
-        ctx.font = `bold 800 ${36 * scaleX}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
+        const ageFontSize = 115 * scaleX;
+        ctx.font = `bold 900 ${ageFontSize}px "Playfair Display", "Bodoni Moda", Georgia, serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
 
-        // Clean crisp white outline for pop/readability
-        ctx.strokeStyle = '#FFFFFF';
-        ctx.lineWidth = 4.5 * scaleX;
-        ctx.strokeText(ageVal, cakeCenterX, ageY);
+        // Soft festive drop shadow
+        ctx.shadowColor = 'rgba(159, 18, 57, 0.28)';
+        ctx.shadowBlur = 10 * scaleX;
+        ctx.shadowOffsetY = 4 * scaleX;
 
-        // Bold playful serif cherry/berry color matching birthday cake theme
-        ctx.fillStyle = '#9F1239';
-        ctx.fillText(ageVal, cakeCenterX, ageY);
+        // Clean bold white outline (drawn first for full pop & sticker candle look)
+        ctx.strokeStyle = '#FFFFFF';
+        ctx.lineWidth = 14 * scaleX;
+        ctx.lineJoin = 'round';
+        ctx.strokeText(ageVal, cakeCenterX, cakeCandleBaseY);
+
+        // Reset shadow for crisp text fill
+        ctx.shadowColor = 'transparent';
+        // Bold playful cherry/rose candle number fill
+        ctx.fillStyle = '#E11D48';
+        ctx.fillText(ageVal, cakeCenterX, cakeCandleBaseY);
         ctx.restore();
       }
 
-      // 2. Name Display: rendered neatly near the footer accent (below the bottom-left birthday banner)
+      // 2. Custom Name Display: scaled up, bold, clearly readable below the bottom-left birthday stickers
       ctx.save();
-      const bannerCenterX = 290 * scaleX;
+      const bannerCenterX = 295 * scaleX;
       const footerNameY = 1746 * scaleY;
+      const maxAllowedWidth = 510 * scaleX;
 
-      ctx.font = `bold 700 ${14 * scaleX}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
-      if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${3 * scaleX}px`;
+      let nameFontSize = 32 * scaleX;
+      ctx.font = `bold 800 ${nameFontSize}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
+      const nameText = title.toUpperCase();
+      const measuredW = ctx.measureText(nameText).width;
+      if (measuredW > maxAllowedWidth) {
+        nameFontSize = Math.max(18 * scaleX, (maxAllowedWidth / measuredW) * nameFontSize);
+        ctx.font = `bold 800 ${nameFontSize}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
+      }
+
+      if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${2 * scaleX}px`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 
       // Clean white stroke
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
-      ctx.lineWidth = 3.5 * scaleX;
-      ctx.strokeText(title.toUpperCase(), bannerCenterX, footerNameY);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.98)';
+      ctx.lineWidth = 5 * scaleX;
+      ctx.lineJoin = 'round';
+      ctx.strokeText(nameText, bannerCenterX, footerNameY);
 
       // Deep berry pink text fill
       ctx.fillStyle = '#831843';
-      ctx.fillText(title.toUpperCase(), bannerCenterX, footerNameY);
+      ctx.fillText(nameText, bannerCenterX, footerNameY);
       ctx.restore();
 
-      // 3. Watermark: tiny subtle watermark at the very bottom edge
-      const wmx = w / 2;
-      const wmy = h - 8 * scaleY;
+      // 3. Watermark: tiny subtle watermark under bottom-right column
       ctx.save();
+      const wmx = w - 36 * scaleX;
+      const wmy = h - 8 * scaleY;
       ctx.fillStyle = 'rgba(159, 18, 57, 0.45)';
-      ctx.font = `500 ${7 * scaleX}px Inter, -apple-system, sans-serif`;
-      ctx.textAlign = 'center';
+      ctx.font = `500 ${7.5 * scaleX}px Inter, -apple-system, sans-serif`;
+      ctx.textAlign = 'right';
       ctx.textBaseline = 'bottom';
       ctx.fillText('haloluna • gethaloluna.com', wmx, wmy);
       ctx.restore();
@@ -2058,6 +2080,38 @@ export default function CanvasEditor({
     }
   }, [frames, preset, frameColor, layout, birthdayName, birthdayTheme, birthdayAge, birthdayPalette, triggerRender]);
 
+  // Single-save automatic upload trigger: once preview canvas finishes rendering, upload high-res composite EXACTLY ONCE
+  useEffect(() => {
+    if (!previewUrl || hasAutoUploadedRef.current) return;
+    hasAutoUploadedRef.current = true;
+
+    const timer = setTimeout(async () => {
+      try {
+        await yieldToMain();
+        // Generate high-resolution export canvas composite
+        const highResDataUrl = await renderToCanvas(true);
+        if (!highResDataUrl) return;
+
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+
+        const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
+        if (blob && blob.size > 0) {
+          if (onAutoUpload) {
+            onAutoUpload(blob, preset);
+          } else {
+            savePhotoToSupabase(blob, preset, locationRef.current || 'HaloLuna Studio')
+              .catch((err) => console.error('Supabase auto-upload error:', err));
+          }
+        }
+      } catch (err) {
+        console.error('Single-save auto-upload failed:', err);
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [previewUrl, onAutoUpload, preset, renderToCanvas]);
+
   // Re-render when preset or frameColor changes
   const handlePresetSelect = (newPreset: FramePreset) => {
     if (newPreset === preset) return;
@@ -2081,6 +2135,23 @@ export default function CanvasEditor({
       link.download = `haloluna-${preset}-${Date.now()}.png`;
       link.href = dataUrl;
       link.click();
+
+      // Fallback: Ensure photo is saved to Supabase / Admin dashboard if not already uploaded
+      if (!hasAutoUploadedRef.current) {
+        hasAutoUploadedRef.current = true;
+        const canvas = canvasRef.current;
+        if (canvas) {
+          const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
+          if (blob && blob.size > 0) {
+            if (onAutoUpload) {
+              onAutoUpload(blob, preset);
+            } else {
+              savePhotoToSupabase(blob, preset, locationRef.current || 'HaloLuna Studio')
+                .catch((err) => console.error('Supabase download-save error:', err));
+            }
+          }
+        }
+      }
 
     } catch (err) {
       console.error('Download export failed:', err);

@@ -153,6 +153,29 @@ export default function HomePage() {
     setShowShareModal(false);
   }, []);
 
+  // Automatic single-save upload trigger: uploads to Supabase EXACTLY ONCE per session
+  const handleAutoUpload = useCallback(
+    async (blob: Blob, templateType: string) => {
+      if (hasUploadedRef.current) return;
+      hasUploadedRef.current = true;
+      setIsUploading(true);
+      try {
+        const result = await savePhotoToSupabase(blob, templateType, 'HaloLuna Studio');
+        if (result.success && result.id) {
+          setShareUrl(`${window.location.origin}/result/${result.id}`);
+        } else {
+          hasUploadedRef.current = false;
+        }
+      } catch (err) {
+        hasUploadedRef.current = false;
+        console.error('Supabase Auto-Upload Error:', err);
+      } finally {
+        setIsUploading(false);
+      }
+    },
+    []
+  );
+
   // Manual share button trigger: uploads to Supabase EXACTLY ONCE per session
   const handleShare = useCallback(
     async (blob: Blob, templateType: string) => {
@@ -670,6 +693,7 @@ export default function HomePage() {
               frames={activeEditorFrames}
               allFrames={capturedFrames}
               layout={layout}
+              onAutoUpload={handleAutoUpload}
               onShare={handleShare}
               onReset={handleReset}
             />
