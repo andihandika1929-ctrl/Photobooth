@@ -1130,8 +1130,47 @@ export default function CanvasEditor({
           await compositePlacedStickers(ctx, w, h);
         }
 
-        // Flatten caption into pixels FIRST — never snapshot before this returns
-        await burnGuestCaption(ctx, w, h, s);
+        // ── Draw Name & Age natively onto canvas BEFORE export ──
+        {
+          const guestName = birthdayNameRef.current || '';
+          const guestAge = birthdayAgeRef.current || '';
+
+          if (guestName || guestAge) {
+            ctx.save();
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'alphabetic';
+            ctx.lineJoin = 'round';
+            ctx.miterLimit = 2;
+
+            // Name line
+            if (guestName) {
+              ctx.font = 'bold 50px Caveat, cursive';
+              ctx.strokeStyle = '#FFFFFF';
+              ctx.lineWidth = 6;
+              ctx.strokeText(guestName, w / 2, h - 70);
+              ctx.fillStyle = '#FF69B4';
+              ctx.fillText(guestName, w / 2, h - 70);
+            }
+
+            // Age line (e.g. "21st", "29th")
+            if (guestAge) {
+              const num = parseInt(guestAge, 10);
+              const j = num % 10;
+              const k = num % 100;
+              const suffix =
+                j === 1 && k !== 11 ? 'st' : j === 2 && k !== 12 ? 'nd' : j === 3 && k !== 13 ? 'rd' : 'th';
+              const ageLabel = `${num}${suffix}`;
+              ctx.font = 'bold 30px Caveat, cursive';
+              ctx.strokeStyle = '#FFFFFF';
+              ctx.lineWidth = 4;
+              ctx.strokeText(ageLabel, w / 2, h - 30);
+              ctx.fillStyle = '#FF69B4';
+              ctx.fillText(ageLabel, w / 2, h - 30);
+            }
+
+            ctx.restore();
+          }
+        }
 
         const dataUrl = canvas.toDataURL('image/png');
         const blob = await new Promise<Blob | null>((resolve) =>
@@ -1156,7 +1195,6 @@ export default function CanvasEditor({
       drawCinemaTicketBirthday,
       drawFilm,
       compositePlacedStickers,
-      burnGuestCaption,
     ]
   );
 
