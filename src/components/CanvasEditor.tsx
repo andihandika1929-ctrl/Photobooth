@@ -67,7 +67,7 @@ interface CanvasEditorProps {
 
 // ─── Constants ────────────────────────────────────────────
 const CUTE_PRESETS: { id: FramePreset; label: string; emoji: string; desc: string }[] = [
-  { id: 'birthday',     label: 'Cinema Ticket Birthday', emoji: '🎟️', desc: 'OURstudio scalloped ticket & vintage stamp' },
+  { id: 'birthday',     label: 'Editorial Birthday',     emoji: '🎂', desc: 'Modern Korean minimalist, bold age & typography' },
   { id: 'birthdayBow',  label: 'Coquette Pink Bow',      emoji: '🎀', desc: 'Silk vector bows, bold caps & script' },
   { id: 'kitty',        label: 'Kitty & Paws',           emoji: '🐱', desc: 'Cute ears, paws & happy cat' },
   { id: 'cyberSparkle', label: 'Y2K Cyber Sparkle',      emoji: '✨', desc: 'Chrome stars, CD discs & hearts' },
@@ -146,6 +146,13 @@ function fmtCinemaDate() {
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const year = d.getFullYear();
   return `• ${day}.${month}.${year} •`;
+}
+function fmtSimpleDate() {
+  const d = new Date();
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}.${month}.${year}`;
 }
 
 function roundRect(
@@ -462,110 +469,59 @@ export default function CanvasEditor({
       const fg = palette.fg;
       const muted = palette.muted;
       const accentGold = palette.accent;
-      const borderCol = palette.accent + '55';
-      const ageText = birthdayAgeRef.current ? `✦  AGE ${birthdayAgeRef.current}  ✦` : '✦  CELEBRATING SPECIAL MOMENTS  ✦';
+      const borderCol = palette.accent + '44';
 
-      // Dimensions & ticket notch setup with Korean Life4Cuts aesthetic margins
-      const headerH = Math.round(h * 0.13); // Enlarged header for bold editorial hierarchy
-      const footerH = Math.round(h * 0.20);
-      const pad = Math.round(w * 0.09); // 9% horizontal margins (8-10%)
-      const gap = Math.round(w * 0.035); // 3.5% vertical gap (3-4%)
-      const topPadding = 20 * s; // Generous breathing room below ticket notch
-      const notchY = headerH;
-      const notchR = Math.round(w * 0.025);
+      // Dimensions with clean Korean Life4Cuts aesthetic margins
+      const headerH = Math.round(h * (layout === 'grid2x2' ? 0.11 : 0.12));
+      const footerH = Math.round(h * (layout === 'grid2x2' ? 0.12 : 0.14));
+      const pad = Math.round(w * 0.09); // 9% horizontal breathing room
+      const gap = Math.round(w * 0.035); // 3.5% vertical gap between photos
 
-      // Draw Cinema Ticket Base Shape with Scalloped Left/Right Cutouts
+      // 1. Clean, flat, modern Korean minimalist canvas background
       ctx.save();
       ctx.fillStyle = bg;
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.lineTo(w, 0);
-      ctx.lineTo(w, notchY - notchR);
-      ctx.arc(w, notchY, notchR, -Math.PI / 2, Math.PI / 2, true);
-      ctx.lineTo(w, h);
-      ctx.lineTo(0, h);
-      ctx.lineTo(0, notchY + notchR);
-      ctx.arc(0, notchY, notchR, Math.PI / 2, -Math.PI / 2, true);
-      ctx.lineTo(0, 0);
-      ctx.closePath();
-      ctx.fill();
+      ctx.fillRect(0, 0, w, h);
 
-      // Delicate outer inset frame
-      ctx.strokeStyle = borderCol;
-      ctx.lineWidth = 1.2 * s;
-      ctx.strokeRect(10 * s, 10 * s, w - 20 * s, h - 20 * s);
-
-      // Clean horizontal row of circular negative cutouts / perforated dots dividing header & frames
-      const dotR = 2.2 * s;
-      const dotGap = 12 * s;
-      ctx.fillStyle = muted;
-      for (let px = notchR + 14 * s; px < w - notchR - 14 * s; px += dotGap) {
-        ctx.beginPath();
-        ctx.arc(px, notchY, dotR, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      // ── Header Box ──
-      ctx.fillStyle = muted;
-      ctx.font = `600 ${7.5 * s}px Inter, sans-serif`;
-      ctx.textAlign = 'left';
-      ctx.fillText('HALOLUNA STUDIO  •  NO. BDAY-2026', pad, 32 * s);
-      ctx.textAlign = 'right';
-      ctx.fillText('KOREAN STUDIO STRIP', w - pad, 32 * s);
-
-      // Thin separator under top meta
-      ctx.strokeStyle = borderCol;
-      ctx.lineWidth = 0.8 * s;
-      ctx.beginPath();
-      ctx.moveTo(pad, 40 * s);
-      ctx.lineTo(w - pad, 40 * s);
-      ctx.stroke();
-
-      // Bold Editorial Serif Header with Custom Age & Name
+      // ── Header Typography (Clean & Bold Editorial) ──
       const title = birthdayNameRef.current || "SARAH'S DAY";
-      const ageVal = birthdayAgeRef.current ? birthdayAgeRef.current.trim() : '';
+      const ageVal = birthdayAgeRef.current ? birthdayAgeRef.current.trim().replace(/^NO\.?\s*/i, '') : '';
 
       if (ageVal) {
-        // Prominent editorial serif Age Accent in Bodoni Moda / Playfair Display
-        const displayAge = ageVal.toUpperCase().startsWith('NO.') ? ageVal.toUpperCase() : `NO. ${ageVal}`;
+        // Raw clean prominent Age Number (bold modern serif, NO prefix words)
         ctx.save();
-        ctx.fillStyle = accentGold;
-        ctx.font = `italic 700 ${46 * s}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
+        ctx.fillStyle = fg;
+        ctx.font = `bold 700 ${50 * s}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
         if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${2 * s}px`;
         ctx.textAlign = 'center';
-        ctx.fillText(displayAge, w / 2, headerH * 0.44);
+        ctx.fillText(ageVal, w / 2, headerH * 0.46);
         ctx.restore();
 
-        // Event Title with letter-spacing tracking
+        // All-caps, modern, highly legible serif Event Name with clean tracking
+        ctx.save();
+        ctx.fillStyle = accentGold;
+        ctx.font = `bold 700 ${15 * s}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
+        if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${4 * s}px`;
+        ctx.textAlign = 'center';
+        ctx.fillText(title.toUpperCase(), w / 2, headerH * 0.78);
+        ctx.restore();
+      } else {
+        // Without age: Centered all-caps modern serif headline with generous tracking
         ctx.save();
         ctx.fillStyle = fg;
         ctx.font = `bold 700 ${22 * s}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
-        if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${4 * s}px`;
+        if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${5 * s}px`;
         ctx.textAlign = 'center';
-        ctx.fillText(title.toUpperCase(), w / 2, headerH * 0.70);
-        ctx.restore();
-      } else {
-        ctx.save();
-        ctx.fillStyle = fg;
-        ctx.font = `bold 700 ${26 * s}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
-        if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${4 * s}px`;
-        ctx.textAlign = 'center';
-        ctx.fillText(title.toUpperCase(), w / 2, headerH * 0.54);
+        ctx.fillText(title.toUpperCase(), w / 2, headerH * 0.58);
         ctx.restore();
       }
 
-      // Minimalist date stamp underneath
-      ctx.fillStyle = muted;
-      ctx.font = `600 ${8.5 * s}px Inter, sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.fillText(fmtCinemaDate(), w / 2, headerH * 0.86);
-
       // ── Crisp Photo Frames ──
       const count = layout === 'strip4' ? 4 : layout === 'strip3' ? 3 : 4;
+      const cornerRadius = 4 * s;
 
       if (layout === 'grid2x2') {
         const cw = (w - pad * 2 - gap) / 2;
-        const ch = (h - headerH - footerH - topPadding - gap) / 2;
+        const ch = (h - headerH - footerH - gap) / 2;
         const pos = [
           [0, 0],
           [1, 0],
@@ -576,91 +532,55 @@ export default function CanvasEditor({
           if (!imgs[i]) continue;
           const [c2, r] = pos[i];
           const ix = pad + c2 * (cw + gap);
-          const iy = headerH + topPadding + r * (ch + gap);
-          drawGradedPhoto(ctx, imgs[i], ix, iy, cw, ch, 5 * s, isExport);
+          const iy = headerH + r * (ch + gap);
+          drawGradedPhoto(ctx, imgs[i], ix, iy, cw, ch, cornerRadius, isExport);
           ctx.strokeStyle = borderCol;
-          ctx.lineWidth = 1.2 * s;
-          roundRect(ctx, ix, iy, cw, ch, 5 * s);
+          ctx.lineWidth = 1 * s;
+          roundRect(ctx, ix, iy, cw, ch, cornerRadius);
           ctx.stroke();
         }
       } else {
         const iw = w - pad * 2;
-        const ih = (h - headerH - footerH - topPadding - gap * (count - 1)) / count;
+        const ih = (h - headerH - footerH - gap * (count - 1)) / count;
         for (let i = 0; i < count; i++) {
           if (!imgs[i]) continue;
-          const iy = headerH + topPadding + i * (ih + gap);
-          drawGradedPhoto(ctx, imgs[i], pad, iy, iw, ih, 5 * s, isExport);
+          const iy = headerH + i * (ih + gap);
+          drawGradedPhoto(ctx, imgs[i], pad, iy, iw, ih, cornerRadius, isExport);
           ctx.strokeStyle = borderCol;
-          ctx.lineWidth = 1.2 * s;
-          roundRect(ctx, pad, iy, iw, ih, 5 * s);
+          ctx.lineWidth = 1 * s;
+          roundRect(ctx, pad, iy, iw, ih, cornerRadius);
           ctx.stroke();
-
-          // Subtle photo index marker
-          ctx.fillStyle = muted;
-          ctx.font = `600 ${6.5 * s}px "Courier New", monospace`;
-          ctx.textAlign = 'right';
-          ctx.fillText(`0${i + 1} / 0${count}`, w - pad - 6 * s, iy + ih - 6 * s);
         }
       }
 
-      // ── Footer Area (Typography, Vintage Stamp & HaloLuna Branding) ──
+      // ── Clean & Elegant Footer (Generous Negative Space) ──
       const footerStartY = h - footerH;
 
-      // Event headline in Playfair Display / Bodoni Moda serif
-      ctx.fillStyle = fg;
-      ctx.font = `bold ${11 * s}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
-      ctx.textAlign = 'center';
-      ctx.fillText(title.toUpperCase(), w / 2, footerStartY + 30 * s);
-
-      // Subtitle / Date
-      ctx.fillStyle = muted;
-      ctx.font = `600 ${8 * s}px Inter, sans-serif`;
-      ctx.fillText(`${fmtCinemaDate()}  •  MEMORIES WITH YOU`, w / 2, footerStartY + 46 * s);
-
-      // Vintage Celebratory Stamp Badge
-      const stampX = w / 2;
-      const stampY = footerStartY + 96 * s;
-      const stampR = 28 * s;
-
+      // Custom name / headline in clean medium size (all-caps serif with tracking)
       ctx.save();
-      ctx.translate(stampX, stampY);
-      ctx.rotate(-0.06);
-
-      ctx.strokeStyle = accentGold;
-      ctx.lineWidth = 1.2 * s;
-      ctx.setLineDash([3 * s, 3 * s]);
-      ctx.beginPath();
-      ctx.arc(0, 0, stampR, 0, Math.PI * 2);
-      ctx.stroke();
-
-      ctx.setLineDash([]);
-      ctx.lineWidth = 0.8 * s;
-      ctx.beginPath();
-      ctx.arc(0, 0, stampR - 4 * s, 0, Math.PI * 2);
-      ctx.stroke();
-
-      ctx.fillStyle = accentGold;
+      ctx.fillStyle = fg;
+      ctx.font = `bold 700 ${13 * s}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
+      if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${3 * s}px`;
       ctx.textAlign = 'center';
-      ctx.font = `bold ${6 * s}px Inter, sans-serif`;
-      ctx.fillText('✦ SPECIAL DAY ✦', 0, -12 * s);
-
-      ctx.font = `bold ${8.5 * s}px "Bodoni Moda", "Playfair Display", serif`;
-      ctx.fillText("LET'S CELEBRATE", 0, 0);
-
-      ctx.font = `italic 400 ${7 * s}px "Pinyon Script", cursive`;
-      ctx.fillText("A beautiful memory", 0, 10 * s);
-
-      ctx.font = `600 ${5 * s}px Inter, sans-serif`;
-      ctx.fillText('• HALOLUNA STUDIO •', 0, 18 * s);
+      ctx.fillText(title.toUpperCase(), w / 2, footerStartY + footerH * 0.28);
       ctx.restore();
 
-      // Cinema Ticket Barcode
-      const barW = 140 * s;
-      const barH = 14 * s;
-      drawBarcode(ctx, w / 2 - barW / 2, h - 44 * s, barW, barH, muted);
+      // Simple clean date (e.g. "25.09.2026")
+      ctx.save();
+      ctx.fillStyle = muted;
+      ctx.font = `500 ${8.5 * s}px Inter, -apple-system, sans-serif`;
+      if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${2 * s}px`;
+      ctx.textAlign = 'center';
+      ctx.fillText(fmtSimpleDate(), w / 2, footerStartY + footerH * 0.48);
+      ctx.restore();
 
-      // Subtle Minimalist HaloLuna Watermark at the bottom of the footer
-      drawHaloLunaWatermark(ctx, w, h - 16 * s, muted, s);
+      // Subtle minimalist barcode accent
+      const barW = 100 * s;
+      const barH = 10 * s;
+      drawBarcode(ctx, w / 2 - barW / 2, footerStartY + footerH * 0.64, barW, barH, muted);
+
+      // Clean subtle watermark at the very bottom
+      drawHaloLunaWatermark(ctx, w, footerStartY + footerH * 0.86, muted, s);
 
       ctx.restore();
     },
@@ -825,8 +745,8 @@ export default function CanvasEditor({
       const count = layout === 'strip4' ? 4 : layout === 'strip3' ? 3 : 4;
 
       // Header Typography with Bold Editorial Hierarchy
-      const title = birthdayNameRef.current || "Hollie's Birthday";
-      const ageVal = birthdayAgeRef.current ? birthdayAgeRef.current.trim() : '';
+      const title = birthdayNameRef.current || "SARAH'S DAY";
+      const ageVal = birthdayAgeRef.current ? birthdayAgeRef.current.trim().replace(/^NO\.?\s*/i, '') : '';
 
       if (ageVal) {
         // Modern caps "HAPPY BIRTHDAY"
@@ -838,22 +758,22 @@ export default function CanvasEditor({
         ctx.fillText('HAPPY BIRTHDAY', w / 2, headerH * 0.28);
         ctx.restore();
 
-        // Prominent serif Age Accent in Bodoni Moda / Playfair Display
-        const displayAge = ageVal.toUpperCase().startsWith('NO.') ? ageVal.toUpperCase() : `NO. ${ageVal}`;
+        // Raw clean prominent Age Number (bold modern serif, NO prefix words)
         ctx.save();
         ctx.fillStyle = bowAccent;
-        ctx.font = `italic 700 ${44 * s}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
+        ctx.font = `bold 700 ${46 * s}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
         if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${2 * s}px`;
         ctx.textAlign = 'center';
-        ctx.fillText(displayAge, w / 2, headerH * 0.54);
+        ctx.fillText(ageVal, w / 2, headerH * 0.54);
         ctx.restore();
 
-        // Romantic cursive script title
+        // All-caps, modern, highly legible serif title with clean tracking
         ctx.save();
         ctx.fillStyle = bowFg;
-        ctx.font = `italic 400 ${26 * s}px "Pinyon Script", "Playfair Display", cursive`;
+        ctx.font = `bold 700 ${15 * s}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
+        if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${3 * s}px`;
         ctx.textAlign = 'center';
-        ctx.fillText(`♡ ${title} ♡`, w / 2, headerH * 0.74);
+        ctx.fillText(title.toUpperCase(), w / 2, headerH * 0.74);
         ctx.restore();
 
         // Subtitle
@@ -871,12 +791,13 @@ export default function CanvasEditor({
         ctx.fillText('HAPPY BIRTHDAY', w / 2, headerH * 0.38);
         ctx.restore();
 
-        // Romantic cursive script accent
+        // All-caps, modern, highly legible serif title with clean tracking
         ctx.save();
         ctx.fillStyle = bowAccent;
-        ctx.font = `italic 400 ${32 * s}px "Pinyon Script", "Playfair Display", cursive`;
+        ctx.font = `bold 700 ${22 * s}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
+        if ('letterSpacing' in ctx) (ctx as any).letterSpacing = `${4 * s}px`;
         ctx.textAlign = 'center';
-        ctx.fillText(`♡ ${title} ♡`, w / 2, headerH * 0.65);
+        ctx.fillText(title.toUpperCase(), w / 2, headerH * 0.65);
         ctx.restore();
 
         // Subtitle
@@ -942,7 +863,7 @@ export default function CanvasEditor({
       ctx.fillStyle = '#9D174D';
       ctx.font = `600 ${8.5 * s}px Inter, sans-serif`;
       ctx.textAlign = 'center';
-      ctx.fillText(`• ${fmtCinemaDate()} •`, w / 2, badgeY + 13 * s);
+      ctx.fillText(fmtSimpleDate(), w / 2, badgeY + 13 * s);
 
       ctx.font = `600 ${6.5 * s}px Inter, sans-serif`;
       ctx.fillStyle = '#DB2777';
@@ -2239,7 +2160,7 @@ export default function CanvasEditor({
                 <div className="flex items-center gap-1.5">
                   <Sparkles size={14} className="text-amber-500" />
                   <span className="text-[11px] font-bold text-zinc-900 uppercase tracking-wider">
-                    {preset === 'birthday' ? 'Cinema Ticket Settings' : 'Pink Bow Settings'}
+                    {preset === 'birthday' ? 'Editorial Birthday Settings' : 'Pink Bow Settings'}
                   </span>
                 </div>
                 <span className="text-[9.5px] font-mono font-bold text-amber-800 bg-amber-100/90 px-2 py-0.5 rounded-full border border-amber-200">
