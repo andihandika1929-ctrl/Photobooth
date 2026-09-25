@@ -519,7 +519,7 @@ export default function CanvasEditor({
 }: CanvasEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const previewWrapRef = useRef<HTMLDivElement>(null);
-  const lastUploadedPresetRef = useRef<string | null>(null);
+
 
   const dragState = useRef<{
     id: string;
@@ -1131,41 +1131,47 @@ export default function CanvasEditor({
         }
 
         // ── Draw Name & Age natively onto canvas BEFORE export ──
+        // Font sizes are canvas-width-relative so they look identical at every resolution.
         {
           const guestName = birthdayNameRef.current || '';
-          const guestAge = birthdayAgeRef.current || '';
+          const guestAge  = birthdayAgeRef.current  || '';
 
           if (guestName || guestAge) {
             ctx.save();
-            ctx.textAlign = 'center';
+            ctx.textAlign    = 'center';
             ctx.textBaseline = 'alphabetic';
-            ctx.lineJoin = 'round';
-            ctx.miterLimit = 2;
+            ctx.lineJoin     = 'round';
+            ctx.miterLimit   = 2;
 
-            // Name line
+            // Name — ~4.5 % of canvas width keeps it readable across all export sizes
             if (guestName) {
-              ctx.font = `bold ${50 * s}px Caveat, cursive`;
+              const nameFontSize = Math.max(18, Math.floor(w * 0.045));
+              ctx.font        = `bold ${nameFontSize}px Caveat, cursive`;
               ctx.strokeStyle = '#FFFFFF';
-              ctx.lineWidth = 6 * s;
-              ctx.strokeText(guestName, w / 2, h - 30 * s);
-              ctx.fillStyle = '#FF69B4';
-              ctx.fillText(guestName, w / 2, h - 30 * s);
+              ctx.lineWidth   = Math.max(2, nameFontSize * 0.12);
+              const nameY     = h - Math.floor(h * 0.04);
+              ctx.strokeText(guestName, w / 2, nameY);
+              ctx.fillStyle   = '#FF69B4';
+              ctx.fillText(guestName,   w / 2, nameY);
             }
 
-            // Age line (e.g. "21st", "29th")
+            // Age — ~2.5 % of canvas width, tucked just below the name
             if (guestAge) {
-              const num = parseInt(guestAge, 10);
-              const j = num % 10;
-              const k = num % 100;
-              const suffix =
-                j === 1 && k !== 11 ? 'st' : j === 2 && k !== 12 ? 'nd' : j === 3 && k !== 13 ? 'rd' : 'th';
-              const ageLabel = `${num}${suffix}`;
-              ctx.font = `bold ${30 * s}px Caveat, cursive`;
+              const num    = parseInt(guestAge, 10);
+              const j      = num % 10;
+              const k      = num % 100;
+              const suffix = j === 1 && k !== 11 ? 'st'
+                           : j === 2 && k !== 12 ? 'nd'
+                           : j === 3 && k !== 13 ? 'rd' : 'th';
+              const ageLabel    = `${num}${suffix}`;
+              const ageFontSize = Math.max(12, Math.floor(w * 0.025));
+              ctx.font        = `bold ${ageFontSize}px Caveat, cursive`;
               ctx.strokeStyle = '#FFFFFF';
-              ctx.lineWidth = 4 * s;
-              ctx.strokeText(ageLabel, w / 2, h - 10 * s);
-              ctx.fillStyle = '#FF69B4';
-              ctx.fillText(ageLabel, w / 2, h - 10 * s);
+              ctx.lineWidth   = Math.max(1.5, ageFontSize * 0.1);
+              const ageY      = h - Math.floor(h * 0.015);
+              ctx.strokeText(ageLabel, w / 2, ageY);
+              ctx.fillStyle   = '#FF69B4';
+              ctx.fillText(ageLabel,   w / 2, ageY);
             }
 
             ctx.restore();
@@ -1266,36 +1272,48 @@ export default function CanvasEditor({
     }
   }, [renderToCanvas]);
 
-  // Auto-sync to cloud when canvas visually changes (debounced)
+  // Upload to Supabase once per preset — fires whenever the active preset changes
+  // (covers initial load AND frame swaps). Waits for render to idle first.
+  const lastUploadedPresetKeyRef = useRef<string | null>(null);
+
   useEffect(() => {
-    if (!previewUrl) return;
+    if (!previewUrl) return; // nothing rendered yet
+
+    // Skip if we already uploaded this exact preset in this session
+    if (lastUploadedPresetKeyRef.current === preset) return;
 
     const timer = setTimeout(async () => {
       try {
-        console.log('[HaloLuna] Auto-Sync: exporting canvas blob for preset', preset);
+        console.log('[HaloLuna] Cloud sync: uploading preset', preset);
+        // Wait for any in-progress render to finish before we export
+        await waitForRenderIdle();
         const blob = await exportCanvasBlob();
-        if (blob && blob.size > 0) {
-          if (onAutoUpload) {
-            onAutoUpload(blob, preset, true); // isActionSave = true forces upsert in page.tsx
-          } else {
-            savePhotoToSupabase(blob, preset, locationRef.current || 'HaloLuna Studio')
-              .catch((err) => console.error("ADMIN UPLOAD ERROR:", err));
-          }
+        if (!blob || blob.size === 0) {
+          console.error('ADMIN UPLOAD ERROR: blob empty after preset', preset);
+          return;
+        }
+        lastUploadedPresetKeyRef.current = preset;
+        if (onAutoUpload) {
+          onAutoUpload(blob, preset, true);
         } else {
-          console.error("ADMIN UPLOAD ERROR: Auto-sync blob was null or empty");
+          savePhotoToSupabase(blob, preset, locationRef.current || 'HaloLuna Studio')
+            .catch((err) => console.error('ADMIN UPLOAD ERROR:', err));
         }
       } catch (err) {
-        console.error("ADMIN UPLOAD ERROR: Auto-sync failed:", err);
+        console.error('ADMIN UPLOAD ERROR: cloud sync failed', err);
       }
-    }, 800);
+    }, 900); // 900 ms debounce — lets the render finish before we grab the blob
 
     return () => clearTimeout(timer);
-  }, [previewUrl, preset, onAutoUpload, exportCanvasBlob]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preset, previewUrl]); // intentionally minimal — onAutoUpload/exportCanvasBlob are stable refs
 
   // Re-render when preset or frameColor changes
   const handlePresetSelect = (newPreset: FramePreset) => {
     if (newPreset === preset) return;
     setPreset(newPreset);
+    // Resetting the key lets the upload effect fire again for the new preset
+    lastUploadedPresetKeyRef.current = null;
   };
 
   // Download Handler (Full High-Resolution Export + Action Save to Supabase)
