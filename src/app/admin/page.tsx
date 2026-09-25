@@ -254,14 +254,14 @@ export default function AdminDashboardPage() {
             </div>
             <div className="flex items-center justify-center gap-1.5 mb-1">
               <h1 className="font-bold text-sm tracking-widest uppercase text-zinc-900">
-                Photobooth Studio
+                HaloLuna Studio
               </h1>
               <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-zinc-900 text-white">
                 Admin
               </span>
             </div>
             <p className="text-[11px] text-zinc-500 font-mono">
-              Korean Aesthetic Studio • Private Management Gate
+              HaloLuna (gethaloluna.com) • Private Management Gate
             </p>
           </div>
 
@@ -364,7 +364,7 @@ export default function AdminDashboardPage() {
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="font-bold text-sm tracking-widest uppercase text-zinc-900 leading-none">
-                  Photobooth Studio
+                  HaloLuna Studio
                 </h1>
                 <span className="text-[9px] font-bold uppercase tracking-widest px-1.5 py-0.5 rounded bg-zinc-900 text-white">
                   HQ Admin
@@ -654,7 +654,7 @@ export default function AdminDashboardPage() {
 
       {/* ── Footer ── */}
       <footer className="border-t border-[#E8DFCE] py-5 px-4 text-center text-xs text-zinc-500 font-mono">
-        <p>PHOTOBOOTH HQ MANAGEMENT • 2026 DIRECTED BY ANDI HANDIKA</p>
+        <p>HALOLUNA HQ MANAGEMENT • GETHALOLUNA.COM • 2026</p>
       </footer>
     </div>
   );

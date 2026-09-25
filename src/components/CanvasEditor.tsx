@@ -19,6 +19,7 @@ import {
   X,
   Sparkles,
   Layers,
+  Smartphone,
 } from 'lucide-react';
 import { type FilterName } from './CameraViewport';
 import { playPrintSound } from './AudioEngine';
@@ -39,6 +40,8 @@ export type FramePreset =
   | 'y2k';
 
 export type LayoutType = 'strip3' | 'strip4' | 'grid2x2';
+
+export type BirthdayPaletteId = 'burgundy' | 'espresso' | 'sage' | 'pink' | 'ivory' | 'charcoal';
 
 type FrameColorId = 'cream' | 'black' | 'olive' | 'blue';
 
@@ -95,16 +98,32 @@ const STICKER_DEFS = [
   { name: 'Smile',  src: '/sticker/Smile.png'  },
 ];
 
-const BIRTHDAY_PALETTES: Record<string, { bg: string; fg: string; accent: string; muted: string }> = {
-  burgundy: { bg: '#6B1D2F', fg: '#F5E6E8', accent: '#E8B4B8', muted: '#C4888E' },
-  mocca:    { bg: '#4A3528', fg: '#F0E8DF', accent: '#C9A882', muted: '#A68562' },
-  sage:     { bg: '#7C8B6A', fg: '#F3F5EE', accent: '#D4DBC4', muted: '#B0BA9A' },
-  pink:     { bg: '#E8B4B8', fg: '#4A1522', accent: '#BE185D', muted: '#9E1452' },
-  ivory:    { bg: '#F7F4EB', fg: '#2A2826', accent: '#8A7560', muted: '#7D776D' },
-  charcoal: { bg: '#1C1C1E', fg: '#E8DFCE', accent: '#E2B874', muted: '#9E968B' },
+export const BIRTHDAY_PALETTES: Record<string, { label: string; bg: string; fg: string; accent: string; muted: string }> = {
+  burgundy: { label: 'Burgundy',      bg: '#6B1D2F', fg: '#F5E6E8', accent: '#E8B4B8', muted: '#C4888E' },
+  espresso: { label: 'Warm Espresso', bg: '#4A3528', fg: '#F0E8DF', accent: '#C9A882', muted: '#A68562' },
+  mocca:    { label: 'Warm Espresso', bg: '#4A3528', fg: '#F0E8DF', accent: '#C9A882', muted: '#A68562' },
+  sage:     { label: 'Sage Green',    bg: '#7C8B6A', fg: '#F3F5EE', accent: '#D4DBC4', muted: '#B0BA9A' },
+  pink:     { label: 'Baby Pink',     bg: '#E8B4B8', fg: '#4A1522', accent: '#BE185D', muted: '#9E1452' },
+  ivory:    { label: 'Cream / Ivory', bg: '#F7F4EB', fg: '#2A2826', accent: '#8A7560', muted: '#7D776D' },
+  charcoal: { label: 'Deep Charcoal', bg: '#1C1C1E', fg: '#E8DFCE', accent: '#E2B874', muted: '#9E968B' },
 };
 
-const SIGNATURE = 'DIRECTED BY ANDI HANDIKA • 2026';
+const SIGNATURE = 'haloluna • gethaloluna.com';
+
+function drawHaloLunaWatermark(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  y: number,
+  color: string,
+  s: number = 1
+) {
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.font = `500 ${8 * s}px Inter, -apple-system, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.fillText('haloluna • gethaloluna.com', w / 2, y);
+  ctx.restore();
+}
 
 // ─── Utilities ────────────────────────────────────────────
 const yieldToMain = () => new Promise<void>((r) => setTimeout(r, 0));
@@ -290,11 +309,11 @@ export default function CanvasEditor({
   const [frameColor, setFrameColor] = useState<FrameColorId>('cream');
   const [location, setLocation] = useState('SEOUL STUDIO');
   const [nowPlaying, setNowPlaying] = useState('NewJeans - Hype Boy');
-  const [birthdayNameInput, setBirthdayNameInput] = useState("Hollie's Birthday");
-  const [birthdayName, setBirthdayName] = useState("Hollie's Birthday");
+  const [birthdayNameInput, setBirthdayNameInput] = useState("SARAH'S DAY");
+  const [birthdayName, setBirthdayName] = useState("SARAH'S DAY");
   const [birthdayTheme, setBirthdayTheme] = useState<'cream' | 'black'>('cream');
-  const [birthdayAge, setBirthdayAge] = useState('');
-  const [birthdayPalette, setBirthdayPalette] = useState<'burgundy' | 'mocca' | 'sage' | 'pink' | 'ivory' | 'charcoal'>('ivory');
+  const [birthdayAge, setBirthdayAge] = useState('21');
+  const [birthdayPalette, setBirthdayPalette] = useState<BirthdayPaletteId>('ivory');
   const [renderProgress, setRenderProgress] = useState<number | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [placedStickers, setPlacedStickers] = useState<PlacedSticker[]>([]);
@@ -304,7 +323,7 @@ export default function CanvasEditor({
   // Debounce birthday title input to keep UI snappy and prevent canvas re-render thrashing
   useEffect(() => {
     const timer = setTimeout(() => {
-      setBirthdayName(birthdayNameInput.trim() || "Hollie's Birthday");
+      setBirthdayName(birthdayNameInput.trim() || "SARAH'S DAY");
     }, 300);
     return () => clearTimeout(timer);
   }, [birthdayNameInput]);
@@ -405,15 +424,15 @@ export default function CanvasEditor({
   const getDimensions = useCallback(
     (isExport: boolean = false) => {
       if (isExport) {
-        // High-DPI print-ready: 1200×3600 base (300 DPI strip), 1200×1200 grid
+        // High-DPI print-ready 300 DPI base: 1200×3600 strip4 (1:3), 1200×2800 strip3, 1200×1200 grid
         if (layout === 'grid2x2') return { w: 1200, h: 1200, s: 1.2 };
         if (layout === 'strip4') return { w: 1200, h: 3600, s: 2.31 };
         return { w: 1200, h: 2800, s: 2.31 }; // strip3
       } else {
-        // Downscaled interactive preview canvas — comfortable for screen
+        // Downscaled interactive preview canvas — exactly 1:1 proportional with export
         if (layout === 'grid2x2') return { w: 400, h: 400, s: 0.4 };
-        if (layout === 'strip4') return { w: 390, h: 1425, s: 0.75 };
-        return { w: 390, h: 1100, s: 0.75 }; // strip3
+        if (layout === 'strip4') return { w: 390, h: 1170, s: 0.75 };
+        return { w: 390, h: 910, s: 0.75 }; // strip3
       }
     },
     [layout]
@@ -449,30 +468,25 @@ export default function CanvasEditor({
       const borderCol = palette.accent + '55';
       const ageText = birthdayAgeRef.current ? `✦  AGE ${birthdayAgeRef.current}  ✦` : '✦  CELEBRATING SPECIAL MOMENTS  ✦';
 
-      // Dimensions & ticket notch setup
-      const headerH = 155 * s;
-      const footerH = 135 * s;
+      // Dimensions & ticket notch setup with Korean Life4Cuts aesthetic margins
+      const headerH = Math.round(h * 0.09);
+      const footerH = Math.round(h * 0.20);
+      const pad = Math.round(w * 0.09); // 9% horizontal margins (8-10%)
+      const gap = Math.round(w * 0.035); // 3.5% vertical gap (3-4%)
       const notchY = headerH;
-      const notchR = 12 * s;
+      const notchR = Math.round(w * 0.025);
 
       // Draw Cinema Ticket Base Shape with Scalloped Left/Right Cutouts
       ctx.save();
       ctx.fillStyle = bg;
       ctx.beginPath();
-      // Start top-left
       ctx.moveTo(0, 0);
       ctx.lineTo(w, 0);
-      // Right edge down to notch
       ctx.lineTo(w, notchY - notchR);
-      // Right notch (semicircle curved inward)
       ctx.arc(w, notchY, notchR, -Math.PI / 2, Math.PI / 2, true);
-      // Right edge to bottom
       ctx.lineTo(w, h);
-      // Bottom edge
       ctx.lineTo(0, h);
-      // Left edge up to notch
       ctx.lineTo(0, notchY + notchR);
-      // Left notch (semicircle curved inward)
       ctx.arc(0, notchY, notchR, Math.PI / 2, -Math.PI / 2, true);
       ctx.lineTo(0, 0);
       ctx.closePath();
@@ -494,41 +508,49 @@ export default function CanvasEditor({
       }
 
       // ── Header Box ──
-      // Top ticket meta
       ctx.fillStyle = muted;
       ctx.font = `600 ${7.5 * s}px Inter, sans-serif`;
       ctx.textAlign = 'left';
-      ctx.fillText('ADMIT ONE  •  NO. BDAY-2026', 22 * s, 34 * s);
+      ctx.fillText('HALOLUNA STUDIO  •  NO. BDAY-2026', pad, 32 * s);
       ctx.textAlign = 'right';
-      ctx.fillText('KOREAN STUDIO STRIP', w - 22 * s, 34 * s);
+      ctx.fillText('KOREAN STUDIO STRIP', w - pad, 32 * s);
 
       // Thin separator under top meta
       ctx.strokeStyle = borderCol;
       ctx.lineWidth = 0.8 * s;
       ctx.beginPath();
-      ctx.moveTo(22 * s, 42 * s);
-      ctx.lineTo(w - 22 * s, 42 * s);
+      ctx.moveTo(pad, 40 * s);
+      ctx.lineTo(w - pad, 40 * s);
       ctx.stroke();
 
-      // Cursive script header: [Name]'s Birthday
-      const title = birthdayNameRef.current || "Hollie's Birthday";
-      ctx.fillStyle = fg;
-      ctx.font = `italic 400 ${32 * s}px "Pinyon Script", "Playfair Display", Georgia, cursive`;
+      // Cursive / Serif script header with custom Age & Name
+      const title = birthdayNameRef.current || "SARAH'S DAY";
+      const ageVal = birthdayAgeRef.current ? birthdayAgeRef.current.trim() : '';
+
+      if (ageVal) {
+        // Prominent serif Age Accent in Bodoni Moda / Playfair Display
+        ctx.fillStyle = accentGold;
+        ctx.font = `italic 700 ${28 * s}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
+        ctx.textAlign = 'center';
+        ctx.fillText(`NO. ${ageVal}`, w / 2, headerH * 0.44);
+
+        ctx.fillStyle = fg;
+        ctx.font = `italic 400 ${22 * s}px "Pinyon Script", "Playfair Display", cursive`;
+        ctx.fillText(title, w / 2, headerH * 0.70);
+      } else {
+        ctx.fillStyle = fg;
+        ctx.font = `italic 400 ${30 * s}px "Pinyon Script", "Playfair Display", Georgia, cursive`;
+        ctx.textAlign = 'center';
+        ctx.fillText(title, w / 2, headerH * 0.58);
+      }
+
+      // Minimalist date stamp underneath
+      ctx.fillStyle = muted;
+      ctx.font = `600 ${8.5 * s}px Inter, sans-serif`;
       ctx.textAlign = 'center';
-      ctx.fillText(title, w / 2, 88 * s);
-
-      // Minimalist date stamp underneath (e.g. • 24.09.2026 •)
-      ctx.fillStyle = muted;
-      ctx.font = `600 ${9.5 * s}px Inter, sans-serif`;
-      ctx.fillText(fmtCinemaDate(), w / 2, 112 * s);
-
-      ctx.font = `600 ${7 * s}px Inter, sans-serif`;
-      ctx.fillStyle = muted;
-      ctx.fillText(ageText, w / 2, 128 * s);
+      ctx.fillText(fmtCinemaDate(), w / 2, headerH * 0.86);
 
       // ── Crisp Photo Frames ──
-      const pad = 24 * s;
-      const gap = 12 * s;
       const count = layout === 'strip4' ? 4 : layout === 'strip3' ? 3 : 4;
 
       if (layout === 'grid2x2') {
@@ -544,7 +566,7 @@ export default function CanvasEditor({
           if (!imgs[i]) continue;
           const [c2, r] = pos[i];
           const ix = pad + c2 * (cw + gap);
-          const iy = headerH + 16 * s + r * (ch + gap);
+          const iy = headerH + 12 * s + r * (ch + gap);
           drawGradedPhoto(ctx, imgs[i], ix, iy, cw, ch, 5 * s, isExport);
           ctx.strokeStyle = borderCol;
           ctx.lineWidth = 1.2 * s;
@@ -553,10 +575,10 @@ export default function CanvasEditor({
         }
       } else {
         const iw = w - pad * 2;
-        const ih = (h - headerH - footerH - 18 * s - gap * (count - 1)) / count;
+        const ih = (h - headerH - footerH - 12 * s - gap * (count - 1)) / count;
         for (let i = 0; i < count; i++) {
           if (!imgs[i]) continue;
-          const iy = headerH + 18 * s + i * (ih + gap);
+          const iy = headerH + 12 * s + i * (ih + gap);
           drawGradedPhoto(ctx, imgs[i], pad, iy, iw, ih, 5 * s, isExport);
           ctx.strokeStyle = borderCol;
           ctx.lineWidth = 1.2 * s;
@@ -571,16 +593,29 @@ export default function CanvasEditor({
         }
       }
 
-      // ── Vintage Celebratory Stamp Badge ──
+      // ── Footer Area (Typography, Vintage Stamp & HaloLuna Branding) ──
+      const footerStartY = h - footerH;
+
+      // Event headline in Playfair Display / Bodoni Moda serif
+      ctx.fillStyle = fg;
+      ctx.font = `bold ${11 * s}px "Bodoni Moda", "Playfair Display", Georgia, serif`;
+      ctx.textAlign = 'center';
+      ctx.fillText(title.toUpperCase(), w / 2, footerStartY + 30 * s);
+
+      // Subtitle / Date
+      ctx.fillStyle = muted;
+      ctx.font = `600 ${8 * s}px Inter, sans-serif`;
+      ctx.fillText(`${fmtCinemaDate()}  •  MEMORIES WITH YOU`, w / 2, footerStartY + 46 * s);
+
+      // Vintage Celebratory Stamp Badge
       const stampX = w / 2;
-      const stampY = h - 72 * s;
-      const stampR = 32 * s;
+      const stampY = footerStartY + 96 * s;
+      const stampR = 28 * s;
 
       ctx.save();
       ctx.translate(stampX, stampY);
-      ctx.rotate(-0.06); // authentic vintage stamp tilt
+      ctx.rotate(-0.06);
 
-      // Outer dashed circle
       ctx.strokeStyle = accentGold;
       ctx.lineWidth = 1.2 * s;
       ctx.setLineDash([3 * s, 3 * s]);
@@ -588,39 +623,34 @@ export default function CanvasEditor({
       ctx.arc(0, 0, stampR, 0, Math.PI * 2);
       ctx.stroke();
 
-      // Inner solid circle
       ctx.setLineDash([]);
       ctx.lineWidth = 0.8 * s;
       ctx.beginPath();
       ctx.arc(0, 0, stampR - 4 * s, 0, Math.PI * 2);
       ctx.stroke();
 
-      // Stamp typography & stars
       ctx.fillStyle = accentGold;
       ctx.textAlign = 'center';
-      ctx.font = `bold ${6.5 * s}px Inter, sans-serif`;
-      ctx.fillText('✦ SPECIAL DAY ✦', 0, -14 * s);
+      ctx.font = `bold ${6 * s}px Inter, sans-serif`;
+      ctx.fillText('✦ SPECIAL DAY ✦', 0, -12 * s);
 
-      ctx.font = `bold ${9 * s}px "Playfair Display", Georgia, serif`;
-      ctx.fillText("LET'S CELEBRATE", 0, -1 * s);
+      ctx.font = `bold ${8.5 * s}px "Bodoni Moda", "Playfair Display", serif`;
+      ctx.fillText("LET'S CELEBRATE", 0, 0);
 
-      ctx.font = `italic 400 ${7.5 * s}px "Pinyon Script", cursive`;
-      ctx.fillText("It's your special day", 0, 11 * s);
+      ctx.font = `italic 400 ${7 * s}px "Pinyon Script", cursive`;
+      ctx.fillText("A beautiful memory", 0, 10 * s);
 
-      ctx.font = `600 ${5.5 * s}px Inter, sans-serif`;
-      ctx.fillText('• OUR STUDIO 2026 •', 0, 20 * s);
-
+      ctx.font = `600 ${5 * s}px Inter, sans-serif`;
+      ctx.fillText('• HALOLUNA STUDIO •', 0, 18 * s);
       ctx.restore();
 
-      // ── Cinema Ticket Barcode & Serial Footer ──
+      // Cinema Ticket Barcode
       const barW = 140 * s;
       const barH = 14 * s;
-      drawBarcode(ctx, w / 2 - barW / 2, h - 35 * s, barW, barH, muted);
+      drawBarcode(ctx, w / 2 - barW / 2, h - 44 * s, barW, barH, muted);
 
-      ctx.fillStyle = muted;
-      ctx.font = `600 ${7.5 * s}px "Courier New", monospace`;
-      ctx.textAlign = 'center';
-      ctx.fillText(`* ${fmtDate().replace(/\//g, '')}-BDAY-OURSTUDIO *`, w / 2, h - 16 * s);
+      // Subtle Minimalist HaloLuna Watermark at the bottom of the footer
+      drawHaloLunaWatermark(ctx, w, h - 16 * s, muted, s);
 
       ctx.restore();
     },
@@ -795,11 +825,11 @@ export default function CanvasEditor({
       ctx.font = `600 ${8 * s}px Inter, sans-serif`;
       ctx.fillText('✦  A BEAUTIFUL DAY TO CELEBRATE YOU  ✦', w / 2, 102 * s);
 
-      // Photo Frames
-      const pad = 26 * s;
-      const gap = 12 * s;
-      const headerH = 118 * s;
-      const footerH = 125 * s;
+      // Photo Frames with Korean Life4Cuts margins
+      const headerH = Math.round(h * 0.09);
+      const footerH = Math.round(h * 0.20);
+      const pad = Math.round(w * 0.09);
+      const gap = Math.round(w * 0.035);
       const count = layout === 'strip4' ? 4 : layout === 'strip3' ? 3 : 4;
 
       if (layout === 'grid2x2') {
@@ -865,10 +895,7 @@ export default function CanvasEditor({
       ctx.fillText('CHERISHED MEMORIES FOREVER', w / 2, badgeY + 22 * s);
 
       // Watermark Signature
-      ctx.fillStyle = '#BE185D';
-      ctx.font = `600 ${8.5 * s}px "Courier New", monospace`;
-      ctx.textAlign = 'center';
-      ctx.fillText(SIGNATURE, w / 2, h - 16 * s);
+      drawHaloLunaWatermark(ctx, w, h - 16 * s, bowMuted, s);
     },
     [layout]
   );
@@ -1494,22 +1521,23 @@ export default function CanvasEditor({
       ctx.fillStyle = COLOR.bg;
       ctx.fillRect(0, 0, w, h);
 
-      const pad = 28 * s;
-      const gap = 12 * s;
-      const headerH = 80 * s;
-      const footerH = 100 * s;
+      // Korean Life4Cuts aesthetic proportions
+      const pad = Math.round(w * 0.09);
+      const gap = Math.round(w * 0.035);
+      const headerH = Math.round(h * 0.08);
+      const footerH = Math.round(h * 0.20);
       const count = layout === 'strip4' ? 4 : layout === 'strip3' ? 3 : 4;
 
       // Header
       ctx.fillStyle = COLOR.text;
-      ctx.font = `300 ${20 * s}px Inter, sans-serif`;
+      ctx.font = `300 ${18 * s}px Inter, sans-serif`;
       ctx.textAlign = 'left';
-      ctx.fillText('PHOTOBOOTH', pad, headerH - 26 * s);
+      ctx.fillText('HALOLUNA STUDIO', pad, headerH - 24 * s);
 
-      ctx.font = `400 ${10.5 * s}px "Courier New", monospace`;
+      ctx.font = `400 ${9.5 * s}px "Courier New", monospace`;
       ctx.fillStyle = COLOR.accent;
       ctx.textAlign = 'right';
-      ctx.fillText(`${fmtDate()}  ${fmtTime()}`, w - pad, headerH - 26 * s);
+      ctx.fillText(`${fmtDate()}  ${fmtTime()}`, w - pad, headerH - 24 * s);
 
       ctx.strokeStyle = COLOR.border;
       ctx.lineWidth = 1.2 * s;
@@ -1570,10 +1598,7 @@ export default function CanvasEditor({
 
       drawBarcode(ctx, w - pad - 80 * s, fy + 18 * s, 80 * s, 36 * s, COLOR.text);
 
-      ctx.fillStyle = COLOR.accent;
-      ctx.font = `600 ${8.5 * s}px "Courier New", monospace`;
-      ctx.textAlign = 'center';
-      ctx.fillText(SIGNATURE, w / 2, h - 16 * s);
+      drawHaloLunaWatermark(ctx, w, h - 16 * s, COLOR.accent, s);
     },
     [COLOR, layout]
   );
@@ -1921,7 +1946,7 @@ export default function CanvasEditor({
       if (!dataUrl) return;
 
       const link = document.createElement('a');
-      link.download = `photobooth-${preset}-${Date.now()}.png`;
+      link.download = `haloluna-${preset}-${Date.now()}.png`;
       link.href = dataUrl;
       link.click();
 
@@ -1936,6 +1961,100 @@ export default function CanvasEditor({
       }
     } catch (err) {
       console.error('Download export failed:', err);
+    } finally {
+      setRenderProgress(null);
+      isRenderingRef.current = false;
+    }
+  };
+
+  // 9:16 Mobile Lockscreen Wallpaper Generator
+  const handleMakeWallpaper = async () => {
+    if (isRenderingRef.current) return;
+    isRenderingRef.current = true;
+    setRenderProgress(15);
+    try {
+      await yieldToMain();
+      setRenderProgress(35);
+      const stripDataUrl = await renderToCanvas(true);
+      setRenderProgress(70);
+      await yieldToMain();
+      if (!stripDataUrl) return;
+
+      const stripImg = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = reject;
+        img.src = stripDataUrl;
+      });
+
+      // Target Mobile Screen (9:16 ratio) - Standard high-res 1080 x 1920 px
+      const wallW = 1080;
+      const wallH = 1920;
+      const wallCanvas = document.createElement('canvas');
+      wallCanvas.width = wallW;
+      wallCanvas.height = wallH;
+      const wCtx = wallCanvas.getContext('2d');
+      if (!wCtx) return;
+
+      // Fill background with selected palette color
+      const palette = BIRTHDAY_PALETTES[birthdayPaletteRef.current] ?? BIRTHDAY_PALETTES.ivory;
+      wCtx.fillStyle = palette.bg;
+      wCtx.fillRect(0, 0, wallW, wallH);
+
+      // Subtle atmospheric radial gradient
+      const grad = wCtx.createRadialGradient(
+        wallW / 2,
+        wallH * 0.45,
+        wallW * 0.05,
+        wallW / 2,
+        wallH * 0.45,
+        wallW * 0.9
+      );
+      grad.addColorStop(0, 'rgba(255, 255, 255, 0.08)');
+      grad.addColorStop(1, 'rgba(0, 0, 0, 0.16)');
+      wCtx.fillStyle = grad;
+      wCtx.fillRect(0, 0, wallW, wallH);
+
+      // Scale photostrip to fit comfortably on screen (~75% of height)
+      const targetH = Math.round(wallH * 0.75);
+      const targetW = Math.round((stripImg.width / stripImg.height) * targetH);
+      const posX = Math.round((wallW - targetW) / 2);
+      const posY = Math.round((wallH - targetH) / 2 + 25);
+
+      // Deep realistic drop shadow
+      wCtx.save();
+      wCtx.shadowColor = 'rgba(0, 0, 0, 0.45)';
+      wCtx.shadowBlur = 48;
+      wCtx.shadowOffsetX = 0;
+      wCtx.shadowOffsetY = 22;
+
+      wCtx.drawImage(stripImg, posX, posY, targetW, targetH);
+      wCtx.restore();
+
+      // Top lockscreen branding
+      wCtx.save();
+      wCtx.fillStyle = palette.fg;
+      wCtx.globalAlpha = 0.55;
+      wCtx.font = '600 20px Inter, sans-serif';
+      wCtx.textAlign = 'center';
+      wCtx.fillText('✦  HALOLUNA STUDIO  ✦', wallW / 2, posY - 36);
+
+      // Bottom lockscreen details
+      wCtx.globalAlpha = 0.5;
+      wCtx.font = '400 17px Inter, sans-serif';
+      wCtx.fillText('gethaloluna.com • 9:16 lockscreen', wallW / 2, wallH - 46);
+      wCtx.restore();
+
+      setRenderProgress(95);
+      await yieldToMain();
+
+      const wallpaperUrl = wallCanvas.toDataURL('image/png');
+      const link = document.createElement('a');
+      link.download = `haloluna-wallpaper-${Date.now()}.png`;
+      link.href = wallpaperUrl;
+      link.click();
+    } catch (err) {
+      console.error('Wallpaper export failed:', err);
     } finally {
       setRenderProgress(null);
       isRenderingRef.current = false;
@@ -2110,13 +2229,13 @@ export default function CanvasEditor({
                   type="text"
                   value={birthdayNameInput}
                   onChange={(e) => setBirthdayNameInput(e.target.value)}
-                  placeholder="e.g. Hollie's Birthday"
+                  placeholder="e.g. SARAH'S DAY"
                   maxLength={32}
                   className="w-full text-xs font-semibold border border-zinc-300 rounded-lg px-3 py-2 bg-white outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition-all shadow-xs"
                 />
                 <div className="flex flex-wrap items-center gap-1.5 mt-2">
                   <span className="text-[10px] text-zinc-400 font-mono">Quick:</span>
-                  {["Hollie's Birthday", "Andi's Birthday", "Happy Birthday ♡", "Our Special Day"].map((sug) => (
+                  {["SARAH'S DAY", "HAPPY BIRTHDAY ANDI", "Hollie's Birthday", "Our Special Day"].map((sug) => (
                     <button
                       key={sug}
                       type="button"
@@ -2136,7 +2255,7 @@ export default function CanvasEditor({
               {/* Birthday Age Input */}
               <div>
                 <label className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest block mb-1.5">
-                  Age (optional)
+                  Age Number (e.g. 21, 24)
                 </label>
                 <input
                   type="number"
@@ -2149,77 +2268,37 @@ export default function CanvasEditor({
                 />
               </div>
 
-              {/* Color Palette Selector */}
+              {/* Aesthetic Solid Color Palette Selector */}
               <div>
                 <label className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest block mb-1.5">
-                  Color Palette
+                  Aesthetic Color Palette
                 </label>
                 <div className="grid grid-cols-3 gap-2">
                   {([
-                    { id: 'ivory',    label: 'Cream',    color: '#F7F4EB', text: '#2A2826' },
-                    { id: 'pink',     label: 'Pink',     color: '#E8B4B8', text: '#4A1522' },
-                    { id: 'burgundy', label: 'Burgundy', color: '#6B1D2F', text: '#F5E6E8' },
-                    { id: 'mocca',    label: 'Mocca',    color: '#4A3528', text: '#F0E8DF' },
-                    { id: 'sage',     label: 'Sage',     color: '#7C8B6A', text: '#F3F5EE' },
-                    { id: 'charcoal', label: 'Charcoal', color: '#1C1C1E', text: '#E8DFCE' },
+                    { id: 'burgundy', label: 'Burgundy',      color: '#6B1D2F', text: '#F5E6E8' },
+                    { id: 'espresso', label: 'Warm Espresso', color: '#4A3528', text: '#F0E8DF' },
+                    { id: 'sage',     label: 'Sage Green',    color: '#7C8B6A', text: '#F3F5EE' },
+                    { id: 'pink',     label: 'Baby Pink',     color: '#E8B4B8', text: '#4A1522' },
+                    { id: 'ivory',    label: 'Cream / Ivory', color: '#F7F4EB', text: '#2A2826' },
+                    { id: 'charcoal', label: 'Deep Charcoal', color: '#1C1C1E', text: '#E8DFCE' },
                   ] as const).map((pal) => (
                     <button
                       key={pal.id}
                       type="button"
                       onClick={() => setBirthdayPalette(pal.id)}
-                      className={`p-2 rounded-lg border-2 flex flex-col items-center justify-center gap-1 text-[9.5px] font-bold transition-all ${
+                      className={`p-2.5 rounded-xl border-2 flex flex-col items-center justify-center gap-1 text-[10px] font-bold transition-all shadow-xs ${
                         birthdayPalette === pal.id
-                          ? 'border-zinc-900 shadow-md scale-[1.04]'
+                          ? 'border-zinc-900 ring-2 ring-zinc-900/30 shadow-md scale-[1.04]'
                           : 'border-zinc-200 hover:border-zinc-400'
                       }`}
                       style={{ backgroundColor: pal.color, color: pal.text }}
                     >
-                      {pal.label}
+                      <span className="w-3.5 h-3.5 rounded-full border border-black/10 shrink-0" style={{ backgroundColor: pal.color }} />
+                      <span className="truncate w-full text-center">{pal.label}</span>
                     </button>
                   ))}
                 </div>
               </div>
-
-              {/* Dual Color Themes (Cinema Ticket only) */}
-              {preset === 'birthday' && (
-                <div>
-                  <label className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest block mb-1.5">
-                    Ticket Color Theme
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setBirthdayTheme('cream')}
-                      className={`p-2.5 rounded-lg border flex items-center gap-2.5 text-xs font-semibold transition-all ${
-                        birthdayTheme === 'cream'
-                          ? 'border-zinc-900 bg-white shadow-sm ring-1 ring-zinc-900 font-bold'
-                          : 'border-zinc-200 bg-[#FAF7EE] text-zinc-600 hover:border-zinc-300'
-                      }`}
-                    >
-                      <span className="w-4 h-4 rounded-full bg-[#FAF7EE] border border-zinc-300 shadow-xs shrink-0" />
-                      <div className="text-left">
-                        <p className="leading-tight">Warm Soft Cream</p>
-                        <p className="text-[9.5px] font-normal text-zinc-500">Charcoal text & accents</p>
-                      </div>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setBirthdayTheme('black')}
-                      className={`p-2.5 rounded-lg border flex items-center gap-2.5 text-xs font-semibold transition-all ${
-                        birthdayTheme === 'black'
-                          ? 'border-zinc-900 bg-zinc-900 text-white shadow-sm ring-1 ring-zinc-900 font-bold'
-                          : 'border-zinc-200 bg-[#141416] text-zinc-300 hover:border-zinc-700'
-                      }`}
-                    >
-                      <span className="w-4 h-4 rounded-full bg-[#141416] border border-zinc-600 shadow-xs shrink-0" />
-                      <div className="text-left">
-                        <p className="leading-tight">Dark Jet-Black</p>
-                        <p className="text-[9.5px] font-normal text-zinc-400">Cream gold script</p>
-                      </div>
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
@@ -2504,21 +2583,31 @@ export default function CanvasEditor({
               : 'Add cute stickers above to customize your strip!'}
           </p>
 
-          {/* Action Buttons */}
-          <div className="flex gap-2.5 w-full">
+          {/* Dual Export Action Buttons */}
+          <div className="flex flex-col sm:flex-row gap-2.5 w-full">
             <button
               onClick={handleDownload}
-              className="flex-1 btn-neo-dark flex items-center justify-center gap-2 py-3.5 text-sm font-bold rounded-xl shadow-md active:scale-[0.98] transition-all"
+              className="flex-1 btn-neo-dark flex items-center justify-center gap-2 py-3.5 text-xs sm:text-sm font-bold rounded-xl shadow-md active:scale-[0.98] transition-all"
+              title="Download uncompressed sharp photostrip PNG"
             >
-              <Download size={15} />
-              Download PNG
+              <Download size={16} />
+              <span>Download Photostrip</span>
+            </button>
+            <button
+              onClick={handleMakeWallpaper}
+              className="flex-1 bg-gradient-to-r from-amber-600 via-rose-600 to-amber-700 hover:from-amber-700 hover:to-rose-800 text-white flex items-center justify-center gap-2 py-3.5 text-xs sm:text-sm font-bold rounded-xl shadow-md active:scale-[0.98] transition-all border border-amber-400/30"
+              title="Make 9:16 phone lockscreen wallpaper"
+            >
+              <Smartphone size={16} />
+              <span>Make Wallpaper (9:16)</span>
             </button>
             <button
               onClick={handleShareClick}
-              className="flex-1 btn-neo flex items-center justify-center gap-2 py-3.5 text-sm font-bold rounded-xl shadow-md active:scale-[0.98] transition-all"
+              className="btn-neo flex items-center justify-center gap-2 py-3.5 px-4 text-xs sm:text-sm font-bold rounded-xl shadow-md active:scale-[0.98] transition-all"
+              title="Share / QR Code"
             >
-              <QrCode size={15} />
-              Share / QR Code
+              <QrCode size={16} />
+              <span className="hidden sm:inline">Share</span>
             </button>
           </div>
 

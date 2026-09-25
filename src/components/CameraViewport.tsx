@@ -92,18 +92,20 @@ export function getFilterCss(filterId?: FilterName): string {
   return STUDIO_FILTERS[0].css;
 }
 
-const POSE_GUIDES = [
-  'Pose 1: Senyum Manis 😊',
-  'Pose 2: Peace Sign by Cheek ✌️',
+export const POSE_GUIDES = [
+  'Pose 1: Sweet Smile 😊',
+  'Pose 2: Cheek Peace Sign ✌️',
   'Pose 3: Cheek Heart 🫶',
-  'Pose 4: Candid Tertawa 😂',
+  'Pose 4: Candid Laugh 😂',
+  'Pose 5: Wink & Point 😉👉',
+  'Pose 6: Free Pose / Silly Face 🤪',
 ];
 
 interface CameraViewportProps {
   onCapture: (imageDataUrl: string, filter: FilterName) => void;
   isCapturing: boolean;
   capturedCount: number;
-  totalFrames: number;
+  totalFrames?: number;
   countdownDuration?: CountdownDuration;
   onCountdownDurationChange?: (duration: CountdownDuration) => void;
   capturedThumbnails?: string[];
@@ -114,8 +116,8 @@ export default function CameraViewport({
   onCapture,
   isCapturing,
   capturedCount,
-  totalFrames,
-  countdownDuration = 5,
+  totalFrames = 6,
+  countdownDuration = 3,
   onCountdownDurationChange,
   capturedThumbnails = [],
   onRetakeLast,
@@ -498,6 +500,26 @@ export default function CameraViewport({
         <div className="mx-auto h-1.5 w-32 bg-[#B0A890] rounded-b-sm" />
       </div>
 
+      {/* Dynamic Pose Idea Prompt displayed beneath the camera */}
+      {poseState === 'idle' && isCapturing && countdown === null && (
+        <div className="flex items-center justify-between px-3.5 py-2.5 bg-white/10 border border-white/15 rounded-xl backdrop-blur-sm">
+          <div className="flex items-center gap-2">
+            <span className="text-sm">✨</span>
+            <div>
+              <p className="text-[10px] font-mono font-bold uppercase tracking-wider text-amber-300">
+                Pose Idea ({capturedCount + 1}/{totalFrames})
+              </p>
+              <p className="text-xs font-semibold text-white">
+                {POSE_GUIDES[capturedCount] ?? 'Free Pose / Smile!'}
+              </p>
+            </div>
+          </div>
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-white/10 text-white/80 border border-white/10">
+            {countdownDuration}s Countdown
+          </span>
+        </div>
+      )}
+
       {/* Shot Tracker Thumbnails */}
       {capturedThumbnails.length > 0 && (
         <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-1">
@@ -531,31 +553,46 @@ export default function CameraViewport({
 
       {/* Pose Guide + Next/Retake actions when in posing state */}
       {poseState === 'posing' && isCapturing && countdown === null && (
-        <div className="w-full flex flex-col gap-2.5 p-3.5 bg-white/10 rounded-2xl border border-white/15 backdrop-blur-sm">
-          <p className="text-center text-white/90 text-xs font-bold uppercase tracking-widest">
-            📸 Shot {capturedCount}/{totalFrames} captured!
-          </p>
-          <p className="text-center text-amber-300 text-sm font-semibold">
-            {POSE_GUIDES[capturedCount] ?? `Pose ${capturedCount + 1}: Ekspresikan Dirimu!`}
-          </p>
-          <div className="flex gap-2">
+        <div className="w-full flex flex-col gap-2.5 p-3.5 bg-zinc-900/90 rounded-2xl border border-amber-500/30 backdrop-blur-md shadow-xl">
+          <div className="flex items-center justify-between">
+            <p className="text-white/90 text-xs font-bold uppercase tracking-widest flex items-center gap-1.5">
+              <span>📸</span>
+              <span>Photo {capturedCount}/{totalFrames} Captured!</span>
+            </p>
+            <span className="text-[10px] font-mono text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded-full border border-amber-400/20">
+              Live Preview Active
+            </span>
+          </div>
+
+          <div className="p-2.5 rounded-xl bg-white/5 border border-white/10">
+            <p className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider">
+              Next Pose Prompt:
+            </p>
+            <p className="text-amber-300 text-sm font-semibold">
+              {POSE_GUIDES[capturedCount] ?? 'Final Pose: Strike your favorite look!'}
+            </p>
+          </div>
+
+          <div className="flex gap-2 pt-1">
             <button
               onClick={() => {
                 if (onRetakeLast) onRetakeLast();
                 setPoseState('idle');
               }}
-              className="flex-1 py-2.5 rounded-xl border border-white/25 text-white/80 text-xs font-bold hover:bg-white/10 transition-all"
+              className="flex-1 py-2.5 rounded-xl border border-white/20 text-white/90 text-xs font-bold hover:bg-white/10 transition-all flex items-center justify-center gap-1.5"
             >
-              🔄 Ulangi Foto Ini
+              <RotateCcw size={13} />
+              <span>Retake This Shot</span>
             </button>
             <button
               onClick={() => {
                 setPoseState('idle');
                 startCountdown();
               }}
-              className="flex-1 py-2.5 rounded-xl bg-white text-zinc-900 text-xs font-bold shadow-md hover:bg-amber-50 transition-all"
+              className="flex-1 py-2.5 rounded-xl bg-white text-zinc-900 text-xs font-bold shadow-md hover:bg-amber-100 transition-all flex items-center justify-center gap-1.5"
             >
-              ➡️ Lanjut Foto Berikutnya
+              <span>Next Photo</span>
+              <span>→</span>
             </button>
           </div>
         </div>
@@ -580,10 +617,10 @@ export default function CameraViewport({
           : poseState === 'posing'
           ? 'Choose action above ↑'
           : !isCapturing
-          ? 'All frames captured!'
+          ? 'All 6 photos captured!'
           : capturedCount > 0
-          ? `Next Shot (${capturedCount + 1}/${totalFrames}) • ${countdownDuration}s`
-          : `Ambil Foto 1/${totalFrames} • ${countdownDuration}s`}
+          ? `Next Photo (${capturedCount + 1}/${totalFrames}) • ${countdownDuration}s`
+          : `Take Photo 1/${totalFrames} • ${countdownDuration}s`}
       </button>
 
       <input

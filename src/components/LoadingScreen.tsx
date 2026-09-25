@@ -74,7 +74,7 @@ export default function LoadingScreen({
           {phase === 'loading' ? message : 'Memories Ready!'}
         </h2>
         <p className="text-[11px] font-mono text-zinc-500 uppercase tracking-widest mb-6">
-          Directed by Andi Handika
+          HaloLuna • gethaloluna.com
         </p>
 
         {/* Sleek Progress Bar */}

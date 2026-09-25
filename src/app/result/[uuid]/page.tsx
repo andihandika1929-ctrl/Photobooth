@@ -31,8 +31,8 @@ export default async function ResultPage({ params }: ResultPageProps) {
             <Camera size={15} className="text-cream" />
           </div>
           <div>
-            <h1 className="font-bold text-[13px] tracking-widest uppercase">Photobooth</h1>
-            <p className="text-[9px] text-warm font-mono uppercase tracking-widest mt-0.5">Photo Strip Viewer</p>
+            <h1 className="font-bold text-[13px] tracking-widest uppercase">HaloLuna</h1>
+            <p className="text-[9px] text-warm font-mono uppercase tracking-widest mt-0.5">Korean Aesthetic Photobooth • gethaloluna.com</p>
           </div>
         </div>
       </header>
@@ -86,8 +86,7 @@ export default async function ResultPage({ params }: ResultPageProps) {
 
       <footer className="border-t border-border py-5 px-4 text-center bg-cream/60">
         <p className="text-[11px] text-warm">
-          Crafted &amp; Directed by{' '}
-          <span className="text-charcoal font-semibold">Andi Handika</span>
+          © 2026 <span className="text-charcoal font-semibold">HaloLuna</span> • gethaloluna.com
         </p>
       </footer>
     </div>
