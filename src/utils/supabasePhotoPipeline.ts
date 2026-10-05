@@ -3,150 +3,226 @@ import { createClient } from '@/utils/supabase/client';
 export interface SavePhotoResult {
   success: boolean;
   id?: string;
+  sessionId?: string;
   publicUrl?: string;
   storage_path?: string;
   error?: unknown;
 }
 
+export interface SavePhotoOptions {
+  /** e.g. 'birthday', 'birthdayCatPink', 'film35mm' */
+  templateType?: string;
+  /** Human-readable studio tag, e.g. 'SEOUL STUDIO' */
+  locationTag?: string;
+  /** Raw birthday name from the input field (only for birthday presets) */
+  guestName?: string;
+  /** Raw birthday age digits (only for birthday presets) */
+  guestAge?: string;
+  /** Re-use an existing photos row (for updates) */
+  existingPhotoId?: string;
+  /** Re-use the same storage path (skip generating a new one) */
+  existingStoragePath?: string;
+}
+
 /**
- * Uploads a photo strip to Supabase Storage ('photos' bucket)
- * and inserts a record into 'public.photos' matching the exact schema:
- * - id (UUID, auto-generated)
- * - image_url (TEXT NOT NULL)
- * - storage_path (TEXT NOT NULL)
- * - template_type (TEXT NOT NULL)
- * - location_tag (TEXT, optional)
- * - created_at (TIMESTAMP)
+ * Phase 2 (Task 2.2 / 2.3) background sync pipeline.
+ *
+ * 1. Uploads the blob to Supabase Storage bucket 'photos'.
+ * 2. Upserts a row in `public.sessions` with guest_name / guest_age.
+ * 3. Inserts / updates a row in `public.photos` linked via session_id.
+ * 4. If the Supabase JS client is blocked by RLS, silently falls back to
+ *    the server-side /api/upload route (which uses the service role key).
+ *
+ * This function NEVER throws — all errors are captured and returned as
+ * { success: false, error }. Callers should treat failures as advisory.
  */
 export async function savePhotoToSupabase(
   blob: Blob,
-  currentTemplate: string = 'classic-strip',
-  locationTag: string = 'Jakarta Studio',
-  existingId?: string,
-  existingStoragePath?: string
+  templateTypeOrOptions: string | SavePhotoOptions = 'classic-strip',
+  locationTagArg: string = 'Jakarta Studio',
+  existingIdArg?: string,
+  existingStoragePathArg?: string,
 ): Promise<SavePhotoResult> {
-  const selectedFrame = currentTemplate || 'classic-strip';
-  const cleanExistingId = (existingId && existingId !== 'undefined' && existingId !== 'null' && existingId.trim() !== '') ? existingId.trim() : undefined;
-  const cleanStoragePath = (existingStoragePath && existingStoragePath !== 'undefined' && existingStoragePath !== 'null' && existingStoragePath.trim() !== '') ? existingStoragePath.trim() : undefined;
-  console.log("Starting upload for frame:", selectedFrame, "cleanExistingId:", cleanExistingId);
-  console.log("Upload payload size:", blob?.size);
+  // ── Normalise overloaded signature ──────────────────────────────────────
+  let opts: SavePhotoOptions;
+  if (typeof templateTypeOrOptions === 'string') {
+    opts = {
+      templateType: templateTypeOrOptions,
+      locationTag: locationTagArg,
+      existingPhotoId: existingIdArg,
+      existingStoragePath: existingStoragePathArg,
+    };
+  } else {
+    opts = templateTypeOrOptions;
+  }
 
-  const supabase = createClient();
-  const storage_path = cleanStoragePath || `strip_${Date.now()}_${Math.random().toString(36).substring(7)}.png`;
+  const selectedFrame   = opts.templateType      || 'classic-strip';
+  const locationTag     = opts.locationTag        || 'Jakarta Studio';
+  const guestName       = (opts.guestName  || '').trim();
+  const guestAge        = (opts.guestAge   || '').replace(/\D/g, '');
+  const isBirthdayFrame = selectedFrame === 'birthday' || selectedFrame === 'birthdayCatPink';
 
+  const cleanExistingId   = sanitiseId(opts.existingPhotoId);
+  const cleanStoragePath  = sanitiseId(opts.existingStoragePath);
+
+  const storagePath = cleanStoragePath
+    || `strip_${Date.now()}_${Math.random().toString(36).substring(7)}.png`;
+
+  console.log('[HaloLuna] savePhotoToSupabase → frame:', selectedFrame,
+    '| guest:', guestName || '—',
+    '| age:', guestAge || '—',
+    '| size:', blob?.size);
+
+  // ── Attempt client-side pipeline ─────────────────────────────────────────
   try {
-    // 1. Upload to Supabase Storage: bucket 'photos' with upsert
+    const supabase = createClient();
+
+    // 1. Storage upload
     const { error: uploadErr } = await supabase.storage
       .from('photos')
-      .upload(storage_path, blob, { contentType: 'image/png', upsert: true });
+      .upload(storagePath, blob, { contentType: 'image/png', upsert: true });
 
     if (uploadErr) {
-      console.error('Supabase Save Error (Storage Upload):', uploadErr);
+      console.warn('[HaloLuna] Storage upload blocked by RLS, will fall back:', uploadErr.message);
       throw uploadErr;
     }
 
-    // 2. Get public URL
-    const {
-      data: { publicUrl },
-    } = supabase.storage.from('photos').getPublicUrl(storage_path);
+    // 2. Public URL
+    const { data: { publicUrl } } = supabase.storage.from('photos').getPublicUrl(storagePath);
 
-    // 3. Upsert or Update DB record
+    // 3. Session upsert (only for birthday presets that carry guest data)
+    let sessionId: string | undefined;
+    if (isBirthdayFrame && (guestName || guestAge)) {
+      const sessionPayload: Record<string, unknown> = {
+        template_type: selectedFrame,
+        location_tag:  locationTag,
+        ...(guestName ? { guest_name: guestName } : {}),
+        ...(guestAge  ? { guest_age:  parseInt(guestAge, 10) } : {}),
+      };
+
+      const { data: sessionRow, error: sessionErr } = await supabase
+        .from('sessions')
+        .insert([sessionPayload])
+        .select('id')
+        .single();
+
+      if (sessionErr) {
+        // Non-fatal: log and continue without session linkage
+        console.warn('[HaloLuna] sessions insert warning (non-fatal):', sessionErr.message);
+      } else {
+        sessionId = sessionRow?.id as string | undefined;
+      }
+    }
+
+    // 4. Photos upsert / insert
     let recordId = cleanExistingId;
+    const photoPayload: Record<string, unknown> = {
+      image_url:     publicUrl,
+      storage_path:  storagePath,
+      template_type: selectedFrame,
+      location_tag:  locationTag,
+      ...(sessionId ? { session_id: sessionId } : {}),
+    };
+
     if (cleanExistingId) {
       const { data: updated, error: updateErr } = await supabase
         .from('photos')
-        .update({
-          image_url: publicUrl,
-          storage_path: storage_path,
-          template_type: selectedFrame,
-          location_tag: locationTag || 'Jakarta Studio',
-        })
+        .update(photoPayload)
         .eq('id', cleanExistingId)
-        .select('id, image_url, storage_path, template_type, location_tag, created_at')
+        .select('id')
         .maybeSingle();
 
       if (updateErr) {
-        console.error('Supabase Save Error (DB Update):', updateErr);
+        console.warn('[HaloLuna] photos update warning:', updateErr.message);
         throw updateErr;
       }
-      if (updated) {
-        recordId = updated.id;
-      }
+      if (updated) recordId = (updated as { id: string }).id;
     } else {
-      const { data: inserted, error: dbErr } = await supabase
+      const { data: inserted, error: insertErr } = await supabase
         .from('photos')
-        .insert([
-          {
-            image_url: publicUrl,
-            storage_path: storage_path,
-            template_type: selectedFrame,
-            location_tag: locationTag || 'Jakarta Studio',
-          },
-        ])
-        .select('id, image_url, storage_path, template_type, location_tag, created_at')
+        .insert([photoPayload])
+        .select('id')
         .single();
 
-      if (dbErr) {
-        console.error('Supabase Save Error (DB Insert):', dbErr);
-        throw dbErr;
+      if (insertErr) {
+        console.warn('[HaloLuna] photos insert warning:', insertErr.message);
+        throw insertErr;
       }
-      recordId = inserted?.id;
+      recordId = (inserted as { id: string } | null)?.id;
     }
 
-    const res: SavePhotoResult = {
+    const result: SavePhotoResult = {
       success: true,
       id: recordId,
+      sessionId,
       publicUrl,
-      storage_path,
+      storage_path: storagePath,
     };
-    console.log("Upload result:", res);
-    return res;
+    console.log('[HaloLuna] savePhotoToSupabase ✓ client-side', result);
+    return result;
+
   } catch (clientErr) {
-    console.warn('Supabase direct client upload failed or constrained, attempting server route /api/upload fallback...', clientErr);
+    // ── Server-side fallback via /api/upload (service role key) ────────────
+    console.warn('[HaloLuna] Client pipeline failed — falling back to /api/upload:', clientErr);
+    return _serverFallback({
+      blob,
+      storagePath,
+      selectedFrame,
+      locationTag,
+      guestName: isBirthdayFrame ? guestName : '',
+      guestAge:  isBirthdayFrame ? guestAge  : '',
+      cleanExistingId,
+    });
+  }
+}
 
-    // Fallback to server route /api/upload with service role fallback
-    try {
-      const fd = new FormData();
-      fd.append('file', blob, storage_path);
-      fd.append('templateType', selectedFrame);
-      fd.append('locationTag', locationTag || 'Jakarta Studio');
-      if (cleanExistingId) {
-        fd.append('existingId', cleanExistingId);
-      }
-      if (storage_path) {
-        fd.append('storagePath', storage_path);
-      }
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-      const serverRes = await fetch('/api/upload', {
-        method: 'POST',
-        body: fd,
-      });
+function sanitiseId(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const t = raw.trim();
+  return (t && t !== 'undefined' && t !== 'null') ? t : undefined;
+}
 
-      if (!serverRes.ok) {
-        const errJson = await serverRes.json().catch(() => ({}));
-        console.error('Supabase Save Error (server route fallback failed):', errJson);
-        const res: SavePhotoResult = {
-          success: false,
-          error: errJson.error || `Server route returned ${serverRes.status}`,
-        };
-        console.log("Upload result:", res);
-        return res;
-      }
+async function _serverFallback(params: {
+  blob: Blob;
+  storagePath: string;
+  selectedFrame: string;
+  locationTag: string;
+  guestName: string;
+  guestAge: string;
+  cleanExistingId: string | undefined;
+}): Promise<SavePhotoResult> {
+  const { blob, storagePath, selectedFrame, locationTag, guestName, guestAge, cleanExistingId } = params;
+  try {
+    const fd = new FormData();
+    fd.append('file', blob, storagePath);
+    fd.append('templateType', selectedFrame);
+    fd.append('locationTag', locationTag);
+    if (guestName) fd.append('guestName', guestName);
+    if (guestAge)  fd.append('guestAge',  guestAge);
+    if (cleanExistingId) fd.append('existingId', cleanExistingId);
+    fd.append('storagePath', storagePath);
 
-      const resData = await serverRes.json();
-      const res: SavePhotoResult = {
-        success: true,
-        id: resData.id || resData.uuid,
-        publicUrl: resData.publicUrl,
-        storage_path: resData.storage_path || storage_path,
-      };
-      console.log("Upload result:", res);
-      return res;
-    } catch (fallbackErr) {
-      console.error('Supabase Save Error (all upload pipelines failed):', fallbackErr);
-      const res: SavePhotoResult = { success: false, error: fallbackErr };
-      console.log("Upload result:", res);
-      return res;
+    const res = await fetch('/api/upload', { method: 'POST', body: fd });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      console.error('[HaloLuna] /api/upload fallback failed:', errJson);
+      return { success: false, error: errJson.error || `HTTP ${res.status}` };
     }
+
+    const data = await res.json();
+    const result: SavePhotoResult = {
+      success: true,
+      id:            data.id || data.uuid,
+      sessionId:     data.sessionId,
+      publicUrl:     data.publicUrl,
+      storage_path:  data.storage_path || storagePath,
+    };
+    console.log('[HaloLuna] savePhotoToSupabase ✓ server fallback', result);
+    return result;
+  } catch (fallbackErr) {
+    console.error('[HaloLuna] All upload pipelines failed:', fallbackErr);
+    return { success: false, error: fallbackErr };
   }
 }

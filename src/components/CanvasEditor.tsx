@@ -1322,48 +1322,80 @@ export default function CanvasEditor({
     }
   }, [renderToCanvas]);
 
-  // Upload to Supabase once per preset — fires whenever the active preset changes
-  // (covers initial load AND frame swaps). Waits for render to idle first.
-  const lastUploadedPresetKeyRef = useRef<string | null>(null);
+  // ─── Task 2.2: Debounced Background Sync ─────────────────────────────────
+  // Rules:
+  //   • 700 ms quiet period after the last preset / previewUrl change before upload.
+  //   • Rapid frame switches cancel the previous debounce timer (clearTimeout).
+  //   • Each new upload attempt increments syncGenRef; stale closures detect they
+  //     are outdated (gen !== syncGenRef.current) and silently bail out without
+  //     triggering any error UI.
+  //   • All failures are console.warn only — ZERO blocking toasts.
+  //   • Download button is completely independent (Phase 0 — untouched).
+  const syncGenRef = useRef(0);
 
   useEffect(() => {
-    if (!previewUrl) return; // nothing rendered yet
+    if (!previewUrl) return; // nothing rendered yet — skip
 
-    // Skip if we already uploaded this exact preset in this session
-    if (lastUploadedPresetKeyRef.current === preset) return;
+    // Increment generation; any closure captured before this will self-abort.
+    const gen = ++syncGenRef.current;
 
     const timer = setTimeout(async () => {
+      // Stale check: another change arrived before the debounce fired.
+      if (gen !== syncGenRef.current) return;
+
       try {
-        console.log('[HaloLuna] Cloud sync: uploading preset', preset);
-        // Wait for any in-progress render to finish before we export
         await waitForRenderIdle();
+
+        // Second stale check after render idle wait
+        if (gen !== syncGenRef.current) return;
+
         const blob = await exportCanvasBlob();
         if (!blob || blob.size === 0) {
-          console.error('ADMIN UPLOAD ERROR: blob empty after preset', preset);
+          console.warn('[HaloLuna] Background sync: empty blob for preset', preset, '— skipping');
           return;
         }
-        lastUploadedPresetKeyRef.current = preset;
+
+        // Final stale check before network I/O
+        if (gen !== syncGenRef.current) return;
+
+        const isBirthday = preset === 'birthday' || preset === 'birthdayCatPink';
+        const uploadOptions = {
+          templateType: preset,
+          locationTag:  locationRef.current || 'HaloLuna Studio',
+          ...(isBirthday ? {
+            guestName: birthdayNameRef.current || '',
+            guestAge:  birthdayAgeRef.current  || '',
+          } : {}),
+        };
+
         if (onAutoUpload) {
           onAutoUpload(blob, preset, true);
         } else {
-          savePhotoToSupabase(blob, preset, locationRef.current || 'HaloLuna Studio')
-            .catch((err) => console.error('ADMIN UPLOAD ERROR:', err));
+          // Fire-and-forget — result is logged but never surfaces to the user
+          savePhotoToSupabase(blob, uploadOptions).then((res) => {
+            if (res.success) {
+              console.log('[HaloLuna] Background sync ✓ preset:', preset,
+                '| photoId:', res.id,
+                '| sessionId:', res.sessionId ?? '—');
+            } else {
+              console.warn('[HaloLuna] Background sync soft-failed (non-fatal):', res.error);
+            }
+          });
         }
       } catch (err) {
-        console.error('ADMIN UPLOAD ERROR: cloud sync failed', err);
+        // Silently swallow — cloud failure must never surface to the user
+        console.warn('[HaloLuna] Background sync error (non-fatal):', err);
       }
-    }, 900); // 900 ms debounce — lets the render finish before we grab the blob
+    }, 700); // 700 ms debounce — rapid preset flipping cancels previous timer
 
     return () => clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [preset, previewUrl]); // intentionally minimal — onAutoUpload/exportCanvasBlob are stable refs
+  }, [preset, previewUrl]); // intentionally minimal deps — refs are always current
 
-  // Re-render when preset or frameColor changes
+  // Re-render when preset changes
   const handlePresetSelect = (newPreset: FramePreset) => {
     if (newPreset === preset) return;
     setPreset(newPreset);
-    // Resetting the key lets the upload effect fire again for the new preset
-    lastUploadedPresetKeyRef.current = null;
   };
 
   // ─── Phase 0 Fix: Decoupled Local Download Handler ───────────────────────
@@ -1424,14 +1456,18 @@ export default function CanvasEditor({
     void (async () => {
       try {
         if (!result || result.blob.size === 0) return;
+        const isBirthday = preset === 'birthday' || preset === 'birthdayCatPink';
         if (onAutoUpload) {
           onAutoUpload(result.blob, preset, true);
         } else {
-          await savePhotoToSupabase(
-            result.blob,
-            preset,
-            locationRef.current || 'HaloLuna Studio',
-          );
+          await savePhotoToSupabase(result.blob, {
+            templateType: preset,
+            locationTag:  locationRef.current || 'HaloLuna Studio',
+            ...(isBirthday ? {
+              guestName: birthdayNameRef.current || '',
+              guestAge:  birthdayAgeRef.current  || '',
+            } : {}),
+          });
         }
       } catch (syncErr) {
         // Cloud sync failure is intentionally swallowed — local download already succeeded.
@@ -1532,11 +1568,18 @@ export default function CanvasEditor({
 
       if (result.blob.size > 0) {
         console.log('[HaloLuna] Action Save: Updating session on wallpaper export for preset', preset);
+        const isBirthdayWall = preset === 'birthday' || preset === 'birthdayCatPink';
         if (onAutoUpload) {
           onAutoUpload(result.blob, preset, true);
         } else {
-          savePhotoToSupabase(result.blob, preset, locationRef.current || 'HaloLuna Studio')
-            .catch((err) => console.error("ADMIN UPLOAD ERROR:", err));
+          savePhotoToSupabase(result.blob, {
+            templateType: preset,
+            locationTag:  locationRef.current || 'HaloLuna Studio',
+            ...(isBirthdayWall ? {
+              guestName: birthdayNameRef.current || '',
+              guestAge:  birthdayAgeRef.current  || '',
+            } : {}),
+          }).catch((err) => console.warn('[HaloLuna] Wallpaper sync failed (non-fatal):', err));
         }
       }
     } catch (err) {
