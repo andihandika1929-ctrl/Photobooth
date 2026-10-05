@@ -1316,42 +1316,78 @@ export default function CanvasEditor({
     lastUploadedPresetKeyRef.current = null;
   };
 
-  // Download Handler (Full High-Resolution Export + Action Save to Supabase)
+  // ─── Phase 0 Fix: Decoupled Local Download Handler ───────────────────────
+  // The local download NEVER awaits Supabase. Cloud sync is fire-and-forget
+  // in a fully isolated void block. Any cloud failure is silently logged and
+  // NEVER blocks, delays, or errors the native file download.
   const handleDownload = async () => {
-    await waitForRenderIdle();
-    isRenderingRef.current = true;
-    setRenderProgress(15);
+    // ── Step 1: Render the high-resolution export canvas ──────────────────
+    setRenderProgress(10);
+    let result: { dataUrl: string; blob: Blob } | null = null;
     try {
       await yieldToMain();
-      setRenderProgress(45);
-      const result = await renderToCanvas(true);
-      setRenderProgress(95);
+      setRenderProgress(40);
+      result = await renderToCanvas(true);
+      setRenderProgress(90);
       await yieldToMain();
-      if (!result) {
-        console.error("ADMIN UPLOAD ERROR: Download render returned null");
-        return;
-      }
+    } catch (renderErr) {
+      console.error('[HaloLuna] Download render error:', renderErr);
+      setRenderProgress(null);
+      return; // canvas failed entirely — nothing to download
+    }
 
+    setRenderProgress(null);
+
+    if (!result || !result.dataUrl) {
+      console.error('[HaloLuna] Download aborted: renderToCanvas returned no data.');
+      return;
+    }
+
+    // ── Step 2: Trigger native browser file download — NO Supabase here ───
+    try {
       const link = document.createElement('a');
       link.download = `haloluna-${preset}-${Date.now()}.png`;
       link.href = result.dataUrl;
+      document.body.appendChild(link);
       link.click();
+      document.body.removeChild(link);
+    } catch (downloadErr) {
+      console.error('[HaloLuna] Native download trigger failed:', downloadErr);
+      // Attempt URL.createObjectURL fallback
+      try {
+        const objectUrl = URL.createObjectURL(result.blob);
+        const fallbackLink = document.createElement('a');
+        fallbackLink.download = `haloluna-${preset}-${Date.now()}.png`;
+        fallbackLink.href = objectUrl;
+        document.body.appendChild(fallbackLink);
+        fallbackLink.click();
+        document.body.removeChild(fallbackLink);
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+      } catch (fallbackErr) {
+        console.error('[HaloLuna] Fallback download also failed:', fallbackErr);
+      }
+    }
 
-      if (result.blob.size > 0) {
-        console.log('[HaloLuna] Action Save: Updating session on download for preset', preset);
+    // ── Step 3: Fire-and-forget cloud sync (NEVER blocks the download) ─────
+    // Captured in a void IIFE so it runs independently. Any error here is
+    // silently logged and has zero effect on the user's downloaded file.
+    void (async () => {
+      try {
+        if (!result || result.blob.size === 0) return;
         if (onAutoUpload) {
           onAutoUpload(result.blob, preset, true);
         } else {
-          savePhotoToSupabase(result.blob, preset, locationRef.current || 'HaloLuna Studio')
-            .catch((err) => console.error("ADMIN UPLOAD ERROR:", err));
+          await savePhotoToSupabase(
+            result.blob,
+            preset,
+            locationRef.current || 'HaloLuna Studio',
+          );
         }
+      } catch (syncErr) {
+        // Cloud sync failure is intentionally swallowed — local download already succeeded.
+        console.warn('[HaloLuna] Cloud sync after download failed (non-fatal):', syncErr);
       }
-    } catch (err) {
-      console.error("ADMIN UPLOAD ERROR: Download failed", err);
-    } finally {
-      setRenderProgress(null);
-      isRenderingRef.current = false;
-    }
+    })();
   };
 
   // 9:16 Mobile Lockscreen Wallpaper Generator
