@@ -1130,9 +1130,15 @@ export default function CanvasEditor({
           await compositePlacedStickers(ctx, w, h);
         }
 
-        // ── Draw Name & Age natively onto canvas BEFORE export ──
-        // Font sizes are canvas-width-relative so they look identical at every resolution.
-        {
+        // ── Frame Isolation + Dynamic Font Sizing ────────────────────────────
+        // Name & Age caption is ONLY rendered for birthday presets:
+        //   • 'birthdayCatPink' — text goes in the blush caption band below the artwork
+        //   • 'birthday'        — text goes in the footer of the editorial strip
+        // Non-birthday frames (film35mm, retroTerracotta) remain 100% clean.
+        const isBirthdayFrame =
+          preset === 'birthday' || preset === 'birthdayCatPink';
+
+        if (isBirthdayFrame) {
           const guestName = birthdayNameRef.current || '';
           const guestAge  = birthdayAgeRef.current  || '';
 
@@ -1143,35 +1149,79 @@ export default function CanvasEditor({
             ctx.lineJoin     = 'round';
             ctx.miterLimit   = 2;
 
-            // Name — ~4.5 % of canvas width keeps it readable across all export sizes
-            if (guestName) {
-              const nameFontSize = Math.max(18, Math.floor(w * 0.045));
-              ctx.font        = `bold ${nameFontSize}px Caveat, cursive`;
-              ctx.strokeStyle = '#FFFFFF';
-              ctx.lineWidth   = Math.max(2, nameFontSize * 0.12);
-              const nameY     = h - Math.floor(h * 0.04);
-              ctx.strokeText(guestName, w / 2, nameY);
-              ctx.fillStyle   = '#FF69B4';
-              ctx.fillText(guestName,   w / 2, nameY);
-            }
+            if (preset === 'birthdayCatPink') {
+              // ── Birthday Cat Pink: text drawn AFTER frame PNG (already composited above)
+              // Position text in the blush caption band (below the artwork rows).
+              const scaleY = h / CAT_PINK_BASE_H;
+              const artH   = CAT_PINK_ART_H * scaleY;
+              const bandH  = h - artH; // caption band height in canvas pixels
+              // Vertically split the band: name at 38%, age at 68%
+              const nameY  = Math.round(artH + bandH * 0.38);
+              const ageY   = Math.round(artH + bandH * 0.68);
 
-            // Age — ~2.5 % of canvas width, tucked just below the name
-            if (guestAge) {
-              const num    = parseInt(guestAge, 10);
-              const j      = num % 10;
-              const k      = num % 100;
-              const suffix = j === 1 && k !== 11 ? 'st'
-                           : j === 2 && k !== 12 ? 'nd'
-                           : j === 3 && k !== 13 ? 'rd' : 'th';
-              const ageLabel    = `${num}${suffix}`;
-              const ageFontSize = Math.max(12, Math.floor(w * 0.025));
-              ctx.font        = `bold ${ageFontSize}px Caveat, cursive`;
-              ctx.strokeStyle = '#FFFFFF';
-              ctx.lineWidth   = Math.max(1.5, ageFontSize * 0.1);
-              const ageY      = h - Math.floor(h * 0.015);
-              ctx.strokeText(ageLabel, w / 2, ageY);
-              ctx.fillStyle   = '#FF69B4';
-              ctx.fillText(ageLabel,   w / 2, ageY);
+              // Name: 5.2% of canvas width — bold Caveat, hot-pink, centered
+              if (guestName) {
+                const nameFontSize = Math.round(w * 0.052);
+                ctx.font        = `bold ${nameFontSize}px Caveat, cursive`;
+                ctx.strokeStyle = '#FFFFFF';
+                ctx.lineWidth   = Math.max(2, nameFontSize * 0.12);
+                ctx.strokeText(guestName, w / 2, nameY);
+                ctx.fillStyle   = '#FF69B4';
+                ctx.fillText(guestName,   w / 2, nameY);
+              }
+
+              // Age: 3.2% of canvas width — bold Caveat, hot-pink, centered, below name
+              if (guestAge) {
+                const num    = parseInt(guestAge, 10);
+                const j      = num % 10;
+                const k      = num % 100;
+                const suffix = j === 1 && k !== 11 ? 'st'
+                             : j === 2 && k !== 12 ? 'nd'
+                             : j === 3 && k !== 13 ? 'rd' : 'th';
+                const ageLabel    = `${num}${suffix}`;
+                const ageFontSize = Math.round(w * 0.032);
+                ctx.font        = `bold ${ageFontSize}px Caveat, cursive`;
+                ctx.strokeStyle = '#FFFFFF';
+                ctx.lineWidth   = Math.max(1.5, ageFontSize * 0.1);
+                ctx.strokeText(ageLabel, w / 2, ageY);
+                ctx.fillStyle   = '#FF69B4';
+                ctx.fillText(ageLabel,   w / 2, ageY);
+              }
+
+            } else {
+              // ── 'birthday' (Editorial Birthday) strip ───────────────────────
+              // Name: 5.5% of canvas width (bold Caveat, #FF69B4, centered)
+              if (guestName) {
+                const nameFontSize = Math.round(w * 0.055);
+                ctx.font        = `bold ${nameFontSize}px Caveat, cursive`;
+                ctx.strokeStyle = '#FFFFFF';
+                ctx.lineWidth   = Math.max(2, nameFontSize * 0.12);
+                // 9% up from bottom — inside the footer band, above the age line
+                const nameY = h - Math.round(h * 0.09);
+                ctx.strokeText(guestName, w / 2, nameY);
+                ctx.fillStyle = '#FF69B4';
+                ctx.fillText(guestName,   w / 2, nameY);
+              }
+
+              // Age: 3.5% of canvas width (bold Caveat, #FF69B4, centered)
+              if (guestAge) {
+                const num    = parseInt(guestAge, 10);
+                const j      = num % 10;
+                const k      = num % 100;
+                const suffix = j === 1 && k !== 11 ? 'st'
+                             : j === 2 && k !== 12 ? 'nd'
+                             : j === 3 && k !== 13 ? 'rd' : 'th';
+                const ageLabel    = `${num}${suffix}`;
+                const ageFontSize = Math.round(w * 0.035);
+                ctx.font        = `bold ${ageFontSize}px Caveat, cursive`;
+                ctx.strokeStyle = '#FFFFFF';
+                ctx.lineWidth   = Math.max(1.5, ageFontSize * 0.1);
+                // 5% up from bottom — just below the name
+                const ageY = h - Math.round(h * 0.05);
+                ctx.strokeText(ageLabel, w / 2, ageY);
+                ctx.fillStyle = '#FF69B4';
+                ctx.fillText(ageLabel,   w / 2, ageY);
+              }
             }
 
             ctx.restore();
