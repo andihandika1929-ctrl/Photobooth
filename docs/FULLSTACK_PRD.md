@@ -49,3 +49,31 @@ Untuk menjamin keandalan 100%, pipeline dibagi menjadi **dua jalur independen (D
 │ • NO Supabase Await     │ │ • Insert Record to Supabase DB       │
 │ • Zero Blocking UI      │ │ • Silent Retry / Background Toast    │
 └─────────────────────────┘ └──────────────────────────────────────┘
+
+---
+
+## 3. PHASE 3 SPECIFICATION: BEHIND-THE-SCENES (BTS) VIDEO ENGINE
+
+### 3.1 Architecture Overview
+Photobooth estetik Korea (seperti Haru Film, Photoism, Life4Cuts) memberikan rekaman video Behind-The-Scenes (BTS) dari sesi pemotretan.
+Fitur ini diimplementasikan menggunakan native browser `MediaRecorder` API secara non-blocking dan mandiri dari render canvas photostrip.
+
+### 3.2 Key Objectives & Implementation Details
+1. **Task 3.1 (Stream Hook & Format Negotiation):**
+   - Mengaitkan native `MediaRecorder` langsung ke active camera `MediaStream` (`streamRef.current`) tanpa overhead canvas re-rendering.
+   - Deteksi format adaptif lintas platform (`getOptimalVideoMimeType`):
+     - Safari (iOS / macOS): Prioritas `video/mp4;codecs=avc1` / `video/mp4`.
+     - Chrome / Firefox / Android: Prioritas `video/webm;codecs=vp9` / `video/webm;codecs=vp8` / `video/webm`.
+     - Fallback ke default format peramban jika tipe spesifik tidak tersedia.
+
+2. **Task 3.2 (Session Recording & Non-Corrupted Compilation):**
+   - Perekaman video chunk dimulai otomatis saat countdown foto pertama dimulai (`startCountdown`).
+   - Perekaman berjalan dalam satu sesi berkelanjutan (`recorder.start(1000)`).
+   - Menghindari *pitfall* penggabungan Blob terpisah (`new Blob([blob1, blob2])`) yang dapat merusak container header dan timestamp video. Seluruh sesi pemotretan multi-shot (6 frame) tersimpan dalam satu stream yang mulus (*seamless & non-corrupted*).
+   - Saat pemotretan shot terakhir tuntas, recorder berhenti dengan jeda 300ms untuk menangkap senyuman setelah flash, lalu mengompilasi video menjadi satu `Blob` final dan meneruskannya via `onBtsVideoReady`.
+
+3. **Task 3.3 (Local BTS Video Download in CanvasEditor):**
+   - Menambahkan tombol dedicated **"Download BTS Video"** pada panel aksi export di `CanvasEditor.tsx`.
+   - Tombol aktif jika BTS video berhasil direkam (dan disabled dengan penjelasan jika sesi tanpa kamera/upload file).
+   - Memicu direct native download browser menggunakan `URL.createObjectURL(blob)` dengan nama file format `HaloLuna-BTS-[timestamp].[mp4|webm]`.
+   - Menjamin 100% isolasi: tidak mengganggu tombol download photostrip lokal (Phase 0) maupun tata letak teks frame (Phase 1).

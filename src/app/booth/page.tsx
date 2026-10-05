@@ -67,6 +67,7 @@ function CaptureRoom() {
   const [uploadToast, setUploadToast] = useState<string | null>(null);
   const [showShareModal, setShowShareModal] = useState(false);
   const [soundMuted, setSoundMuted] = useState(false);
+  const [btsVideoBlob, setBtsVideoBlob] = useState<Blob | null>(null);
   const hasUploadedRef = useRef(false);
   const lastUploadedTemplateRef = useRef<string | null>(null);
   const sessionPhotoIdRef = useRef<string | null>(null);
@@ -113,7 +114,7 @@ function CaptureRoom() {
         if (next.length >= STUDIO_SHOT_COUNT) {
           // All 6 photos captured! Pre-select up to targetCount and transition to Selection screen
           setSelectedIndices([0, 1, 2, 3, 4, 5].slice(0, targetCount));
-          setTimeout(() => setStep('select'), 350);
+          setTimeout(() => setStep('select'), 700);
         }
         return next;
       });
@@ -188,6 +189,7 @@ function CaptureRoom() {
     setStep('capture');
     setShareUrl(null);
     setShowShareModal(false);
+    setBtsVideoBlob(null);
   }, []);
 
   // Automatic 2-way upload trigger: Initial save on render + Action save on download/wallpaper
@@ -521,6 +523,7 @@ function CaptureRoom() {
                 onCountdownDurationChange={setCountdownDuration}
                 capturedThumbnails={capturedFrames.map((f) => f.dataUrl)}
                 onRetakeLast={() => setCapturedFrames((prev) => prev.slice(0, -1))}
+                onBtsVideoReady={(blob) => setBtsVideoBlob(blob)}
               />
             </div>
 
@@ -815,6 +818,7 @@ function CaptureRoom() {
               onAutoUpload={handleAutoUpload}
               onShare={handleShare}
               onReset={handleReset}
+              btsVideoBlob={btsVideoBlob}
             />
           </div>
         )}

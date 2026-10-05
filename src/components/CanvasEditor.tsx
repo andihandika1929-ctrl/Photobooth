@@ -19,6 +19,7 @@ import {
   X,
   Sparkles,
   Smartphone,
+  Video,
 } from 'lucide-react';
 import { type FilterName } from './CameraViewport';
 import { playPrintSound } from './AudioEngine';
@@ -59,6 +60,7 @@ interface CanvasEditorProps {
   onAutoUpload?: (blob: Blob, templateType: string, isSyncUpdate?: boolean) => void;
   onShare: (blob: Blob, templateType: string) => void;
   onReset: () => void;
+  btsVideoBlob?: Blob | null;
 }
 
 // ─── Constants ────────────────────────────────────────────
@@ -516,6 +518,7 @@ export default function CanvasEditor({
   onAutoUpload,
   onShare,
   onReset,
+  btsVideoBlob,
 }: CanvasEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const previewWrapRef = useRef<HTMLDivElement>(null);
@@ -1476,6 +1479,27 @@ export default function CanvasEditor({
     })();
   };
 
+  // ── Phase 3: BTS Video Direct Local Download Handler ──
+  const handleDownloadBts = useCallback(() => {
+    if (!btsVideoBlob) return;
+    try {
+      const isMp4 = btsVideoBlob.type.includes('mp4');
+      const ext = isMp4 ? 'mp4' : 'webm';
+      const timestamp = Date.now();
+      const filename = `HaloLuna-BTS-${timestamp}.${ext}`;
+      const objectUrl = URL.createObjectURL(btsVideoBlob);
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch (err) {
+      console.error('[HaloLuna] Native BTS video download failed:', err);
+    }
+  }, [btsVideoBlob]);
+
   // 9:16 Mobile Lockscreen Wallpaper Generator
   const handleMakeWallpaper = async () => {
     await waitForRenderIdle();
@@ -2058,19 +2082,36 @@ export default function CanvasEditor({
               : 'Add cute stickers above to customize your strip!'}
           </p>
 
-          {/* Dual Export Action Buttons */}
-          <div className="flex flex-col sm:flex-row gap-2.5 w-full">
+          {/* Export Action Buttons */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full">
             <button
               onClick={handleDownload}
-              className="flex-1 btn-neo-dark flex items-center justify-center gap-2 py-3.5 text-xs sm:text-sm font-bold rounded-xl shadow-md active:scale-[0.98] transition-all"
+              className="btn-neo-dark flex items-center justify-center gap-2 py-3.5 text-xs sm:text-sm font-bold rounded-xl shadow-md active:scale-[0.98] transition-all"
               title="Download uncompressed sharp photostrip PNG"
             >
               <Download size={16} />
               <span>Download Photostrip</span>
             </button>
             <button
+              onClick={handleDownloadBts}
+              disabled={!btsVideoBlob}
+              className={`flex items-center justify-center gap-2 py-3.5 text-xs sm:text-sm font-bold rounded-xl shadow-md active:scale-[0.98] transition-all border ${
+                btsVideoBlob
+                  ? 'bg-zinc-800 hover:bg-zinc-900 text-amber-200 border-amber-500/30'
+                  : 'bg-zinc-100 text-zinc-400 border-zinc-200 cursor-not-allowed'
+              }`}
+              title={
+                btsVideoBlob
+                  ? 'Download Behind-The-Scenes (BTS) video clip'
+                  : 'BTS video is available when capturing photos via live camera'
+              }
+            >
+              <Video size={16} />
+              <span>Download BTS Video</span>
+            </button>
+            <button
               onClick={handleMakeWallpaper}
-              className="flex-1 bg-gradient-to-r from-amber-600 via-rose-600 to-amber-700 hover:from-amber-700 hover:to-rose-800 text-white flex items-center justify-center gap-2 py-3.5 text-xs sm:text-sm font-bold rounded-xl shadow-md active:scale-[0.98] transition-all border border-amber-400/30"
+              className="bg-gradient-to-r from-amber-600 via-rose-600 to-amber-700 hover:from-amber-700 hover:to-rose-800 text-white flex items-center justify-center gap-2 py-3.5 text-xs sm:text-sm font-bold rounded-xl shadow-md active:scale-[0.98] transition-all border border-amber-400/30"
               title="Make 9:16 phone lockscreen wallpaper"
             >
               <Smartphone size={16} />
@@ -2082,7 +2123,7 @@ export default function CanvasEditor({
               title="Share / QR Code"
             >
               <QrCode size={16} />
-              <span className="hidden sm:inline">Share</span>
+              <span>Share</span>
             </button>
           </div>
 

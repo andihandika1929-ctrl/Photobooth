@@ -101,6 +101,39 @@ export const POSE_GUIDES = [
   'Pose 6: Free Pose / Silly Face 🤪',
 ];
 
+export function getOptimalVideoMimeType(): string {
+  if (typeof window === 'undefined' || typeof MediaRecorder === 'undefined') {
+    return '';
+  }
+  const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+  const candidates = isSafari
+    ? [
+        'video/mp4;codecs=avc1',
+        'video/mp4',
+        'video/webm;codecs=vp9',
+        'video/webm;codecs=vp8',
+        'video/webm',
+      ]
+    : [
+        'video/webm;codecs=vp9',
+        'video/webm;codecs=vp8',
+        'video/webm',
+        'video/mp4;codecs=avc1',
+        'video/mp4',
+      ];
+
+  for (const candidate of candidates) {
+    try {
+      if (MediaRecorder.isTypeSupported(candidate)) {
+        return candidate;
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return '';
+}
+
 interface CameraViewportProps {
   onCapture: (imageDataUrl: string, filter: FilterName) => void;
   isCapturing: boolean;
@@ -110,6 +143,7 @@ interface CameraViewportProps {
   onCountdownDurationChange?: (duration: CountdownDuration) => void;
   capturedThumbnails?: string[];
   onRetakeLast?: () => void;
+  onBtsVideoReady?: (blob: Blob) => void;
 }
 
 export default function CameraViewport({
@@ -121,6 +155,7 @@ export default function CameraViewport({
   onCountdownDurationChange,
   capturedThumbnails = [],
   onRetakeLast,
+  onBtsVideoReady,
 }: CameraViewportProps) {
   const videoRef    = useRef<HTMLVideoElement>(null);
   const canvasRef   = useRef<HTMLCanvasElement>(null);
@@ -140,6 +175,13 @@ export default function CameraViewport({
 
   const transitionTimerRef = useRef<NodeJS.Timeout | null>(null);
   const lastCapturedCountRef = useRef(capturedCount);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const onBtsVideoReadyRef = useRef(onBtsVideoReady);
+
+  useEffect(() => {
+    onBtsVideoReadyRef.current = onBtsVideoReady;
+  }, [onBtsVideoReady]);
 
   const startCamera = useCallback(async () => {
     setIsLoading(true);
@@ -174,6 +216,13 @@ export default function CameraViewport({
       streamRef.current?.getTracks().forEach(t => t.stop());
       if (countdownRef.current) clearInterval(countdownRef.current);
       if (transitionTimerRef.current) clearTimeout(transitionTimerRef.current);
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        try {
+          mediaRecorderRef.current.stop();
+        } catch {
+          // ignore
+        }
+      }
     };
   }, [startCamera]);
 
@@ -218,7 +267,21 @@ export default function CameraViewport({
     }
 
     onCapture(canvas.toDataURL('image/jpeg', 0.98), activeFilter);
-  }, [activeFilter, isMirrored, onCapture]);
+
+    // Phase 3: Final shot reached. Wait 300ms for flash reaction, then stop recording to compile BTS video.
+    const nextCount = capturedCount + 1;
+    if (nextCount >= totalFrames) {
+      setTimeout(() => {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+          try {
+            mediaRecorderRef.current.stop();
+          } catch (stopErr) {
+            console.warn('[HaloLuna] Error stopping MediaRecorder:', stopErr);
+          }
+        }
+      }, 300);
+    }
+  }, [activeFilter, isMirrored, onCapture, capturedCount, totalFrames]);
 
   const startCountdown = useCallback(() => {
     if (countdown !== null || !isCapturing) return;
@@ -226,6 +289,40 @@ export default function CameraViewport({
       clearTimeout(transitionTimerRef.current);
       transitionTimerRef.current = null;
     }
+
+    // Phase 3: Start BTS video recording on the first shot countdown if not already active
+    if (streamRef.current && typeof MediaRecorder !== 'undefined') {
+      if (!mediaRecorderRef.current || mediaRecorderRef.current.state === 'inactive') {
+        try {
+          recordedChunksRef.current = [];
+          const mime = getOptimalVideoMimeType();
+          const options: MediaRecorderOptions = mime ? { mimeType: mime } : {};
+          const recorder = new MediaRecorder(streamRef.current, options);
+
+          recorder.ondataavailable = (event: BlobEvent) => {
+            if (event.data && event.data.size > 0) {
+              recordedChunksRef.current.push(event.data);
+            }
+          };
+
+          recorder.onstop = () => {
+            const finalMime = recorder.mimeType || mime || 'video/webm';
+            const compiledBlob = new Blob(recordedChunksRef.current, { type: finalMime });
+            console.log('[HaloLuna] BTS Video compiled successfully, size:', compiledBlob.size, 'type:', finalMime);
+            if (compiledBlob.size > 0) {
+              onBtsVideoReadyRef.current?.(compiledBlob);
+            }
+          };
+
+          mediaRecorderRef.current = recorder;
+          recorder.start(1000); // 1-second chunks
+          console.log('[HaloLuna] BTS MediaRecorder recording started, mimeType:', recorder.mimeType || mime);
+        } catch (recErr) {
+          console.warn('[HaloLuna] Failed to initialize MediaRecorder for BTS video:', recErr);
+        }
+      }
+    }
+
     initAudio();
     let count = countdownDuration;
     setCountdown(count);
@@ -259,6 +356,14 @@ export default function CameraViewport({
     }
     if (capturedCount === 0) {
       setPoseState('idle');
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === 'recording') {
+        try {
+          mediaRecorderRef.current.stop();
+        } catch {
+          // ignore
+        }
+      }
+      recordedChunksRef.current = [];
     }
     lastCapturedCountRef.current = capturedCount;
 
