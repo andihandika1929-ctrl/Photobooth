@@ -72,8 +72,9 @@ Fitur ini diimplementasikan menggunakan native browser `MediaRecorder` API secar
    - Menghindari *pitfall* penggabungan Blob terpisah (`new Blob([blob1, blob2])`) yang dapat merusak container header dan timestamp video. Seluruh sesi pemotretan multi-shot (6 frame) tersimpan dalam satu stream yang mulus (*seamless & non-corrupted*).
    - Saat pemotretan shot terakhir tuntas, recorder berhenti dengan jeda 300ms untuk menangkap senyuman setelah flash, lalu mengompilasi video menjadi satu `Blob` final dan meneruskannya via `onBtsVideoReady`.
 
-3. **Task 3.3 (Local BTS Video Download in CanvasEditor):**
-   - Menambahkan tombol dedicated **"Download BTS Video"** pada panel aksi export di `CanvasEditor.tsx`.
-   - Tombol aktif jika BTS video berhasil direkam (dan disabled dengan penjelasan jika sesi tanpa kamera/upload file).
-   - Memicu direct native download browser menggunakan `URL.createObjectURL(blob)` dengan nama file format `HaloLuna-BTS-[timestamp].[mp4|webm]`.
-   - Menjamin 100% isolasi: tidak mengganggu tombol download photostrip lokal (Phase 0) maupun tata letak teks frame (Phase 1).
+3. **Task 3.3 (Live Framed Photostrip BTS Video & iOS Web Share Export):**
+   - **Per-pose clip recording:** Perekaman video mentah dipisah per pose (countdown → shutter) dan dihubungkan langsung ke tiap frame (`ShotClip`), menjamin integritas klip tetap terjaga saat user melakukan retake atau pemilihan pose terbaik.
+   - **Live Framed Canvas Compositing:** Menggantikan unduhan rekaman video kamera mentah. Canvas merender klip video tiap pose yang bergerak secara looping ke dalam slot cutout frame bersama elemen bingkai grafis, stiker pengguna, dan teks caption secara presisi.
+   - **Canvas Stream Recording:** Menggunakan `canvas.captureStream(30)` dan `MediaRecorder` untuk merekam photostrip berbingkai utuh yang bergerak menjadi satu file video beresolusi teroptimasi (`.mp4` / `.webm`).
+   - **Safari iOS Download Fix (Web Share API):** Pada perangkat mobile/iOS, tombol 'Download Photostrip' dan 'Download BTS Video' memprioritaskan `navigator.canShare({ files })` dan `navigator.share()` agar pengguna dapat langsung menyimpannya ke galeri foto/video bawaan ("Save Image" / "Save Video"). Tombol menyediakan fallback anchor link tag (`<a>`) otomatis untuk lingkungan desktop.
+   - **Safety Guarantees:** 100% isolasi — tidak mengganggu tombol download photostrip lokal asli (Phase 0) maupun tata letak teks frame (Phase 1).

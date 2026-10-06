@@ -259,7 +259,7 @@ export default function LandingPage() {
           <p className="text-[11px] text-zinc-600">
             Crafted with precision for{' '}
             <a
-              href="https://gethaloluna.com"
+              href="https://www.instagram.com/andihandikaaaa"
               target="_blank"
               rel="noreferrer"
               className="text-zinc-900 font-semibold underline underline-offset-4 hover:text-zinc-700 transition-colors"

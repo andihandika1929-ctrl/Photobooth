@@ -21,7 +21,13 @@ import {
   Smartphone,
   Video,
 } from 'lucide-react';
-import { type FilterName } from './CameraViewport';
+import {
+  type FilterName,
+  type ShotClip,
+  getFilterCss,
+  getOptimalVideoMimeType,
+} from './CameraViewport';
+import { isCanvasFilterSupported, applyPixelFilter } from '@/utils/canvasColorGrading';
 import { playPrintSound } from './AudioEngine';
 import { v4 as uuidv4 } from 'uuid';
 import { getKeyedSticker, getKeyedStickerSync, preloadAllStickers } from '@/utils/stickerCache';
@@ -50,6 +56,7 @@ export interface PlacedSticker {
 interface CapturedFrame {
   dataUrl: string;
   filter: FilterName;
+  clip?: ShotClip;
 }
 
 interface CanvasEditorProps {
@@ -60,7 +67,6 @@ interface CanvasEditorProps {
   onAutoUpload?: (blob: Blob, templateType: string, isSyncUpdate?: boolean) => void;
   onShare: (blob: Blob, templateType: string) => void;
   onReset: () => void;
-  btsVideoBlob?: Blob | null;
 }
 
 // ─── Constants ────────────────────────────────────────────
@@ -108,6 +114,62 @@ function drawHaloLunaWatermark(
 
 // ─── Utilities ────────────────────────────────────────────
 const yieldToMain = () => new Promise<void>((r) => setTimeout(r, 0));
+
+function isMobileDevice(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const ua = navigator.userAgent || '';
+  if (/iPhone|iPad|iPod|Android/i.test(ua)) return true;
+  // iPadOS 13+ reports itself as a Mac but has a touch screen
+  return navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+}
+
+/**
+ * Web Share API (files) — on iOS/Android this opens the native sheet with
+ * "Save Image / Save Video" so the file lands in the photo gallery.
+ *  - 'shared' / 'cancelled' : sheet was shown (nothing more to do)
+ *  - 'blocked'              : browser refused (user-gesture window expired)
+ *  - 'unsupported'          : desktop or no file-share support → use anchor fallback
+ */
+async function tryNativeShare(
+  blob: Blob,
+  filename: string,
+): Promise<'shared' | 'cancelled' | 'blocked' | 'unsupported'> {
+  if (
+    !isMobileDevice() ||
+    typeof navigator.share !== 'function' ||
+    typeof navigator.canShare !== 'function'
+  ) {
+    return 'unsupported';
+  }
+  try {
+    const baseType = (blob.type || '').split(';')[0] || undefined;
+    const file = new File([blob], filename, { type: baseType });
+    if (!navigator.canShare({ files: [file] })) return 'unsupported';
+    await navigator.share({ files: [file], title: 'HaloLuna' });
+    return 'shared';
+  } catch (err) {
+    const name = (err as DOMException)?.name;
+    if (name === 'AbortError') return 'cancelled';
+    if (name === 'NotAllowedError') return 'blocked';
+    console.warn('[HaloLuna] Web Share failed, using anchor fallback:', err);
+    return 'unsupported';
+  }
+}
+
+function anchorDownloadBlob(blob: Blob, filename: string) {
+  try {
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+  } catch (err) {
+    console.error('[HaloLuna] Anchor download failed:', err);
+  }
+}
 
 function fmtDate() {
   return new Date().toLocaleDateString('en-US', {
@@ -442,36 +504,42 @@ function drawKoreanStickerCaption(
 
 // Hardware-accelerated Korean studio & film preset rendering (grain applied only on export)
 // Object-fit: cover center-crop helper — preserves aspect ratio, no face distortion
+// SlotImage: a still photo, or a per-slot canvas that is refreshed every frame
+// while the animated BTS strip video is being recorded.
+type SlotImage = HTMLImageElement | HTMLCanvasElement;
+
 function drawImageCover(
   ctx: CanvasRenderingContext2D,
-  img: HTMLImageElement,
+  img: SlotImage,
   dx: number,
   dy: number,
   dw: number,
   dh: number,
 ) {
-  const imgAspect = img.naturalWidth / img.naturalHeight;
+  const natW = img instanceof HTMLImageElement ? img.naturalWidth : img.width;
+  const natH = img instanceof HTMLImageElement ? img.naturalHeight : img.height;
+  const imgAspect = natW / natH;
   const dstAspect = dw / dh;
   let sx: number, sy: number, sWidth: number, sHeight: number;
   if (imgAspect > dstAspect) {
     // Image is wider than destination — crop left/right
-    sHeight = img.naturalHeight;
+    sHeight = natH;
     sWidth = sHeight * dstAspect;
-    sx = (img.naturalWidth - sWidth) / 2;
+    sx = (natW - sWidth) / 2;
     sy = 0;
   } else {
     // Image is taller than destination — crop top/bottom
-    sWidth = img.naturalWidth;
+    sWidth = natW;
     sHeight = sWidth / dstAspect;
     sx = 0;
-    sy = (img.naturalHeight - sHeight) / 2;
+    sy = (natH - sHeight) / 2;
   }
   ctx.drawImage(img, sx, sy, sWidth, sHeight, dx, dy, dw, dh);
 }
 
 function drawGradedPhoto(
   ctx: CanvasRenderingContext2D,
-  img: HTMLImageElement,
+  img: SlotImage,
   dx: number,
   dy: number,
   dw: number,
@@ -518,10 +586,17 @@ export default function CanvasEditor({
   onAutoUpload,
   onShare,
   onReset,
-  btsVideoBlob,
 }: CanvasEditorProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const previewWrapRef = useRef<HTMLDivElement>(null);
+
+  // Phase 3: animated BTS strip video state
+  const [btsProgress, setBtsProgress] = useState<number | null>(null);
+  const [btsNeedsTap, setBtsNeedsTap] = useState(false);
+  const [btsError, setBtsError] = useState<string | null>(null);
+  const btsBusyRef = useRef(false);
+  const btsCacheRef = useRef<{ key: string; blob: Blob } | null>(null);
+  const hasBtsClips = frames.some((f) => !!f.clip);
 
 
   const dragState = useRef<{
@@ -705,7 +780,7 @@ export default function CanvasEditor({
   const drawCinemaTicketBirthday = useCallback(
     async (
       ctx: CanvasRenderingContext2D,
-      imgs: HTMLImageElement[],
+      imgs: SlotImage[],
       w: number,
       h: number,
       s: number,
@@ -798,7 +873,7 @@ export default function CanvasEditor({
   const drawBirthdayCatPink = useCallback(
     async (
       ctx: CanvasRenderingContext2D,
-      imgs: HTMLImageElement[],
+      imgs: SlotImage[],
       w: number,
       h: number,
       s: number,
@@ -890,7 +965,7 @@ export default function CanvasEditor({
   const drawRetroTerracotta = useCallback(
     async (
       ctx: CanvasRenderingContext2D,
-      imgs: HTMLImageElement[],
+      imgs: SlotImage[],
       w: number,
       h: number,
       _s: number,
@@ -934,7 +1009,7 @@ export default function CanvasEditor({
   const drawFilm = useCallback(
     async (
       ctx: CanvasRenderingContext2D,
-      imgs: HTMLImageElement[],
+      imgs: SlotImage[],
       w: number,
       h: number,
       s: number,
@@ -1071,15 +1146,18 @@ export default function CanvasEditor({
   );
 
   const renderToCanvas = useCallback(
-    async (isExport: boolean = false): Promise<{ dataUrl: string; blob: Blob } | null> => {
+    async (
+      isExport: boolean = false,
+      liveOpts?: { canvas: HTMLCanvasElement; w: number; h: number; s: number; slots: SlotImage[] },
+    ): Promise<{ dataUrl: string; blob: Blob } | null> => {
       if (frames.length === 0) return null;
 
       try {
-        const { w, h, s } = getDimensions(isExport);
+        const { w, h, s } = liveOpts ?? getDimensions(isExport);
         // Offscreen master — never share pixels with a concurrent preview pass
-        const canvas = document.createElement('canvas');
-        canvas.width = w;
-        canvas.height = h;
+        const canvas = liveOpts ? liveOpts.canvas : document.createElement('canvas');
+        if (canvas.width !== w) canvas.width = w;
+        if (canvas.height !== h) canvas.height = h;
         const ctx = canvas.getContext('2d');
         if (!ctx) return null;
 
@@ -1088,7 +1166,7 @@ export default function CanvasEditor({
             ? allFrames
             : frames;
 
-        const imgs = await Promise.all(
+        const imgs: SlotImage[] = liveOpts ? liveOpts.slots : await Promise.all(
           effectiveFrames.map(
             (f) =>
               new Promise<HTMLImageElement>((resolve) => {
@@ -1129,7 +1207,7 @@ export default function CanvasEditor({
             break;
         }
 
-        if (isExport) {
+        if (isExport || liveOpts) {
           await compositePlacedStickers(ctx, w, h);
         }
 
@@ -1230,6 +1308,8 @@ export default function CanvasEditor({
             ctx.restore();
           }
         }
+
+        if (liveOpts) return { dataUrl: '', blob: new Blob() };
 
         const dataUrl = canvas.toDataURL('image/png');
         const blob = await new Promise<Blob | null>((resolve) =>
@@ -1428,28 +1508,32 @@ export default function CanvasEditor({
       return;
     }
 
-    // ── Step 2: Trigger native browser file download — NO Supabase here ───
-    try {
-      const link = document.createElement('a');
-      link.download = `haloluna-${preset}-${Date.now()}.png`;
-      link.href = result.dataUrl;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } catch (downloadErr) {
-      console.error('[HaloLuna] Native download trigger failed:', downloadErr);
-      // Attempt URL.createObjectURL fallback
+    // ── Step 2: Mobile/iOS → native share sheet (Save Image); else anchor download — NO Supabase here ───
+    const stripFileName = `haloluna-${preset}-${Date.now()}.png`;
+    const shareOutcome = await tryNativeShare(result.blob, stripFileName);
+    if (shareOutcome === 'unsupported' || shareOutcome === 'blocked') {
       try {
-        const objectUrl = URL.createObjectURL(result.blob);
-        const fallbackLink = document.createElement('a');
-        fallbackLink.download = `haloluna-${preset}-${Date.now()}.png`;
-        fallbackLink.href = objectUrl;
-        document.body.appendChild(fallbackLink);
-        fallbackLink.click();
-        document.body.removeChild(fallbackLink);
-        setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
-      } catch (fallbackErr) {
-        console.error('[HaloLuna] Fallback download also failed:', fallbackErr);
+        const link = document.createElement('a');
+        link.download = `haloluna-${preset}-${Date.now()}.png`;
+        link.href = result.dataUrl;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      } catch (downloadErr) {
+        console.error('[HaloLuna] Native download trigger failed:', downloadErr);
+        // Attempt URL.createObjectURL fallback
+        try {
+          const objectUrl = URL.createObjectURL(result.blob);
+          const fallbackLink = document.createElement('a');
+          fallbackLink.download = `haloluna-${preset}-${Date.now()}.png`;
+          fallbackLink.href = objectUrl;
+          document.body.appendChild(fallbackLink);
+          fallbackLink.click();
+          document.body.removeChild(fallbackLink);
+          setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+        } catch (fallbackErr) {
+          console.error('[HaloLuna] Fallback download also failed:', fallbackErr);
+        }
       }
     }
 
@@ -1479,26 +1563,232 @@ export default function CanvasEditor({
     })();
   };
 
-  // ── Phase 3: BTS Video Direct Local Download Handler ──
-  const handleDownloadBts = useCallback(() => {
-    if (!btsVideoBlob) return;
-    try {
-      const isMp4 = btsVideoBlob.type.includes('mp4');
-      const ext = isMp4 ? 'mp4' : 'webm';
-      const timestamp = Date.now();
-      const filename = `HaloLuna-BTS-${timestamp}.${ext}`;
-      const objectUrl = URL.createObjectURL(btsVideoBlob);
-      const link = document.createElement('a');
-      link.href = objectUrl;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
-    } catch (err) {
-      console.error('[HaloLuna] Native BTS video download failed:', err);
+  // ── Phase 3: Animated photostrip BTS video ──
+  // Every pose clip loops inside its frame slot while the real frame artwork,
+  // stickers and caption text are redrawn around it each tick. That canvas is
+  // recorded with captureStream() + MediaRecorder, so the output is the whole
+  // framed strip in motion (not the raw camera feed).
+  const buildBtsKey = () =>
+    JSON.stringify([
+      preset,
+      layout,
+      birthdayNameRef.current,
+      birthdayAgeRef.current,
+      birthdayPaletteRef.current,
+      locationRef.current,
+      nowPlayingRef.current,
+      placedStickersRef.current.map((st) => [st.id, st.xPct, st.yPct, st.scale]),
+      frames.map((f) => f.dataUrl.length),
+    ]);
+
+  const generateBtsVideo = async (): Promise<Blob | null> => {
+    const effectiveFrames =
+      preset === 'birthdayCatPink' && allFrames && allFrames.length >= 6 ? allFrames : frames;
+
+    const probe = document.createElement('canvas') as HTMLCanvasElement & {
+      captureStream?: (fps?: number) => MediaStream;
+    };
+    if (typeof probe.captureStream !== 'function' || typeof MediaRecorder === 'undefined') {
+      return null;
     }
-  }, [btsVideoBlob]);
+
+    // Output size: export proportions, capped at 540px wide (even dimensions for H.264)
+    const exp = getDimensions(true);
+    const k = Math.min(1, 540 / exp.w);
+    const w = Math.max(2, Math.round((exp.w * k) / 2) * 2);
+    const h = Math.max(2, Math.round((exp.h * k) / 2) * 2);
+    const s = exp.s * k;
+
+    const SLOT_PX = 360;
+    const hasNativeFilter = isCanvasFilterSupported();
+    const objectUrls: string[] = [];
+
+    type LiveSlot = {
+      canvas: HTMLCanvasElement;
+      ctx: CanvasRenderingContext2D;
+      video: HTMLVideoElement | null;
+      frame: CapturedFrame;
+    };
+
+    const loadStill = (src: string) =>
+      new Promise<HTMLImageElement | null>((resolve) => {
+        const img = new Image();
+        const timer = setTimeout(() => resolve(null), 3000);
+        img.onload = () => {
+          clearTimeout(timer);
+          resolve(img);
+        };
+        img.onerror = () => {
+          clearTimeout(timer);
+          resolve(null);
+        };
+        img.src = src;
+      });
+
+    const slots: LiveSlot[] = await Promise.all(
+      effectiveFrames.map(async (f) => {
+        const canvas = document.createElement('canvas');
+        canvas.width = SLOT_PX;
+        canvas.height = SLOT_PX;
+        const sctx = canvas.getContext('2d') as CanvasRenderingContext2D;
+        // Always seed with the still so photos without a clip (uploads) still render
+        const still = await loadStill(f.dataUrl);
+        if (still) drawImageCover(sctx, still, 0, 0, SLOT_PX, SLOT_PX);
+
+        let video: HTMLVideoElement | null = null;
+        if (f.clip && f.clip.blob.size > 0) {
+          const url = URL.createObjectURL(f.clip.blob);
+          objectUrls.push(url);
+          const v = document.createElement('video');
+          v.muted = true;
+          v.loop = true;
+          v.playsInline = true;
+          v.setAttribute('playsinline', '');
+          v.src = url;
+          const ready = await new Promise<boolean>((resolve) => {
+            const timer = setTimeout(() => resolve(false), 4000);
+            v.onloadeddata = () => {
+              clearTimeout(timer);
+              resolve(true);
+            };
+            v.onerror = () => {
+              clearTimeout(timer);
+              resolve(false);
+            };
+          });
+          if (ready) video = v;
+        }
+        return { canvas, ctx: sctx, video, frame: f };
+      })
+    );
+
+    const paintSlot = (slot: LiveSlot) => {
+      const v = slot.video;
+      if (!v || v.readyState < 2 || !v.videoWidth) return;
+      const size = Math.min(v.videoWidth, v.videoHeight);
+      const ox = (v.videoWidth - size) / 2;
+      const oy = (v.videoHeight - size) / 2;
+      const c = slot.ctx;
+      c.save();
+      if (slot.frame.clip?.mirrored) {
+        c.translate(SLOT_PX, 0);
+        c.scale(-1, 1);
+      }
+      c.filter = hasNativeFilter ? getFilterCss(slot.frame.filter) : 'none';
+      c.drawImage(v, ox, oy, size, size, 0, 0, SLOT_PX, SLOT_PX);
+      c.restore();
+      c.filter = 'none';
+      if (!hasNativeFilter) applyPixelFilter(c, slot.frame.filter, SLOT_PX, SLOT_PX);
+    };
+
+    const out = document.createElement('canvas');
+    const liveOpts = { canvas: out, w, h, s, slots: slots.map((sl) => sl.canvas) as SlotImage[] };
+
+    const cleanup = () => {
+      slots.forEach((sl) => {
+        if (sl.video) {
+          sl.video.pause();
+          sl.video.removeAttribute('src');
+          sl.video.load();
+        }
+      });
+      objectUrls.forEach((u) => URL.revokeObjectURL(u));
+    };
+
+    try {
+      const maxClipMs = Math.max(0, ...effectiveFrames.map((f) => f.clip?.durationMs ?? 0));
+      const durationMs = Math.min(12000, Math.max(3000, maxClipMs));
+
+      await Promise.all(slots.map((sl) => sl.video?.play().catch(() => undefined)));
+      slots.forEach(paintSlot);
+      // Draw one full frame BEFORE recording starts so the first video frame is never blank
+      await renderToCanvas(false, liveOpts);
+
+      const stream = (out as HTMLCanvasElement & { captureStream: (fps?: number) => MediaStream }).captureStream(30);
+      const mime = getOptimalVideoMimeType();
+      let recorder: MediaRecorder;
+      try {
+        recorder = new MediaRecorder(stream, {
+          ...(mime ? { mimeType: mime } : {}),
+          videoBitsPerSecond: 4_000_000,
+        });
+      } catch {
+        recorder = new MediaRecorder(stream);
+      }
+      const chunks: Blob[] = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) chunks.push(e.data);
+      };
+      const stopped = new Promise<void>((resolve) => {
+        recorder.onstop = () => resolve();
+      });
+      recorder.start(250);
+
+      const t0 = performance.now();
+      const FRAME_MS = 1000 / 24;
+      while (performance.now() - t0 < durationMs) {
+        const tickStart = performance.now();
+        slots.forEach(paintSlot);
+        await renderToCanvas(false, liveOpts);
+        setBtsProgress(Math.min(99, Math.round(((tickStart - t0) / durationMs) * 100)));
+        const spent = performance.now() - tickStart;
+        await new Promise<void>((r) => setTimeout(r, Math.max(0, FRAME_MS - spent)));
+      }
+
+      recorder.stop();
+      await stopped;
+      stream.getTracks().forEach((t) => t.stop());
+
+      const type = recorder.mimeType || mime || 'video/webm';
+      const blob = new Blob(chunks, { type });
+      return blob.size > 0 ? blob : null;
+    } finally {
+      cleanup();
+    }
+  };
+
+  const handleDownloadBts = async () => {
+    if (btsBusyRef.current || !hasBtsClips) return;
+    setBtsError(null);
+
+    const key = buildBtsKey();
+    let blob = btsCacheRef.current?.key === key ? btsCacheRef.current.blob : null;
+
+    if (!blob) {
+      btsBusyRef.current = true;
+      setBtsProgress(0);
+      try {
+        blob = await generateBtsVideo();
+      } catch (err) {
+        console.error('[HaloLuna] BTS strip video render failed:', err);
+        blob = null;
+      } finally {
+        btsBusyRef.current = false;
+        setBtsProgress(null);
+      }
+      if (!blob) {
+        setBtsError('Could not render the BTS video on this browser.');
+        return;
+      }
+      btsCacheRef.current = { key, blob };
+    }
+
+    const ext = blob.type.includes('mp4') ? 'mp4' : 'webm';
+    const fileName = `HaloLuna-BTS-${Date.now()}.${ext}`;
+    const outcome = await tryNativeShare(blob, fileName);
+    if (outcome === 'shared' || outcome === 'cancelled') {
+      setBtsNeedsTap(false);
+      return;
+    }
+    if (outcome === 'blocked') {
+      // Rendering took longer than the browser's tap window: the video is cached,
+      // so the next tap shares instantly with a fresh user gesture.
+      setBtsNeedsTap(true);
+      return;
+    }
+    setBtsNeedsTap(false);
+    anchorDownloadBlob(blob, fileName);
+  };
 
   // 9:16 Mobile Lockscreen Wallpaper Generator
   const handleMakeWallpaper = async () => {
@@ -2094,20 +2384,26 @@ export default function CanvasEditor({
             </button>
             <button
               onClick={handleDownloadBts}
-              disabled={!btsVideoBlob}
+              disabled={!hasBtsClips || btsProgress !== null}
               className={`flex items-center justify-center gap-2 py-3.5 text-xs sm:text-sm font-bold rounded-xl shadow-md active:scale-[0.98] transition-all border ${
-                btsVideoBlob
-                  ? 'bg-zinc-800 hover:bg-zinc-900 text-amber-200 border-amber-500/30'
+                hasBtsClips
+                  ? 'bg-zinc-800 hover:bg-zinc-900 text-amber-200 border-amber-500/30 disabled:opacity-70'
                   : 'bg-zinc-100 text-zinc-400 border-zinc-200 cursor-not-allowed'
               }`}
               title={
-                btsVideoBlob
-                  ? 'Download Behind-The-Scenes (BTS) video clip'
+                hasBtsClips
+                  ? 'Animated photostrip video (frame + stickers + text)'
                   : 'BTS video is available when capturing photos via live camera'
               }
             >
               <Video size={16} />
-              <span>Download BTS Video</span>
+              <span>
+                {btsProgress !== null
+                  ? `Rendering BTS… ${btsProgress}%`
+                  : btsNeedsTap
+                  ? 'Tap to Save BTS Video'
+                  : 'Download BTS Video'}
+              </span>
             </button>
             <button
               onClick={handleMakeWallpaper}
@@ -2126,6 +2422,9 @@ export default function CanvasEditor({
               <span>Share</span>
             </button>
           </div>
+          {btsError && (
+            <p className="text-[11px] text-red-600 font-mono text-center">{btsError}</p>
+          )}
 
           <div className="flex items-center justify-between w-full pt-2">
             <button

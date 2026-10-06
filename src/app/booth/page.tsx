@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import CameraViewport, {
   type FilterName,
+  type ShotClip,
   COUNTDOWN_OPTIONS,
   type CountdownDuration,
   STUDIO_FILTERS,
@@ -39,6 +40,7 @@ type AppStep = 'capture' | 'select' | 'edit';
 interface CapturedFrame {
   dataUrl: string;
   filter: FilterName;
+  clip?: ShotClip;
 }
 
 const STUDIO_SHOT_COUNT = 6;
@@ -67,7 +69,6 @@ function CaptureRoom() {
   const [uploadToast, setUploadToast] = useState<string | null>(null);
   const [showShareModal, setShowShareModal] = useState(false);
   const [soundMuted, setSoundMuted] = useState(false);
-  const [btsVideoBlob, setBtsVideoBlob] = useState<Blob | null>(null);
   const hasUploadedRef = useRef(false);
   const lastUploadedTemplateRef = useRef<string | null>(null);
   const sessionPhotoIdRef = useRef<string | null>(null);
@@ -107,14 +108,14 @@ function CaptureRoom() {
 
   // Handle capture of each shot in the 6-shot sequence
   const handleCapture = useCallback(
-    (dataUrl: string, filter: FilterName) => {
+    (dataUrl: string, filter: FilterName, clip?: ShotClip) => {
       initAudio();
       setCapturedFrames((prev) => {
-        const next = [...prev, { dataUrl, filter }];
+        const next = [...prev, { dataUrl, filter, clip }];
         if (next.length >= STUDIO_SHOT_COUNT) {
           // All 6 photos captured! Pre-select up to targetCount and transition to Selection screen
           setSelectedIndices([0, 1, 2, 3, 4, 5].slice(0, targetCount));
-          setTimeout(() => setStep('select'), 700);
+          setTimeout(() => setStep('select'), 350);
         }
         return next;
       });
@@ -189,7 +190,6 @@ function CaptureRoom() {
     setStep('capture');
     setShareUrl(null);
     setShowShareModal(false);
-    setBtsVideoBlob(null);
   }, []);
 
   // Automatic 2-way upload trigger: Initial save on render + Action save on download/wallpaper
@@ -523,7 +523,6 @@ function CaptureRoom() {
                 onCountdownDurationChange={setCountdownDuration}
                 capturedThumbnails={capturedFrames.map((f) => f.dataUrl)}
                 onRetakeLast={() => setCapturedFrames((prev) => prev.slice(0, -1))}
-                onBtsVideoReady={(blob) => setBtsVideoBlob(blob)}
               />
             </div>
 
@@ -818,7 +817,6 @@ function CaptureRoom() {
               onAutoUpload={handleAutoUpload}
               onShare={handleShare}
               onReset={handleReset}
-              btsVideoBlob={btsVideoBlob}
             />
           </div>
         )}
@@ -833,7 +831,7 @@ function CaptureRoom() {
           <p className="text-[11px] text-zinc-600">
             Crafted with precision for{' '}
             <a
-              href="https://gethaloluna.com"
+              href="https://www.instagram.com/andihandikaaaa"
               target="_blank"
               rel="noreferrer"
               className="text-zinc-900 font-semibold underline underline-offset-4 hover:text-zinc-700 transition-colors"
