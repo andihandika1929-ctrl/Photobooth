@@ -14,6 +14,7 @@ import CanvasEditor, { type LayoutType } from '@/components/CanvasEditor';
 import LoadingScreen from '@/components/LoadingScreen';
 import ShareModal from '@/components/ShareModal';
 import { initAudio, getMuted, toggleMuted } from '@/components/AudioEngine';
+import { fireCelebrationConfetti } from '@/utils/confetti';
 import {
   Camera,
   Grid,
@@ -113,9 +114,11 @@ function CaptureRoom() {
       setCapturedFrames((prev) => {
         const next = [...prev, { dataUrl, filter, clip }];
         if (next.length >= STUDIO_SHOT_COUNT) {
-          // All 6 photos captured! Pre-select up to targetCount and transition to Selection screen
+          // All 6 photos captured! Trigger celebration confetti before transitioning
+          fireCelebrationConfetti();
+          // Pre-select up to targetCount and transition to Selection screen
           setSelectedIndices([0, 1, 2, 3, 4, 5].slice(0, targetCount));
-          setTimeout(() => setStep('select'), 350);
+          setTimeout(() => setStep('select'), 1100);
         }
         return next;
       });
@@ -627,7 +630,10 @@ function CaptureRoom() {
                 </button>
                 <button
                   onClick={() => {
-                    if (selectedIndices.length === targetCount) setStep('edit');
+                    if (selectedIndices.length === targetCount) {
+                      fireCelebrationConfetti();
+                      setStep('edit');
+                    }
                   }}
                   disabled={selectedIndices.length !== targetCount}
                   className="btn-neo-dark text-xs py-2 px-4 flex items-center gap-1.5 rounded-xl disabled:opacity-40 disabled:cursor-not-allowed shadow-md"
@@ -789,7 +795,10 @@ function CaptureRoom() {
                 {/* Primary CTA */}
                 <button
                   onClick={() => {
-                    if (selectedIndices.length === targetCount) setStep('edit');
+                    if (selectedIndices.length === targetCount) {
+                      fireCelebrationConfetti();
+                      setStep('edit');
+                    }
                   }}
                   disabled={selectedIndices.length !== targetCount}
                   className="w-full btn-neo-dark flex items-center justify-center gap-2 py-3.5 text-xs font-bold uppercase tracking-widest rounded-xl shadow-md transition-all disabled:opacity-40 disabled:cursor-not-allowed mt-2"

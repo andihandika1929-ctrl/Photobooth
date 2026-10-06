@@ -39,7 +39,12 @@ export function getMuted(): boolean {
 
 function getAudioContext(): AudioContext {
   if (!audioCtx || audioCtx.state === 'closed') {
-    audioCtx = new AudioContext();
+    const AudioCtxClass =
+      typeof window !== 'undefined'
+        ? window.AudioContext ||
+          (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext
+        : AudioContext;
+    audioCtx = new AudioCtxClass();
     masterGain = null;
   }
   if (audioCtx.state === 'suspended') {
@@ -123,40 +128,92 @@ export function stopAmbient(): void {
 }
 
 /**
- * Mechanical analog camera shutter click
- * Combines a white noise burst with a sharp transient envelope
+ * Procedural mechanical camera shutter click ("cekrek")
+ * Two-stage mechanical action synthesized entirely with Web Audio API:
+ * - Stage 1 ("cek"): Front curtain latch release & crisp metallic transient (t = 0)
+ * - Stage 2 ("rek"): Rear curtain snap & body resonance thud (t = ~45ms)
  */
 export function playShutterClick(): void {
   if (getMuted()) return;
   try {
     const ctx = getAudioContext();
-    const bufferSize = ctx.sampleRate * 0.08;
-    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-    const data = buffer.getChannelData(0);
+    const bus = getBus();
+    const t0 = ctx.currentTime;
 
-    for (let i = 0; i < bufferSize; i++) {
-      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.12));
-    }
+    // Helper: generate a shaped white-noise transient burst
+    const playNoiseBurst = (
+      startTime: number,
+      duration: number,
+      centerFreq: number,
+      q: number,
+      peakGain: number
+    ) => {
+      const bufferSize = Math.floor(ctx.sampleRate * duration);
+      if (bufferSize <= 0) return;
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        // Natural exponential decay curve baked into noise
+        data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.22));
+      }
 
-    const source = ctx.createBufferSource();
-    source.buffer = buffer;
+      const noiseSource = ctx.createBufferSource();
+      noiseSource.buffer = buffer;
 
-    // Bandpass filter to shape the click character
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'bandpass';
-    filter.frequency.value = 3200;
-    filter.Q.value = 0.8;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(centerFreq, startTime);
+      filter.Q.setValueAtTime(q, startTime);
 
-    // Gain shaping
-    const gainNode = ctx.createGain();
-    gainNode.gain.setValueAtTime(0, ctx.currentTime);
-    gainNode.gain.linearRampToValueAtTime(1.4, ctx.currentTime + 0.003);
-    gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.07);
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, startTime);
+      gain.gain.linearRampToValueAtTime(peakGain, startTime + 0.002);
+      gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+      gain.gain.linearRampToValueAtTime(0, startTime + duration + 0.005);
 
-    source.connect(filter);
-    filter.connect(gainNode);
-    gainNode.connect(getBus());
-    source.start();
+      noiseSource.connect(filter);
+      filter.connect(gain);
+      gain.connect(bus);
+
+      noiseSource.start(startTime);
+      noiseSource.stop(startTime + duration + 0.01);
+    };
+
+    // Helper: generate a mechanical body thud (pitched transient)
+    const playThump = (
+      startTime: number,
+      duration: number,
+      startFreq: number,
+      endFreq: number,
+      peakGain: number
+    ) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(startFreq, startTime);
+      osc.frequency.exponentialRampToValueAtTime(Math.max(20, endFreq), startTime + duration);
+
+      gain.gain.setValueAtTime(0.0001, startTime);
+      gain.gain.linearRampToValueAtTime(peakGain, startTime + 0.002);
+      gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+      gain.gain.linearRampToValueAtTime(0, startTime + duration + 0.005);
+
+      osc.connect(gain);
+      gain.connect(bus);
+
+      osc.start(startTime);
+      osc.stop(startTime + duration + 0.01);
+    };
+
+    // Stage 1: "Cek" (Front curtain latch & crisp metallic transient at t0)
+    playNoiseBurst(t0, 0.032, 3800, 1.4, 1.3);
+    playThump(t0, 0.024, 200, 80, 0.35);
+
+    // Stage 2: "Rek" (Rear curtain snap & body thud at t0 + 46ms)
+    const tRek = t0 + 0.046;
+    playNoiseBurst(tRek, 0.055, 2300, 1.0, 1.45);
+    playThump(tRek, 0.045, 115, 45, 0.42);
   } catch (e) {
     console.warn('AudioEngine: shutter click failed', e);
   }
@@ -182,9 +239,10 @@ export function playCountdownBeep(count: number): void {
     const volume = count === 1 ? 0.45 : count <= 3 ? 0.32 : 0.22;
     const duration = count === 1 ? 0.22 : count <= 3 ? 0.16 : 0.12;
 
-    gainNode.gain.setValueAtTime(0, ctx.currentTime);
+    gainNode.gain.setValueAtTime(0.0001, ctx.currentTime);
     gainNode.gain.linearRampToValueAtTime(volume, ctx.currentTime + 0.008);
-    gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
+    gainNode.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + duration);
+    gainNode.gain.linearRampToValueAtTime(0, ctx.currentTime + duration + 0.01);
 
     oscillator.connect(gainNode);
     gainNode.connect(getBus());
@@ -197,41 +255,10 @@ export function playCountdownBeep(count: number): void {
 }
 
 /**
- * Final shutter flash sound — a punchy "0" mark
+ * Final shutter flash sound — authentic camera shutter ("cekrek")
  */
 export function playFlashSound(): void {
-  if (getMuted()) return;
-  try {
-    const ctx = getAudioContext();
-
-    // Oscillator burst
-    const osc = ctx.createOscillator();
-    const gainNode = ctx.createGain();
-
-    osc.type = 'square';
-    osc.frequency.setValueAtTime(200, ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(80, ctx.currentTime + 0.1);
-
-    gainNode.gain.setValueAtTime(0, ctx.currentTime);
-    gainNode.gain.linearRampToValueAtTime(0.5, ctx.currentTime + 0.005);
-    gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.12);
-
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.value = 800;
-
-    osc.connect(filter);
-    filter.connect(gainNode);
-    gainNode.connect(getBus());
-
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.15);
-
-    // Layer the shutter on top
-    setTimeout(playShutterClick, 30);
-  } catch (e) {
-    console.warn('AudioEngine: flash sound failed', e);
-  }
+  playShutterClick();
 }
 
 /**

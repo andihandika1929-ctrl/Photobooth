@@ -350,8 +350,10 @@ export default function CameraViewport({
         setCountdown(null);
         if (countdownRef.current) clearInterval(countdownRef.current);
         if (flashRef.current) {
+          flashRef.current.classList.remove('active');
+          void flashRef.current.offsetWidth;
           flashRef.current.classList.add('active');
-          setTimeout(() => flashRef.current?.classList.remove('active'), 300);
+          setTimeout(() => flashRef.current?.classList.remove('active'), 200);
         }
         playFlashSound();
         setTimeout(captureFrame, 80);

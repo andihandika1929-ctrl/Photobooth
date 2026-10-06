@@ -96,10 +96,10 @@ body::after {
   opacity: 0;
 }
 .flash-overlay.active {
-  animation: flashFade 0.25s ease-out forwards;
+  animation: flashFade 0.18s ease-out forwards;
 }
 @keyframes flashFade {
-  0%   { opacity: 0.95; }
+  0%   { opacity: 1; }
   100% { opacity: 0; }
 }
 
