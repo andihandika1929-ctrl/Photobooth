@@ -20,6 +20,10 @@ import {
   Sparkles,
   Smartphone,
   Video,
+  Type,
+  RotateCcw,
+  Check,
+  Move,
 } from 'lucide-react';
 import {
   type FilterName,
@@ -32,6 +36,17 @@ import { playPrintSound } from './AudioEngine';
 import { v4 as uuidv4 } from 'uuid';
 import { getKeyedSticker, getKeyedStickerSync, preloadAllStickers } from '@/utils/stickerCache';
 import { savePhotoToSupabase } from '@/utils/supabasePhotoPipeline';
+import {
+  CURATED_FONTS,
+  getCuratedFont,
+  ensureFontLoaded,
+  preloadAllCuratedFonts,
+} from '@/lib/fonts';
+import {
+  type TextConfig,
+  getPresetTextConfig,
+  PRESET_DEFAULT_TEXT_CONFIGS,
+} from '@/lib/frames';
 
 // ─── Types ───────────────────────────────────────────────
 export type FramePreset =
@@ -70,11 +85,11 @@ interface CanvasEditorProps {
 }
 
 // ─── Constants ────────────────────────────────────────────
-const FRAME_PRESETS: { id: FramePreset; label: string; emoji: string; desc: string }[] = [
-  { id: 'birthdayCatPink', label: 'Birthday Cat Pink', emoji: '🐱', desc: 'Party cat, cake & 6-photo custom PNG' },
-  { id: 'retroTerracotta', label: 'Retro Terracotta', emoji: '📎', desc: 'Scrapbook 4-cut with paperclips' },
-  { id: 'birthday', label: 'Editorial Birthday', emoji: '🎂', desc: 'Clean Korean strip, name & age at the bottom' },
-  { id: 'film35mm', label: '35mm Film Strip', emoji: '🎞', desc: 'Kodak sprockets & metadata' },
+const FRAME_PRESETS: { id: FramePreset; label: string; emoji: string; desc: string; textConfig: TextConfig }[] = [
+  { id: 'birthdayCatPink', label: 'Birthday Cat Pink', emoji: '🐱', desc: 'Party cat, cake & 6-photo custom PNG', textConfig: PRESET_DEFAULT_TEXT_CONFIGS.birthdayCatPink },
+  { id: 'retroTerracotta', label: 'Retro Terracotta', emoji: '📎', desc: 'Scrapbook 4-cut with paperclips', textConfig: PRESET_DEFAULT_TEXT_CONFIGS.retroTerracotta },
+  { id: 'birthday', label: 'Editorial Birthday', emoji: '🎂', desc: 'Clean Korean strip, name & age at the bottom', textConfig: PRESET_DEFAULT_TEXT_CONFIGS.birthday },
+  { id: 'film35mm', label: '35mm Film Strip', emoji: '🎞', desc: 'Kodak sprockets & metadata', textConfig: PRESET_DEFAULT_TEXT_CONFIGS.film35mm },
 ];
 
 const STICKER_DEFS = [
@@ -607,15 +622,36 @@ export default function CanvasEditor({
     startYPct: number;
   } | null>(null);
 
+  const textDragState = useRef<{
+    startMX: number;
+    startMY: number;
+    startXPct: number;
+    startYPct: number;
+  } | null>(null);
+
   const [activeTab, setActiveTab] = useState<'style' | 'stickers'>('style');
-  const [preset, setPreset] = useState<FramePreset>(
+  const initialActivePreset: FramePreset =
     initialPreset ||
-      (layout === 'grid2x3' ? 'birthdayCatPink' : layout === 'grid2x2' ? 'retroTerracotta' : 'birthday')
-  );
+    (layout === 'grid2x3' ? 'birthdayCatPink' : layout === 'grid2x2' ? 'retroTerracotta' : 'birthday');
+  const initialConfig = getPresetTextConfig(initialActivePreset);
+
+  const [preset, setPreset] = useState<FramePreset>(initialActivePreset);
+  const activeTextConfig = getPresetTextConfig(preset);
   const [location, setLocation] = useState('SEOUL STUDIO');
   const [nowPlaying, setNowPlaying] = useState('NewJeans - Hype Boy');
-  const [birthdayNameInput, setBirthdayNameInput] = useState('');
-  const [birthdayName, setBirthdayName] = useState('');
+  const [customTextInput, setCustomTextInput] = useState(initialConfig.defaultText);
+  const [customText, setCustomText] = useState(initialConfig.defaultText);
+  const [customFont, setCustomFont] = useState(initialConfig.fontFamily);
+  const [customColor, setCustomColor] = useState(initialConfig.color);
+  const [textXPct, setTextXPct] = useState<number>(
+    initialConfig.hasCustomText ? initialConfig.xPercent : 50
+  );
+  const [textYPct, setTextYPct] = useState<number>(
+    initialConfig.hasCustomText ? initialConfig.yPercent : 90
+  );
+  const [fontScale, setFontScale] = useState<number>(1.0);
+  const [isTextActive, setIsTextActive] = useState<boolean>(false);
+  const [previewHeight, setPreviewHeight] = useState<number>(0);
   const [birthdayTheme, setBirthdayTheme] = useState<'cream' | 'black'>('cream');
   const [birthdayAge, setBirthdayAge] = useState('');
   const [birthdayPalette, setBirthdayPalette] = useState<BirthdayPaletteId>('ivory');
@@ -625,13 +661,13 @@ export default function CanvasEditor({
   const [activeStickerID, setActiveStickerID] = useState<string | null>(null);
   const [stickerThumbnails, setStickerThumbnails] = useState<Record<string, string>>({});
 
-  // Debounce birthday title input to keep UI snappy and prevent canvas re-render thrashing
+  // Debounce custom text input to keep UI snappy and prevent canvas re-render thrashing
   useEffect(() => {
     const timer = setTimeout(() => {
-      setBirthdayName(birthdayNameInput.trim());
+      setCustomText(customTextInput.trim());
     }, 300);
     return () => clearTimeout(timer);
-  }, [birthdayNameInput]);
+  }, [customTextInput]);
 
   const placedStickersRef = useRef<PlacedSticker[]>(placedStickers);
   useEffect(() => {
@@ -644,18 +680,44 @@ export default function CanvasEditor({
   const lastExportBlobRef = useRef<Blob | null>(null);
   const locationRef = useRef(location);
   const nowPlayingRef = useRef(nowPlaying);
-  const birthdayNameRef = useRef(birthdayName);
+  const customTextRef = useRef(customText);
+  const customFontRef = useRef(customFont);
+  const customColorRef = useRef(customColor);
+  const textXPctRef = useRef(textXPct);
+  const textYPctRef = useRef(textYPct);
+  const fontScaleRef = useRef(fontScale);
+  const birthdayNameRef = useRef(customText);
   const birthdayThemeRef = useRef(birthdayTheme);
   const birthdayAgeRef = useRef(birthdayAge);
   const birthdayPaletteRef = useRef(birthdayPalette);
   locationRef.current = location;
   nowPlayingRef.current = nowPlaying;
-  birthdayNameRef.current = birthdayName;
+  customTextRef.current = customText;
+  customFontRef.current = customFont;
+  customColorRef.current = customColor;
+  textXPctRef.current = textXPct;
+  textYPctRef.current = textYPct;
+  fontScaleRef.current = fontScale;
+  birthdayNameRef.current = customText;
   birthdayThemeRef.current = birthdayTheme;
   birthdayAgeRef.current = birthdayAge;
   birthdayPaletteRef.current = birthdayPalette;
 
-  // Pre-key all sticker images & preload custom PNG frame on mount into in-memory cache
+  // Dynamically observe preview container height to maintain pixel-perfect font scaling
+  useEffect(() => {
+    if (!previewWrapRef.current) return;
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.contentRect.height > 0) {
+          setPreviewHeight(entry.contentRect.height);
+        }
+      }
+    });
+    observer.observe(previewWrapRef.current);
+    return () => observer.disconnect();
+  }, [previewUrl]);
+
+  // Pre-key all sticker images & preload custom PNG frame and curated fonts on mount
   useEffect(() => {
     let mounted = true;
     preloadAllStickers(STICKER_DEFS).then((map) => {
@@ -663,6 +725,7 @@ export default function CanvasEditor({
         setStickerThumbnails(map);
       }
     });
+    preloadAllCuratedFonts();
     loadBirthdayCatPinkFrame().catch(() => {});
     loadRetroTerracottaFrame().catch(() => {});
     return () => {
@@ -670,12 +733,16 @@ export default function CanvasEditor({
     };
   }, []);
 
-  // Global drag listeners for placed stickers with requestAnimationFrame throttling
+  // Global drag listeners for placed stickers & draggable text layer with requestAnimationFrame throttling
   useEffect(() => {
     let animationFrameId: number | null = null;
 
     const handleMove = (e: MouseEvent | TouchEvent) => {
-      if (!dragState.current || !previewWrapRef.current) return;
+      if ((!dragState.current && !textDragState.current) || !previewWrapRef.current) return;
+      if (e.cancelable && (dragState.current || textDragState.current)) {
+        e.preventDefault();
+      }
+
       const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
       const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
 
@@ -683,23 +750,45 @@ export default function CanvasEditor({
 
       animationFrameId = requestAnimationFrame(() => {
         animationFrameId = null;
-        if (!dragState.current || !previewWrapRef.current) return;
+        if (!previewWrapRef.current) return;
 
         const rect = previewWrapRef.current.getBoundingClientRect();
-        const dx = (clientX - dragState.current.startMX) / rect.width;
-        const dy = (clientY - dragState.current.startMY) / rect.height;
 
-        setPlacedStickers((prev) =>
-          prev.map((s) =>
-            s.id === dragState.current!.id
-              ? {
-                  ...s,
-                  xPct: Math.max(0.05, Math.min(0.95, dragState.current!.startXPct + dx)),
-                  yPct: Math.max(0.05, Math.min(0.95, dragState.current!.startYPct + dy)),
-                }
-              : s
-          )
-        );
+        // 1. Sticker drag
+        if (dragState.current) {
+          const dx = (clientX - dragState.current.startMX) / rect.width;
+          const dy = (clientY - dragState.current.startMY) / rect.height;
+
+          setPlacedStickers((prev) =>
+            prev.map((s) =>
+              s.id === dragState.current!.id
+                ? {
+                    ...s,
+                    xPct: Math.max(0.05, Math.min(0.95, dragState.current!.startXPct + dx)),
+                    yPct: Math.max(0.05, Math.min(0.95, dragState.current!.startYPct + dy)),
+                  }
+                : s
+            )
+          );
+        }
+
+        // 2. Draggable Text Layer drag with clamping (5% - 95%)
+        if (textDragState.current) {
+          const dxPct = ((clientX - textDragState.current.startMX) / rect.width) * 100;
+          const dyPct = ((clientY - textDragState.current.startMY) / rect.height) * 100;
+
+          const clampedX = Math.max(
+            5,
+            Math.min(95, Number((textDragState.current.startXPct + dxPct).toFixed(1)))
+          );
+          const clampedY = Math.max(
+            5,
+            Math.min(95, Number((textDragState.current.startYPct + dyPct).toFixed(1)))
+          );
+
+          setTextXPct(clampedX);
+          setTextYPct(clampedY);
+        }
       });
     };
 
@@ -709,6 +798,7 @@ export default function CanvasEditor({
         animationFrameId = null;
       }
       dragState.current = null;
+      textDragState.current = null;
     };
 
     window.addEventListener('mousemove', handleMove, { passive: true });
@@ -1209,103 +1299,68 @@ export default function CanvasEditor({
 
         if (isExport || liveOpts) {
           await compositePlacedStickers(ctx, w, h);
-        }
 
-        // ── Frame Isolation + Dynamic Font Sizing ────────────────────────────
-        // Name & Age caption is ONLY rendered for birthday presets:
-        //   • 'birthdayCatPink' — text goes in the blush caption band below the artwork
-        //   • 'birthday'        — text goes in the footer of the editorial strip
-        // Non-birthday frames (film35mm, retroTerracotta) remain 100% clean.
-        const isBirthdayFrame =
-          preset === 'birthday' || preset === 'birthdayCatPink';
+          // ── PRD v2 Phase 5: Percentage-Based Interactive Text Layer ──────────
+          const activeTextConfig = getPresetTextConfig(preset);
+          if (activeTextConfig.hasCustomText) {
+            const textToDraw = (customTextRef.current || '').trim();
+            const guestAge = (birthdayAgeRef.current || '').trim();
 
-        if (isBirthdayFrame) {
-          const guestName = birthdayNameRef.current || '';
-          const guestAge  = birthdayAgeRef.current  || '';
+            if (textToDraw || guestAge) {
+              const activeFont = customFontRef.current || activeTextConfig.fontFamily;
+              const activeColor = customColorRef.current || activeTextConfig.color;
+              const fontObj = getCuratedFont(activeFont);
 
-          if (guestName || guestAge) {
-            ctx.save();
-            ctx.textAlign    = 'center';
-            ctx.textBaseline = 'alphabetic';
-            ctx.lineJoin     = 'round';
-            ctx.miterLimit   = 2;
+              // Pre-flight font glyph rasterization to prevent font flash or coordinate shifting
+              await ensureFontLoaded(fontObj.googleFontFamily);
 
-            if (preset === 'birthdayCatPink') {
-              // ── Birthday Cat Pink: text drawn AFTER frame PNG (already composited above)
-              // Position text in the blush caption band (below the artwork rows).
-              const scaleY = h / CAT_PINK_BASE_H;
-              const artH   = CAT_PINK_ART_H * scaleY;
-              const bandH  = h - artH; // caption band height in canvas pixels
-              // Vertically split the band: name at 38%, age at 68%
-              const nameY  = Math.round(artH + bandH * 0.38);
-              const ageY   = Math.round(artH + bandH * 0.68);
+              ctx.save();
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.lineJoin = 'round';
+              ctx.miterLimit = 2;
 
-              // Name: 5.2% of canvas width — bold Caveat, hot-pink, centered
-              if (guestName) {
-                const nameFontSize = Math.round(w * 0.052);
-                ctx.font        = `bold ${nameFontSize}px Caveat, cursive`;
-                ctx.strokeStyle = '#FFFFFF';
-                ctx.lineWidth   = Math.max(2, nameFontSize * 0.12);
-                ctx.strokeText(guestName, w / 2, nameY);
-                ctx.fillStyle   = '#FF69B4';
-                ctx.fillText(guestName,   w / 2, nameY);
+              const posX = (textXPctRef.current / 100) * w;
+              const posY = (textYPctRef.current / 100) * h;
+              const activeScale = fontScaleRef.current || 1.0;
+              const fontSize = Math.max(10, Math.round(activeTextConfig.fontSizeRatio * h * activeScale));
+
+              const isHeavy = fontObj.category === 'bubble' || fontObj.category === 'chunky';
+              ctx.font = `${isHeavy ? '900' : '700'} ${fontSize}px ${fontObj.fontFamily}`;
+
+              const hasAge = !!guestAge;
+              const mainY = hasAge ? posY - Math.round(fontSize * 0.45) : posY;
+
+              // Contrasting outline stroke for sticker-like readability across any background
+              const isWhiteText = activeColor.toUpperCase() === '#FFFFFF';
+              ctx.strokeStyle = isWhiteText ? 'rgba(0, 0, 0, 0.4)' : '#FFFFFF';
+              ctx.lineWidth = Math.max(2, fontSize * 0.14);
+
+              if (textToDraw) {
+                ctx.strokeText(textToDraw, posX, mainY);
+                ctx.fillStyle = activeColor;
+                ctx.fillText(textToDraw, posX, mainY);
               }
 
-              // Age: 3.2% of canvas width — bold Caveat, hot-pink, centered, below name
-              if (guestAge) {
-                const num    = parseInt(guestAge, 10);
-                const j      = num % 10;
-                const k      = num % 100;
-                const suffix = j === 1 && k !== 11 ? 'st'
-                             : j === 2 && k !== 12 ? 'nd'
-                             : j === 3 && k !== 13 ? 'rd' : 'th';
-                const ageLabel    = `${num}${suffix}`;
-                const ageFontSize = Math.round(w * 0.032);
-                ctx.font        = `bold ${ageFontSize}px Caveat, cursive`;
-                ctx.strokeStyle = '#FFFFFF';
-                ctx.lineWidth   = Math.max(1.5, ageFontSize * 0.1);
-                ctx.strokeText(ageLabel, w / 2, ageY);
-                ctx.fillStyle   = '#FF69B4';
-                ctx.fillText(ageLabel,   w / 2, ageY);
+              if (hasAge) {
+                const num = parseInt(guestAge, 10);
+                const j = num % 10;
+                const k = num % 100;
+                const suffix =
+                  j === 1 && k !== 11 ? 'st' : j === 2 && k !== 12 ? 'nd' : j === 3 && k !== 13 ? 'rd' : 'th';
+                const ageLabel = Number.isNaN(num) ? guestAge : `${num}${suffix}`;
+                const ageFontSize = Math.max(10, Math.round(fontSize * 0.62));
+                const ageY = mainY + Math.round(fontSize * 0.85);
+
+                ctx.font = `${isHeavy ? '900' : '700'} ${ageFontSize}px ${fontObj.fontFamily}`;
+                ctx.lineWidth = Math.max(1.5, ageFontSize * 0.12);
+                ctx.strokeText(ageLabel, posX, ageY);
+                ctx.fillStyle = activeColor;
+                ctx.fillText(ageLabel, posX, ageY);
               }
 
-            } else {
-              // ── 'birthday' (Editorial Birthday) strip ───────────────────────
-              // Name: 5.5% of canvas width (bold Caveat, #FF69B4, centered)
-              if (guestName) {
-                const nameFontSize = Math.round(w * 0.055);
-                ctx.font        = `bold ${nameFontSize}px Caveat, cursive`;
-                ctx.strokeStyle = '#FFFFFF';
-                ctx.lineWidth   = Math.max(2, nameFontSize * 0.12);
-                // 9% up from bottom — inside the footer band, above the age line
-                const nameY = h - Math.round(h * 0.09);
-                ctx.strokeText(guestName, w / 2, nameY);
-                ctx.fillStyle = '#FF69B4';
-                ctx.fillText(guestName,   w / 2, nameY);
-              }
-
-              // Age: 3.5% of canvas width (bold Caveat, #FF69B4, centered)
-              if (guestAge) {
-                const num    = parseInt(guestAge, 10);
-                const j      = num % 10;
-                const k      = num % 100;
-                const suffix = j === 1 && k !== 11 ? 'st'
-                             : j === 2 && k !== 12 ? 'nd'
-                             : j === 3 && k !== 13 ? 'rd' : 'th';
-                const ageLabel    = `${num}${suffix}`;
-                const ageFontSize = Math.round(w * 0.035);
-                ctx.font        = `bold ${ageFontSize}px Caveat, cursive`;
-                ctx.strokeStyle = '#FFFFFF';
-                ctx.lineWidth   = Math.max(1.5, ageFontSize * 0.1);
-                // 5% up from bottom — just below the name
-                const ageY = h - Math.round(h * 0.05);
-                ctx.strokeText(ageLabel, w / 2, ageY);
-                ctx.fillStyle = '#FF69B4';
-                ctx.fillText(ageLabel,   w / 2, ageY);
-              }
+              ctx.restore();
             }
-
-            ctx.restore();
           }
         }
 
@@ -1376,7 +1431,7 @@ export default function CanvasEditor({
       void triggerRender(true);
     }, 450);
     return () => clearTimeout(timer);
-  }, [birthdayName, birthdayAge, triggerRender]);
+  }, [customText, customFont, customColor, birthdayAge, triggerRender]);
 
   const waitForRenderIdle = async () => {
     let spins = 0;
@@ -1445,10 +1500,8 @@ export default function CanvasEditor({
         const uploadOptions = {
           templateType: preset,
           locationTag:  locationRef.current || 'HaloLuna Studio',
-          ...(isBirthday ? {
-            guestName: birthdayNameRef.current || '',
-            guestAge:  birthdayAgeRef.current  || '',
-          } : {}),
+          guestName:    customTextRef.current || '',
+          guestAge:     birthdayAgeRef.current || '',
         };
 
         if (onAutoUpload) {
@@ -1478,6 +1531,22 @@ export default function CanvasEditor({
   // Re-render when preset changes
   const handlePresetSelect = (newPreset: FramePreset) => {
     if (newPreset === preset) return;
+    const newConfig = getPresetTextConfig(newPreset);
+    if (!newConfig.hasCustomText) {
+      setCustomTextInput('');
+      setCustomText('');
+      setFontScale(1.0);
+      setIsTextActive(false);
+    } else {
+      setTextXPct(newConfig.xPercent);
+      setTextYPct(newConfig.yPercent);
+      setFontScale(1.0);
+      setCustomFont(newConfig.fontFamily);
+      setCustomColor(newConfig.color);
+      setCustomTextInput(newConfig.defaultText);
+      setCustomText(newConfig.defaultText);
+      setIsTextActive(false);
+    }
     setPreset(newPreset);
   };
 
@@ -1550,10 +1619,8 @@ export default function CanvasEditor({
           await savePhotoToSupabase(result.blob, {
             templateType: preset,
             locationTag:  locationRef.current || 'HaloLuna Studio',
-            ...(isBirthday ? {
-              guestName: birthdayNameRef.current || '',
-              guestAge:  birthdayAgeRef.current  || '',
-            } : {}),
+            guestName:    customTextRef.current || '',
+            guestAge:     birthdayAgeRef.current || '',
           });
         }
       } catch (syncErr) {
@@ -1572,11 +1639,16 @@ export default function CanvasEditor({
     JSON.stringify([
       preset,
       layout,
-      birthdayNameRef.current,
+      customTextRef.current,
+      customFontRef.current,
+      customColorRef.current,
       birthdayAgeRef.current,
       birthdayPaletteRef.current,
       locationRef.current,
       nowPlayingRef.current,
+      textXPctRef.current,
+      textYPctRef.current,
+      fontScaleRef.current,
       placedStickersRef.current.map((st) => [st.id, st.xPct, st.yPct, st.scale]),
       frames.map((f) => f.dataUrl.length),
     ]);
@@ -1889,10 +1961,8 @@ export default function CanvasEditor({
           savePhotoToSupabase(result.blob, {
             templateType: preset,
             locationTag:  locationRef.current || 'HaloLuna Studio',
-            ...(isBirthdayWall ? {
-              guestName: birthdayNameRef.current || '',
-              guestAge:  birthdayAgeRef.current  || '',
-            } : {}),
+            guestName:    customTextRef.current || '',
+            guestAge:     birthdayAgeRef.current || '',
           }).catch((err) => console.warn('[HaloLuna] Wallpaper sync failed (non-fatal):', err));
         }
       }
@@ -1959,6 +2029,7 @@ export default function CanvasEditor({
     id: string,
   ) => {
     e.stopPropagation();
+    setIsTextActive(false);
     setActiveStickerID(id);
     const st = placedStickers.find((s) => s.id === id);
     if (!st) return;
@@ -1972,6 +2043,22 @@ export default function CanvasEditor({
       startMY: clientY,
       startXPct: st.xPct,
       startYPct: st.yPct,
+    };
+  };
+
+  const handleTextPointerDown = (e: React.MouseEvent | React.TouchEvent) => {
+    e.stopPropagation();
+    setActiveStickerID(null);
+    setIsTextActive(true);
+
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+
+    textDragState.current = {
+      startMX: clientX,
+      startMY: clientY,
+      startXPct: textXPctRef.current,
+      startYPct: textYPctRef.current,
     };
   };
 
@@ -2041,71 +2128,324 @@ export default function CanvasEditor({
             </div>
           </div>
 
-          {(preset === 'birthday' || preset === 'birthdayCatPink' || preset === 'retroTerracotta' || preset === 'film35mm') && (
+          {/* ── PRD v2 Phase 5: Percentage-Based Text Config & Curated Font Layer ── */}
+          {activeTextConfig.hasCustomText && (
             <form
               onSubmit={(e) => e.preventDefault()}
-              className="p-4 bg-gradient-to-br from-amber-50/70 via-white to-pink-50/70 rounded-xl border border-amber-200/90 shadow-sm flex flex-col gap-3.5"
+              className="p-4 bg-gradient-to-br from-amber-50/70 via-white to-pink-50/70 rounded-xl border border-amber-200/90 shadow-sm flex flex-col gap-4"
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
-                  <Sparkles size={14} className="text-amber-500" />
+                  <Type size={14} className="text-amber-600" />
                   <span className="text-[11px] font-bold text-zinc-900 uppercase tracking-wider">
-                    Sticker caption (burned into the file)
+                    Text Layer (Relative Coordinates)
                   </span>
                 </div>
-                <span className="text-[9.5px] font-mono font-bold text-amber-800 bg-amber-100/90 px-2 py-0.5 rounded-full border border-amber-200">
-                  Name + age at the bottom
-                </span>
-              </div>
-
-              <div>
-                <label className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest block mb-1.5">
-                  Name (printed at the bottom)
-                </label>
-                <input
-                  type="text"
-                  name="guest-name"
-                  autoComplete="off"
-                  value={birthdayNameInput}
-                  onChange={(e) => setBirthdayNameInput(e.target.value)}
-                  placeholder="e.g. Andi"
-                  maxLength={32}
-                  className="w-full text-xs font-semibold border border-zinc-300 rounded-lg px-3 py-2 bg-white outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition-all shadow-xs"
-                />
-                <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                  <span className="text-[10px] text-zinc-400 font-mono">Quick:</span>
-                  {['Andi', 'Hollie', 'Luna', 'Us'].map((sug) => (
-                    <button
-                      key={sug}
-                      type="button"
-                      onClick={() => setBirthdayNameInput(sug)}
-                      className={`text-[10px] font-medium px-2 py-0.5 rounded-md border transition-all ${
-                        birthdayNameInput === sug
-                          ? 'bg-zinc-900 text-white border-zinc-900'
-                          : 'bg-white border-zinc-200 hover:border-zinc-400 text-zinc-600'
-                      }`}
-                    >
-                      {sug}
-                    </button>
-                  ))}
+                <div className="flex items-center gap-2">
+                  <span className="text-[9.5px] font-mono font-bold text-amber-800 bg-amber-100/90 px-2 py-0.5 rounded-full border border-amber-200">
+                    {getCuratedFont(customFont).badge}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomTextInput(activeTextConfig.defaultText);
+                      setCustomText(activeTextConfig.defaultText);
+                      setCustomFont(activeTextConfig.fontFamily);
+                      setCustomColor(activeTextConfig.color);
+                      setBirthdayAge('');
+                      setTextXPct(activeTextConfig.xPercent);
+                      setTextYPct(activeTextConfig.yPercent);
+                      setFontScale(1.0);
+                      setIsTextActive(false);
+                    }}
+                    className="text-[10px] text-zinc-500 hover:text-zinc-800 flex items-center gap-1 transition-colors"
+                    title="Reset to frame preset defaults"
+                  >
+                    <RotateCcw size={10} />
+                    <span>Reset</span>
+                  </button>
                 </div>
               </div>
 
+              {/* Main Text Input */}
               <div>
                 <label className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest block mb-1.5">
-                  Age (printed under the name)
+                  Custom Caption
                 </label>
-                <input
-                  type="text"
-                  name="guest-age"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  autoComplete="off"
-                  value={birthdayAge}
-                  onChange={(e) => setBirthdayAge(e.target.value.replace(/\D/g, '').slice(0, 3))}
-                  placeholder="e.g. 21"
-                  className="w-full text-xs font-semibold border border-zinc-300 rounded-lg px-3 py-2 bg-white outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition-all shadow-xs"
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    name="guest-caption"
+                    autoComplete="off"
+                    value={customTextInput}
+                    onChange={(e) => setCustomTextInput(e.target.value)}
+                    onFocus={() => setIsTextActive(true)}
+                    placeholder={activeTextConfig.defaultText || 'Type your caption...'}
+                    maxLength={40}
+                    className="w-full text-xs font-semibold border border-zinc-300 rounded-lg px-3 py-2 pr-8 bg-white outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition-all shadow-xs"
+                  />
+                  {customTextInput && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCustomTextInput('');
+                        setCustomText('');
+                      }}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700"
+                      title="Clear text"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                  <span className="text-[10px] text-zinc-400 font-mono">Quick:</span>
+                  {[activeTextConfig.defaultText, 'Andi', 'Hollie', 'Luna', 'Forever', 'Smile']
+                    .filter((item, idx, arr) => item && arr.indexOf(item) === idx)
+                    .map((sug) => (
+                      <button
+                        key={sug}
+                        type="button"
+                        onClick={() => {
+                          setCustomTextInput(sug);
+                          setCustomText(sug);
+                        }}
+                        className={`text-[10px] font-medium px-2 py-0.5 rounded-md border transition-all ${
+                          customTextInput === sug
+                            ? 'bg-zinc-900 text-white border-zinc-900'
+                            : 'bg-white border-zinc-200 hover:border-zinc-400 text-zinc-600'
+                        }`}
+                      >
+                        {sug}
+                      </button>
+                    ))}
+                </div>
+
+                {/* Position & Drag Coordinates with Reset Posisi Button (Task 5.3) */}
+                <div className="flex items-center justify-between bg-amber-50/80 px-2.5 py-1.5 rounded-lg border border-amber-200/80 text-[10.5px] mt-2">
+                  <div className="flex items-center gap-1.5 text-amber-900 font-medium">
+                    <Move size={12} className="text-amber-700" />
+                    <span>
+                      Posisi: <strong>X: {textXPct}%</strong>, <strong>Y: {textYPct}%</strong>
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTextXPct(activeTextConfig.xPercent);
+                      setTextYPct(activeTextConfig.yPercent);
+                      setFontScale(1.0);
+                    }}
+                    disabled={
+                      textXPct === activeTextConfig.xPercent &&
+                      textYPct === activeTextConfig.yPercent &&
+                      fontScale === 1.0
+                    }
+                    className="text-[10px] text-amber-800 hover:text-amber-950 font-bold flex items-center gap-1 transition-colors disabled:opacity-40 disabled:cursor-not-allowed hover:underline"
+                    title="Kembalikan posisi teks dan ukuran font ke persentase default preset"
+                  >
+                    <RotateCcw size={10} />
+                    <span>Reset Posisi</span>
+                  </button>
+                </div>
+
+                {/* Font Size Control Slider & Quick Multipliers */}
+                <div className="flex flex-col gap-2 bg-white/80 p-2.5 rounded-lg border border-amber-200/90 shadow-2xs mt-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <Type size={12} className="text-amber-700" />
+                      <span className="text-[10px] font-bold text-zinc-700 uppercase tracking-widest">
+                        Font Size
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10.5px] font-mono font-bold text-amber-900 bg-amber-100/90 px-2 py-0.5 rounded-md border border-amber-200">
+                        {fontScale.toFixed(2)}x ({Math.round(fontScale * 100)}%)
+                      </span>
+                      {fontScale !== 1.0 && (
+                        <button
+                          type="button"
+                          onClick={() => setFontScale(1.0)}
+                          className="text-[10px] text-zinc-500 hover:text-zinc-800 flex items-center gap-0.5 transition-colors hover:underline"
+                          title="Reset font size to 1.0x"
+                        >
+                          <RotateCcw size={9} />
+                          <span>1.0x</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setFontScale((prev) => Math.max(0.5, Number((prev - 0.1).toFixed(2))))}
+                      disabled={fontScale <= 0.5}
+                      className="w-6 h-6 rounded bg-zinc-100 hover:bg-zinc-200 border border-zinc-200 flex items-center justify-center text-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                      title="Perkecil font"
+                    >
+                      <Minus size={11} />
+                    </button>
+
+                    <input
+                      type="range"
+                      min={0.5}
+                      max={2.5}
+                      step={0.05}
+                      value={fontScale}
+                      onChange={(e) => setFontScale(parseFloat(e.target.value))}
+                      className="flex-1 accent-zinc-900 cursor-pointer h-1.5 bg-zinc-200 rounded-lg appearance-none"
+                    />
+
+                    <button
+                      type="button"
+                      onClick={() => setFontScale((prev) => Math.min(2.5, Number((prev + 0.1).toFixed(2))))}
+                      disabled={fontScale >= 2.5}
+                      className="w-6 h-6 rounded bg-zinc-100 hover:bg-zinc-200 border border-zinc-200 flex items-center justify-center text-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                      title="Perbesar font"
+                    >
+                      <Plus size={11} />
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-1 mt-0.5">
+                    {[0.75, 1.0, 1.25, 1.5, 2.0].map((sc) => (
+                      <button
+                        key={sc}
+                        type="button"
+                        onClick={() => setFontScale(sc)}
+                        className={`flex-1 py-0.5 text-[9.5px] font-mono rounded border transition-all ${
+                          Math.abs(fontScale - sc) < 0.02
+                            ? 'bg-zinc-900 text-white border-zinc-900 font-bold shadow-2xs'
+                            : 'bg-white text-zinc-600 border-zinc-200 hover:bg-zinc-50 hover:border-zinc-300'
+                        }`}
+                      >
+                        {sc === 1.0 ? 'Normal (1x)' : `${sc}x`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Optional Age Input (Only for birthday presets or when user wants ordinal age) */}
+              {(preset === 'birthday' || preset === 'birthdayCatPink') && (
+                <div>
+                  <label className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest block mb-1.5">
+                    Age (printed under the name)
+                  </label>
+                  <input
+                    type="text"
+                    name="guest-age"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    autoComplete="off"
+                    value={birthdayAge}
+                    onChange={(e) => setBirthdayAge(e.target.value.replace(/\D/g, '').slice(0, 3))}
+                    placeholder="e.g. 21"
+                    className="w-full text-xs font-semibold border border-zinc-300 rounded-lg px-3 py-2 bg-white outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition-all shadow-xs"
+                  />
+                </div>
+              )}
+
+              {/* Curated Font Catalog Selector */}
+              <div>
+                <label className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest block mb-1.5">
+                  Curated Font Catalog
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
+                  {CURATED_FONTS.map((font) => {
+                    const isSelected =
+                      customFont === font.googleFontFamily ||
+                      customFont.toLowerCase() === font.id.toLowerCase();
+                    return (
+                      <button
+                        key={font.id}
+                        type="button"
+                        onClick={() => setCustomFont(font.googleFontFamily)}
+                        className={`p-2 rounded-lg border text-left flex flex-col justify-between transition-all ${
+                          isSelected
+                            ? 'bg-zinc-900 text-white border-zinc-900 ring-2 ring-zinc-900/20 shadow-xs'
+                            : 'bg-white text-zinc-800 border-zinc-200/90 hover:border-zinc-400 hover:bg-zinc-50'
+                        }`}
+                      >
+                        <span
+                          className="text-xs truncate block font-bold leading-tight"
+                          style={{ fontFamily: font.fontFamily }}
+                        >
+                          {font.name}
+                        </span>
+                        <span
+                          className={`text-[9px] mt-1 truncate block ${
+                            isSelected ? 'text-zinc-300' : 'text-zinc-500'
+                          }`}
+                        >
+                          {font.badge}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Text Color Swatches & Custom Color Picker */}
+              <div>
+                <label className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest block mb-1.5">
+                  Text Color
+                </label>
+                <div className="flex flex-wrap items-center gap-2">
+                  {[
+                    { label: 'Hot Pink', value: '#FF69B4' },
+                    { label: 'Coral Rose', value: '#FF5E7E' },
+                    { label: 'Pure White', value: '#FFFFFF' },
+                    { label: 'Noir Black', value: '#1C1C1E' },
+                    { label: 'Warm Amber', value: '#F59E0B' },
+                    { label: 'Sage Green', value: '#7C8B6A' },
+                    { label: 'Burgundy', value: '#6B1D2F' },
+                    { label: 'Cobalt Blue', value: '#3B82F6' },
+                  ].map((colorItem) => {
+                    const isSelected =
+                      customColor.toUpperCase() === colorItem.value.toUpperCase();
+                    return (
+                      <button
+                        key={colorItem.value}
+                        type="button"
+                        onClick={() => setCustomColor(colorItem.value)}
+                        className={`w-7 h-7 rounded-full border-2 transition-all flex items-center justify-center shadow-xs ${
+                          isSelected
+                            ? 'ring-2 ring-zinc-900 scale-110 border-white'
+                            : 'border-zinc-300 hover:scale-105'
+                        }`}
+                        style={{ backgroundColor: colorItem.value }}
+                        title={colorItem.label}
+                      >
+                        {isSelected && (
+                          <Check
+                            size={12}
+                            strokeWidth={3}
+                            className={
+                              colorItem.value === '#FFFFFF'
+                                ? 'text-zinc-900'
+                                : 'text-white'
+                            }
+                          />
+                        )}
+                      </button>
+                    );
+                  })}
+                  <div className="flex items-center gap-1.5 ml-1">
+                    <input
+                      type="color"
+                      value={customColor}
+                      onChange={(e) => setCustomColor(e.target.value)}
+                      className="w-7 h-7 rounded-full cursor-pointer border border-zinc-300 overflow-hidden"
+                      title="Custom HEX Color Picker"
+                    />
+                    <span className="text-[10px] font-mono text-zinc-500 uppercase">
+                      {customColor}
+                    </span>
+                  </div>
+                </div>
               </div>
 
               {/* Aesthetic Solid Color Palette Selector (hidden for custom PNG frame) */}
@@ -2299,7 +2639,10 @@ export default function CanvasEditor({
           <div
             ref={previewWrapRef}
             className="relative w-full max-w-[340px] sm:max-w-[400px] border border-zinc-300/80 rounded-lg shadow-xl overflow-hidden bg-white select-none transition-shadow hover:shadow-2xl"
-            onClick={() => setActiveStickerID(null)}
+            onClick={() => {
+              setActiveStickerID(null);
+              setIsTextActive(false);
+            }}
           >
             {/* Rendered Base Photo Strip */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -2364,11 +2707,105 @@ export default function CanvasEditor({
                 </div>
               );
             })}
+
+            {/* Draggable Text Layer Overlay (Task 5.3) */}
+            {activeTextConfig.hasCustomText &&
+              ((customTextInput.trim() || customText.trim()) || birthdayAge.trim()) && (() => {
+                const textStr = customTextInput.trim() || customText.trim();
+                const ageStr = birthdayAge.trim();
+                const curFont = getCuratedFont(customFont || activeTextConfig.fontFamily);
+                const isHeavy = curFont.category === 'bubble' || curFont.category === 'chunky';
+                const activeScale = fontScale || 1.0;
+                const previewFontSize = Math.max(
+                  10,
+                  Math.round(
+                    (previewHeight > 0 ? previewHeight : layout === 'grid2x2' ? 380 : 850) *
+                      activeTextConfig.fontSizeRatio *
+                      activeScale
+                  )
+                );
+                const isWhite =
+                  (customColor || activeTextConfig.color).toUpperCase() === '#FFFFFF';
+                const strokeColor = isWhite ? 'rgba(0, 0, 0, 0.45)' : '#FFFFFF';
+                const strokeWidth = Math.max(1.5, Math.round(previewFontSize * 0.12));
+
+                const num = parseInt(ageStr, 10);
+                const j = num % 10;
+                const k = num % 100;
+                const suffix =
+                  j === 1 && k !== 11 ? 'st' : j === 2 && k !== 12 ? 'nd' : j === 3 && k !== 13 ? 'rd' : 'th';
+                const ageLabel = Number.isNaN(num) ? ageStr : `${num}${suffix}`;
+                const ageFontSize = Math.max(10, Math.round(previewFontSize * 0.62));
+                const ageStrokeWidth = Math.max(1.2, Math.round(ageFontSize * 0.12));
+
+                return (
+                  <div
+                    onMouseDown={handleTextPointerDown}
+                    onTouchStart={handleTextPointerDown}
+                    className={`absolute cursor-grab active:cursor-grabbing select-none touch-none text-center ${
+                      isTextActive ? 'z-30' : 'z-20'
+                    }`}
+                    style={{
+                      left: `${textXPct}%`,
+                      top: `${textYPct}%`,
+                      transform: 'translate(-50%, -50%)',
+                      maxWidth: '92%',
+                    }}
+                  >
+                    {/* Visual dashed bounding box indicator (Hidden in exports) */}
+                    {isTextActive && (
+                      <div className="absolute -inset-2 border-2 border-dashed border-amber-500 rounded-lg pointer-events-none shadow-xs">
+                        <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-amber-500 text-white text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-full flex items-center gap-1 shadow pointer-events-none">
+                          <Move size={8} />
+                          <span>Drag</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Main Caption */}
+                    {textStr && (
+                      <div
+                        style={{
+                          fontFamily: curFont.fontFamily,
+                          fontWeight: isHeavy ? 900 : 700,
+                          color: customColor || activeTextConfig.color,
+                          fontSize: `${previewFontSize}px`,
+                          lineHeight: 1.15,
+                          WebkitTextStroke: `${strokeWidth}px ${strokeColor}`,
+                          paintOrder: 'stroke fill',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {textStr}
+                      </div>
+                    )}
+
+                    {/* Optional Age Label */}
+                    {ageStr && (
+                      <div
+                        style={{
+                          fontFamily: curFont.fontFamily,
+                          fontWeight: isHeavy ? 900 : 700,
+                          color: customColor || activeTextConfig.color,
+                          fontSize: `${ageFontSize}px`,
+                          lineHeight: 1.1,
+                          WebkitTextStroke: `${ageStrokeWidth}px ${strokeColor}`,
+                          paintOrder: 'stroke fill',
+                          marginTop: `${Math.round(previewFontSize * 0.1)}px`,
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {ageLabel}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
           </div>
 
           <p className="text-[11px] text-zinc-500 font-mono text-center">
-            {placedStickers.length > 0
-              ? '💡 Tip: Click & drag stickers directly on the strip to reposition.'
+            {activeTextConfig.hasCustomText || placedStickers.length > 0
+              ? '💡 Tip: Click & drag text caption or stickers directly on the strip to reposition.'
               : 'Add cute stickers above to customize your strip!'}
           </p>
 

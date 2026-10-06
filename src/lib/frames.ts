@@ -1,6 +1,74 @@
 import type { FramePreset, LayoutType } from '@/components/CanvasEditor';
 
 /**
+ * Relative percentage-based text configuration according to PRD v2 Phase 5 (Task 5.1).
+ * Coordinates and font size are normalized relative to canvas dimensions to ensure
+ * pixel-perfect rendering across downscaled previews and high-res export canvases.
+ */
+export interface TextConfig {
+  hasCustomText: boolean;
+  defaultText: string;
+  fontFamily: string;     // Value from Curated Font Catalog (e.g. 'Caveat', 'Cherry Bomb One')
+  color: string;          // Hex code, e.g. '#FF5E7E'
+  xPercent: number;       // 0 - 100, e.g. 50 (horizontal center)
+  yPercent: number;       // 0 - 100, e.g. 88 (bottom area)
+  fontSizeRatio: number;  // Ratio relative to canvas height, e.g. 0.045
+}
+
+export const PRESET_DEFAULT_TEXT_CONFIGS: Record<FramePreset, TextConfig> = {
+  birthdayCatPink: {
+    hasCustomText: true,
+    defaultText: 'Happy Birthday',
+    fontFamily: 'Caveat',
+    color: '#FF69B4',
+    xPercent: 50,
+    yPercent: 94.6,
+    fontSizeRatio: 0.032,
+  },
+  retroTerracotta: {
+    hasCustomText: true,
+    defaultText: 'Smile came from inside',
+    fontFamily: 'Caveat',
+    color: '#FFFFFF',
+    xPercent: 50,
+    yPercent: 92.4,
+    fontSizeRatio: 0.039,
+  },
+  birthday: {
+    hasCustomText: true,
+    defaultText: 'Happy Birthday',
+    fontFamily: 'Caveat',
+    color: '#FF69B4',
+    xPercent: 50,
+    yPercent: 91,
+    fontSizeRatio: 0.035,
+  },
+  film35mm: {
+    hasCustomText: false,
+    defaultText: '',
+    fontFamily: 'Inter',
+    color: '#E8890A',
+    xPercent: 50,
+    yPercent: 98,
+    fontSizeRatio: 0.02,
+  },
+};
+
+export function getPresetTextConfig(preset: FramePreset): TextConfig {
+  return (
+    PRESET_DEFAULT_TEXT_CONFIGS[preset] ?? {
+      hasCustomText: false,
+      defaultText: '',
+      fontFamily: 'Inter',
+      color: '#000000',
+      xPercent: 50,
+      yPercent: 90,
+      fontSizeRatio: 0.03,
+    }
+  );
+}
+
+/**
  * A frame theme is the single choice a guest makes on the landing page.
  * It decides the strip layout used in the capture room and the frame
  * artwork the canvas editor opens with.
@@ -18,6 +86,7 @@ export interface FrameTheme {
   ink: string;
   accent: string;
   wash: string;
+  textConfig?: TextConfig;
 }
 
 export const FRAME_THEMES: FrameTheme[] = [
@@ -34,6 +103,7 @@ export const FRAME_THEMES: FrameTheme[] = [
     ink: '#FFF8F0',
     accent: '#F4C7A8',
     wash: '#F8E4D6',
+    textConfig: PRESET_DEFAULT_TEXT_CONFIGS.retroTerracotta,
   },
   {
     id: 'birthday',
@@ -48,6 +118,7 @@ export const FRAME_THEMES: FrameTheme[] = [
     ink: '#7A2E48',
     accent: '#F2A7C3',
     wash: '#FBE6EE',
+    textConfig: PRESET_DEFAULT_TEXT_CONFIGS.birthdayCatPink,
   },
   {
     id: 'film-35mm',
@@ -61,6 +132,7 @@ export const FRAME_THEMES: FrameTheme[] = [
     ink: '#2B2A26',
     accent: '#A8A08C',
     wash: '#EDE8DC',
+    textConfig: PRESET_DEFAULT_TEXT_CONFIGS.film35mm,
   },
 ];
 
