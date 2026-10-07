@@ -14,6 +14,7 @@ import {
   Music,
   Palette,
   Sticker,
+  Smile,
   Plus,
   Minus,
   X,
@@ -26,6 +27,9 @@ import {
   Move,
   Contrast,
   RotateCw,
+  Trash2,
+  Maximize2,
+  Search,
 } from 'lucide-react';
 import {
   type FilterName,
@@ -38,6 +42,7 @@ import { playPrintSound } from './AudioEngine';
 import { v4 as uuidv4 } from 'uuid';
 import { getKeyedSticker, getKeyedStickerSync, preloadAllStickers } from '@/utils/stickerCache';
 import { savePhotoToSupabase } from '@/utils/supabasePhotoPipeline';
+import { StickerDrawerModal } from './StickerDrawerModal';
 import {
   CURATED_FONTS,
   getCuratedFont,
@@ -68,6 +73,7 @@ export interface PlacedSticker {
   xPct: number; // 0–1 of container width
   yPct: number; // 0–1 of container height
   scale: number;
+  rotation: number; // in degrees (-180 to 180)
 }
 
 interface CapturedFrame {
@@ -458,6 +464,53 @@ function loadRetroTerracottaFrame(): Promise<HTMLImageElement> {
   return retroLoadingPromise;
 }
 
+// In-memory cache for transparent sticker assets (GIPHY / external)
+const remoteStickerCache = new Map<string, HTMLImageElement>();
+
+async function loadTransparentSticker(
+  src: string,
+  name: string = ''
+): Promise<HTMLCanvasElement | HTMLImageElement | null> {
+  if (typeof window === 'undefined') return null;
+
+  // 1. If it's a local black-keyed sticker asset (e.g. /sticker/Couple.png)
+  if (src.startsWith('/sticker/')) {
+    const keyed = getKeyedStickerSync(src) || (await getKeyedSticker(src, name));
+    if (keyed) return keyed.canvas;
+  }
+
+  // 2. Check remote cache
+  const cached = remoteStickerCache.get(src);
+  if (cached && cached.complete && cached.naturalWidth > 0) {
+    return cached;
+  }
+
+  // 3. Load with crossOrigin = 'anonymous' to prevent tainted canvas
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+
+    const timer = setTimeout(() => {
+      console.warn(`[StickerEngine] Timeout loading sticker from: ${src}`);
+      resolve(null);
+    }, 6000);
+
+    img.onload = () => {
+      clearTimeout(timer);
+      remoteStickerCache.set(src, img);
+      resolve(img);
+    };
+
+    img.onerror = (err) => {
+      clearTimeout(timer);
+      console.warn(`[StickerEngine] Failed loading sticker from: ${src}`, err);
+      resolve(null);
+    };
+
+    img.src = src;
+  });
+}
+
 // Preload cute fonts safely with fallback so canvas generator never hangs or throws
 let fontsLoaded = false;
 async function loadCuteBirthdayFonts(): Promise<void> {
@@ -686,10 +739,17 @@ export default function CanvasEditor({
 
   const dragState = useRef<{
     id: string;
+    mode: 'drag' | 'rotate' | 'resize';
     startMX: number;
     startMY: number;
     startXPct: number;
     startYPct: number;
+    startScale: number;
+    startRotation: number;
+    centerX: number;
+    centerY: number;
+    startDist: number;
+    startAngle: number;
   } | null>(null);
 
   const textDragState = useRef<{
@@ -701,6 +761,7 @@ export default function CanvasEditor({
   } | null>(null);
 
   const [activeTab, setActiveTab] = useState<'style' | 'stickers'>('style');
+  const [isStickerDrawerOpen, setIsStickerDrawerOpen] = useState(false);
   const initialActivePreset: FramePreset =
     initialPreset ||
     (layout === 'grid2x3' ? 'birthdayCatPink' : layout === 'grid2x2' ? 'retroTerracotta' : 'birthday');
@@ -877,22 +938,43 @@ export default function CanvasEditor({
 
         const rect = previewWrapRef.current.getBoundingClientRect();
 
-        // 1. Sticker drag
+        // 1. Sticker drag, rotate & resize interaction
         if (dragState.current) {
-          const dx = (clientX - dragState.current.startMX) / rect.width;
-          const dy = (clientY - dragState.current.startMY) / rect.height;
+          const state = dragState.current;
+          if (state.mode === 'drag') {
+            const dx = (clientX - state.startMX) / rect.width;
+            const dy = (clientY - state.startMY) / rect.height;
 
-          setPlacedStickers((prev) =>
-            prev.map((s) =>
-              s.id === dragState.current!.id
-                ? {
-                    ...s,
-                    xPct: Math.max(0.05, Math.min(0.95, dragState.current!.startXPct + dx)),
-                    yPct: Math.max(0.05, Math.min(0.95, dragState.current!.startYPct + dy)),
-                  }
-                : s
-            )
-          );
+            setPlacedStickers((prev) =>
+              prev.map((s) =>
+                s.id === state.id
+                  ? {
+                      ...s,
+                      xPct: Math.max(0.05, Math.min(0.95, state.startXPct + dx)),
+                      yPct: Math.max(0.05, Math.min(0.95, state.startYPct + dy)),
+                    }
+                  : s
+              )
+            );
+          } else if (state.mode === 'rotate') {
+            const curAngle = Math.atan2(clientY - state.centerY, clientX - state.centerX) * (180 / Math.PI);
+            const angleDiff = curAngle - state.startAngle;
+            let nextRotation = Math.round((state.startRotation + angleDiff) % 360);
+            if (nextRotation > 180) nextRotation -= 360;
+            if (nextRotation < -180) nextRotation += 360;
+
+            setPlacedStickers((prev) =>
+              prev.map((s) => (s.id === state.id ? { ...s, rotation: nextRotation } : s))
+            );
+          } else if (state.mode === 'resize') {
+            const curDist = Math.hypot(clientX - state.centerX, clientY - state.centerY);
+            const scaleRatio = curDist / Math.max(12, state.startDist);
+            const nextScale = Math.max(0.3, Math.min(3.0, Number((state.startScale * scaleRatio).toFixed(2))));
+
+            setPlacedStickers((prev) =>
+              prev.map((s) => (s.id === state.id ? { ...s, scale: nextScale } : s))
+            );
+          }
         }
 
         // 2. Draggable Text Layer drag with clamping (5% - 95%)
@@ -1300,7 +1382,7 @@ export default function CanvasEditor({
   );
 
   // ═══════════════════════════════════════════════════════
-  //  STICKER COMPOSITING ON HIGH-DPI CANVAS (EXPORT ONLY)
+  //  STICKER COMPOSITING ON HIGH-DPI CANVAS (EXPORT & BTS)
   // ═══════════════════════════════════════════════════════
   const compositePlacedStickers = useCallback(
     async (ctx: CanvasRenderingContext2D, w: number, h: number) => {
@@ -1308,15 +1390,34 @@ export default function CanvasEditor({
       if (stickers.length === 0) return;
 
       for (const st of stickers) {
-        const keyed = getKeyedStickerSync(st.src) || (await getKeyedSticker(st.src, st.name));
-        if (!keyed) continue;
+        try {
+          const source = await loadTransparentSticker(st.src, st.name);
+          if (!source) continue;
 
-        const sW = st.scale * w * 0.22;
-        const sH = (sW / keyed.width) * keyed.height;
-        const sx = st.xPct * w - sW / 2;
-        const sy = st.yPct * h - sH / 2;
+          const naturalW =
+            (source as HTMLImageElement).naturalWidth ||
+            (source as HTMLCanvasElement).width ||
+            200;
+          const naturalH =
+            (source as HTMLImageElement).naturalHeight ||
+            (source as HTMLCanvasElement).height ||
+            200;
 
-        ctx.drawImage(keyed.canvas, sx, sy, sW, sH);
+          const sW = (st.scale || 1.0) * w * 0.22;
+          const sH = (sW / naturalW) * naturalH;
+          const sx = st.xPct * w;
+          const sy = st.yPct * h;
+
+          ctx.save();
+          ctx.translate(sx, sy);
+          if (st.rotation) {
+            ctx.rotate(((st.rotation || 0) * Math.PI) / 180);
+          }
+          ctx.drawImage(source, -sW / 2, -sH / 2, sW, sH);
+          ctx.restore();
+        } catch (err) {
+          console.warn('[StickerEngine] Error compositing sticker:', st.name, err);
+        }
       }
     },
     []
@@ -1844,7 +1945,7 @@ export default function CanvasEditor({
       subTextYPctRef.current,
       subFontScaleRef.current,
       subRotationRef.current,
-      placedStickersRef.current.map((st) => [st.id, st.xPct, st.yPct, st.scale]),
+      placedStickersRef.current.map((st) => [st.id, st.xPct, st.yPct, st.scale, st.rotation]),
       frames.map((f) => f.dataUrl.length),
     ]);
 
@@ -2190,18 +2291,27 @@ export default function CanvasEditor({
     }
   };
 
-  // ── Sticker Operations ──────────────────────────────────
-  const addSticker = (def: (typeof STICKER_DEFS)[0]) => {
+  // ── Sticker Operations (Phase 6) ─────────────────────────
+  const addSticker = (def: { name?: string; title?: string; src?: string; url?: string }) => {
+    const src = def.src || def.url || '';
+    const name = def.name || def.title || 'Sticker';
+    if (!src) return;
+
     const newSticker: PlacedSticker = {
       id: uuidv4(),
-      name: def.name,
-      src: def.src,
-      xPct: 0.5,
+      name,
+      src,
+      xPct: 0.5, // Render at the center of photostrip canvas
       yPct: 0.5,
       scale: 1.0,
+      rotation: 0,
     };
     setPlacedStickers((prev) => [...prev, newSticker]);
     setActiveStickerID(newSticker.id);
+    setIsTextActive(null);
+
+    // Warm-up image cache with crossOrigin = 'anonymous'
+    loadTransparentSticker(src, name).catch(() => {});
   };
 
   const removeSticker = (id: string) => {
@@ -2213,31 +2323,64 @@ export default function CanvasEditor({
     setPlacedStickers((prev) =>
       prev.map((s) =>
         s.id === id
-          ? { ...s, scale: Math.max(0.4, Math.min(2.5, Number((s.scale + delta).toFixed(2)))) }
+          ? {
+              ...s,
+              scale: Math.max(
+                0.3,
+                Math.min(3.0, Number(((s.scale || 1.0) + delta).toFixed(2)))
+              ),
+            }
           : s
       )
+    );
+  };
+
+  const rotateSticker = (id: string, deltaDeg: number) => {
+    setPlacedStickers((prev) =>
+      prev.map((s) => {
+        if (s.id !== id) return s;
+        let nextRot = Math.round(((s.rotation || 0) + deltaDeg) % 360);
+        if (nextRot > 180) nextRot -= 360;
+        if (nextRot < -180) nextRot += 360;
+        return { ...s, rotation: nextRot };
+      })
     );
   };
 
   const handleStickerPointerDown = (
     e: React.MouseEvent | React.TouchEvent,
     id: string,
+    mode: 'drag' | 'rotate' | 'resize' = 'drag'
   ) => {
     e.stopPropagation();
     setIsTextActive(null);
     setActiveStickerID(id);
     const st = placedStickers.find((s) => s.id === id);
-    if (!st) return;
+    if (!st || !previewWrapRef.current) return;
 
+    const rect = previewWrapRef.current.getBoundingClientRect();
     const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
     const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
 
+    const centerX = rect.left + st.xPct * rect.width;
+    const centerY = rect.top + st.yPct * rect.height;
+
+    const startDist = Math.hypot(clientX - centerX, clientY - centerY);
+    const startAngle = Math.atan2(clientY - centerY, clientX - centerX) * (180 / Math.PI);
+
     dragState.current = {
       id,
+      mode,
       startMX: clientX,
       startMY: clientY,
       startXPct: st.xPct,
       startYPct: st.yPct,
+      startScale: st.scale || 1.0,
+      startRotation: st.rotation || 0,
+      centerX,
+      centerY,
+      startDist,
+      startAngle,
     };
   };
 
@@ -2278,7 +2421,11 @@ export default function CanvasEditor({
           Frame Themes
         </button>
         <button
-          onClick={() => setActiveTab('stickers')}
+          type="button"
+          onClick={() => {
+            setActiveTab('stickers');
+            setIsStickerDrawerOpen(true);
+          }}
           className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-xs font-semibold uppercase tracking-wider rounded-lg transition-all ${
             activeTab === 'stickers'
               ? 'bg-zinc-900 text-white shadow-sm'
@@ -2286,7 +2433,12 @@ export default function CanvasEditor({
           }`}
         >
           <Sticker size={14} />
-          Sticker Drawer {placedStickers.length > 0 && `(${placedStickers.length})`}
+          <span>Stickers</span>
+          {placedStickers.length > 0 && (
+            <span className="bg-amber-400 text-zinc-950 text-[10px] font-bold px-1.5 py-0.2 rounded-full">
+              {placedStickers.length}
+            </span>
+          )}
         </button>
       </div>
 
@@ -3115,105 +3267,160 @@ export default function CanvasEditor({
         </div>
       )}
 
-      {/* ── STICKERS TAB ── */}
+      {/* ── STICKERS TAB (Phase 6) ── */}
       {activeTab === 'stickers' && (
         <div className="flex flex-col gap-4">
-          <div className="p-3.5 bg-white rounded-xl border border-zinc-200 shadow-sm">
-            <div className="flex items-center justify-between mb-3">
-              <p className="text-[11px] font-bold text-zinc-800 uppercase tracking-wider">
-                Select Sticker to Add
-              </p>
-              <span className="text-[10px] text-zinc-500 font-mono">
-                Auto-Keyed (Transparent)
+          {/* GIPHY Sticker Drawer Action Card */}
+          <div className="p-4 bg-white rounded-xl border border-zinc-200/90 shadow-xs flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <Sticker size={15} className="text-amber-500" />
+                <p className="text-[11px] font-bold text-zinc-800 uppercase tracking-wider">
+                  Katalog Stiker GIPHY
+                </p>
+              </div>
+              <span className="text-[10px] text-zinc-400 font-mono">
+                Transparent WebP
               </span>
             </div>
 
-            {/* Sticker Tray */}
-            <div className="grid grid-cols-5 gap-2.5">
-              {STICKER_DEFS.map((def) => {
-                const thumb = stickerThumbnails[def.name] || def.src;
-                return (
-                  <button
-                    key={def.name}
-                    onClick={() => addSticker(def)}
-                    className="group relative aspect-square rounded-xl border border-zinc-200 bg-[#FBF9F5] hover:border-zinc-900 hover:shadow-md transition-all flex flex-col items-center justify-center p-2 active:scale-95"
-                    title={`Add ${def.name} Sticker`}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={thumb}
-                      alt={def.name}
-                      className="w-full h-full object-contain filter drop-shadow-sm group-hover:scale-110 transition-transform"
-                    />
-                    <span className="text-[9px] font-semibold text-zinc-600 mt-1 capitalize">
-                      {def.name}
-                    </span>
-                  </button>
-                );
-              })}
+            <button
+              type="button"
+              onClick={() => setIsStickerDrawerOpen(true)}
+              className="w-full py-3 px-4 rounded-xl bg-zinc-900 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-sm hover:bg-zinc-800 active:scale-[0.99] transition-all"
+            >
+              <Smile size={15} className="text-amber-400" />
+              <span>Buka Sticker Drawer (GIPHY)</span>
+            </button>
+
+            {/* Quick Tray of Standard Photobooth Stickers */}
+            <div className="pt-2 border-t border-zinc-100">
+              <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-wider mb-2">
+                Stiker Cepat (Quick Add)
+              </p>
+              <div className="grid grid-cols-5 gap-2">
+                {STICKER_DEFS.map((def) => {
+                  const thumb = stickerThumbnails[def.name] || def.src;
+                  return (
+                    <button
+                      key={def.name}
+                      type="button"
+                      onClick={() => addSticker(def)}
+                      className="group relative aspect-square rounded-xl border border-zinc-200 bg-[#FBF9F5] hover:border-zinc-900 hover:shadow-sm transition-all flex flex-col items-center justify-center p-1.5 active:scale-95"
+                      title={`Tambah Stiker ${def.name}`}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={thumb}
+                        alt={def.name}
+                        className="w-full h-full object-contain filter drop-shadow-xs group-hover:scale-110 transition-transform pointer-events-none"
+                      />
+                      <span className="text-[8.5px] font-semibold text-zinc-500 mt-0.5 capitalize truncate w-full text-center">
+                        {def.name}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           </div>
 
           {/* Active Placed Stickers Controls */}
-          {placedStickers.length > 0 && (
+          {placedStickers.length > 0 ? (
             <div className="p-3.5 bg-white rounded-xl border border-zinc-200 shadow-sm">
-              <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center justify-between mb-2.5">
                 <p className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest">
-                  Placed Stickers ({placedStickers.length})
+                  Stiker Terpasang ({placedStickers.length})
                 </p>
                 <button
+                  type="button"
                   onClick={() => setPlacedStickers([])}
-                  className="text-[10px] text-red-500 font-medium hover:underline"
+                  className="text-[10px] text-red-500 font-medium hover:underline flex items-center gap-1"
                 >
-                  Clear All
+                  <Trash2 size={10} />
+                  <span>Hapus Semua</span>
                 </button>
               </div>
 
-              <div className="flex flex-col gap-2 max-h-48 overflow-y-auto pr-1">
+              <div className="flex flex-col gap-2 max-h-56 overflow-y-auto pr-1">
                 {placedStickers.map((s, idx) => (
                   <div
                     key={s.id}
-                    onClick={() => setActiveStickerID(s.id)}
-                    className={`flex items-center justify-between p-2 rounded-lg border text-xs transition-colors cursor-pointer ${
+                    onClick={() => {
+                      setActiveStickerID(s.id);
+                      setIsTextActive(null);
+                    }}
+                    className={`flex items-center justify-between p-2.5 rounded-lg border text-xs transition-colors cursor-pointer ${
                       activeStickerID === s.id
-                        ? 'border-zinc-900 bg-zinc-100 font-bold'
-                        : 'border-zinc-200 hover:border-zinc-300'
+                        ? 'border-blue-500 bg-blue-50/50 shadow-xs'
+                        : 'border-zinc-200 hover:border-zinc-300 bg-zinc-50/40'
                     }`}
                   >
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-mono text-zinc-400">#{idx + 1}</span>
-                      <span>{s.name}</span>
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-8 h-8 rounded-lg bg-white border border-zinc-200 flex items-center justify-center p-1 shrink-0">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={s.src}
+                          crossOrigin="anonymous"
+                          alt={s.name}
+                          className="w-full h-full object-contain pointer-events-none"
+                        />
+                      </div>
+                      <div className="flex flex-col min-w-0">
+                        <span className="truncate text-xs font-semibold text-zinc-800 max-w-[100px] sm:max-w-[130px]">
+                          {s.name || `Stiker #${idx + 1}`}
+                        </span>
+                        <span className="text-[9px] font-mono text-zinc-400">
+                          {Math.round((s.scale || 1.0) * 100)}%{s.rotation !== 0 ? ` • ${s.rotation}°` : ''}
+                        </span>
+                      </div>
                     </div>
 
-                    <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
                       <button
+                        type="button"
                         onClick={() => scaleSticker(s.id, -0.15)}
                         className="w-6 h-6 rounded bg-zinc-200 hover:bg-zinc-300 flex items-center justify-center text-zinc-700"
-                        title="Shrink sticker"
+                        title="Perkecil"
                       >
                         <Minus size={11} />
                       </button>
-                      <span className="text-[10px] font-mono w-9 text-center text-zinc-600">
-                        {Math.round(s.scale * 100)}%
-                      </span>
                       <button
+                        type="button"
                         onClick={() => scaleSticker(s.id, 0.15)}
                         className="w-6 h-6 rounded bg-zinc-200 hover:bg-zinc-300 flex items-center justify-center text-zinc-700"
-                        title="Enlarge sticker"
+                        title="Perbesar"
                       >
                         <Plus size={11} />
                       </button>
                       <button
+                        type="button"
+                        onClick={() => rotateSticker(s.id, 15)}
+                        className="w-6 h-6 rounded bg-zinc-200 hover:bg-zinc-300 flex items-center justify-center text-zinc-700 ml-0.5"
+                        title="Putar 15°"
+                      >
+                        <RotateCw size={11} />
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => removeSticker(s.id)}
                         className="w-6 h-6 rounded bg-red-100 hover:bg-red-200 text-red-600 flex items-center justify-center ml-1"
-                        title="Remove sticker"
+                        title="Hapus Stiker"
                       >
-                        <X size={12} />
+                        <Trash2 size={11} />
                       </button>
                     </div>
                   </div>
                 ))}
               </div>
+            </div>
+          ) : (
+            <div className="p-6 bg-white rounded-xl border border-dashed border-zinc-300 text-center flex flex-col items-center justify-center">
+              <Smile size={24} className="text-zinc-300 mb-2" />
+              <p className="text-xs font-semibold text-zinc-600">Belum ada stiker di kanvas</p>
+              <p className="text-[11px] text-zinc-400 mt-0.5">
+                Buka katalog stiker GIPHY di atas untuk memilih stiker lucu.
+              </p>
             </div>
           )}
         </div>
@@ -3240,7 +3447,27 @@ export default function CanvasEditor({
 
       {/* ── PHOTO STRIP PREVIEW WITH DRAGGABLE STICKERS ── */}
       {previewUrl && (
-        <div className="flex flex-col gap-4 items-center w-full">
+        <div className="flex flex-col gap-3 items-center w-full">
+          {/* Quick Toolbar Bar with Stickers Button */}
+          <div className="flex items-center justify-between w-full max-w-[340px] sm:max-w-[400px] px-1">
+            <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-widest font-mono">
+              Strip Canvas
+            </span>
+            <button
+              type="button"
+              onClick={() => setIsStickerDrawerOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-xl text-xs font-bold transition-all shadow-sm active:scale-95"
+            >
+              <Sticker size={13} className="text-amber-400" />
+              <span>Stickers</span>
+              {placedStickers.length > 0 && (
+                <span className="bg-amber-400 text-zinc-950 text-[10px] font-bold px-1.5 py-0.2 rounded-full ml-0.5">
+                  {placedStickers.length}
+                </span>
+              )}
+            </button>
+          </div>
+
           <div
             ref={previewWrapRef}
             className="relative w-full max-w-[340px] sm:max-w-[400px] border border-zinc-300/80 rounded-lg shadow-xl overflow-hidden bg-white select-none transition-shadow hover:shadow-2xl touch-none"
@@ -3268,47 +3495,84 @@ export default function CanvasEditor({
               }}
             />
 
-            {/* Draggable Keyed Transparent Sticker Overlays */}
+            {/* Draggable Transparent Sticker Overlays with Active Bounding Box */}
             {placedStickers.map((st) => {
-              const thumb = stickerThumbnails[st.name] || st.src;
               const isActive = activeStickerID === st.id;
               return (
                 <div
                   key={st.id}
-                  onMouseDown={(e) => handleStickerPointerDown(e, st.id)}
-                  onTouchStart={(e) => handleStickerPointerDown(e, st.id)}
-                  className={`absolute cursor-grab active:cursor-grabbing select-none touch-none ${
-                    isActive ? 'z-30' : 'z-20'
+                  onMouseDown={(e) => handleStickerPointerDown(e, st.id, 'drag')}
+                  onTouchStart={(e) => handleStickerPointerDown(e, st.id, 'drag')}
+                  className={`absolute select-none touch-none ${
+                    isActive ? 'z-30 cursor-move' : 'z-20 cursor-pointer'
                   }`}
                   style={{
                     left: `${st.xPct * 100}%`,
                     top: `${st.yPct * 100}%`,
-                    transform: 'translate(-50%, -50%)',
-                    width: `${st.scale * 22}%`,
+                    transform: `translate(-50%, -50%) rotate(${st.rotation || 0}deg)`,
+                    transformOrigin: 'center center',
+                    width: `${(st.scale || 1.0) * 22}%`,
                     touchAction: 'none',
                   }}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
-                    src={thumb}
+                    src={st.src}
+                    crossOrigin="anonymous"
                     alt={st.name}
-                    className="w-full h-auto pointer-events-none drop-shadow-md"
+                    className="w-full h-auto pointer-events-none drop-shadow-md select-none"
                     draggable={false}
                   />
 
-                  {/* Active Controls Ring */}
+                  {/* Active Bounding Box with Corner Controls (Rotate, Resize, Delete) */}
                   {isActive && (
-                    <div className="absolute -inset-1 border-2 border-dashed border-zinc-900 rounded-lg pointer-events-none">
+                    <div className="absolute -inset-2 border border-blue-500/90 rounded-lg pointer-events-none shadow-xs">
+                      {/* Top-Left: Delete Handle (Lucide Trash2) */}
                       <button
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.stopPropagation();
+                          removeSticker(st.id);
+                        }}
+                        onTouchStart={(e) => {
+                          e.stopPropagation();
+                          removeSticker(st.id);
+                        }}
                         onClick={(e) => {
                           e.stopPropagation();
                           removeSticker(st.id);
                         }}
-                        className="pointer-events-auto absolute -top-2.5 -right-2.5 w-5 h-5 bg-red-600 text-white rounded-full flex items-center justify-center text-[10px] shadow hover:bg-red-700 active:scale-95"
-                        title="Delete sticker"
+                        className="pointer-events-auto absolute -top-3 -left-3 w-6 h-6 bg-red-600 text-white rounded-full flex items-center justify-center shadow-md hover:bg-red-700 active:scale-90 transition-transform cursor-pointer"
+                        title="Hapus Stiker"
                       >
-                        ×
+                        <Trash2 size={12} strokeWidth={2.5} />
                       </button>
+
+                      {/* Top-Right: Rotate Handle (Lucide RotateCw) */}
+                      <div
+                        onMouseDown={(e) => handleStickerPointerDown(e, st.id, 'rotate')}
+                        onTouchStart={(e) => handleStickerPointerDown(e, st.id, 'rotate')}
+                        className="pointer-events-auto absolute -top-3 -right-3 w-6 h-6 bg-zinc-900 text-white rounded-full flex items-center justify-center shadow-md hover:bg-zinc-800 active:scale-90 transition-transform cursor-grab active:cursor-grabbing"
+                        title="Putar Stiker"
+                      >
+                        <RotateCw size={12} strokeWidth={2.5} />
+                      </div>
+
+                      {/* Bottom-Right: Resize Handle (Lucide Maximize2) */}
+                      <div
+                        onMouseDown={(e) => handleStickerPointerDown(e, st.id, 'resize')}
+                        onTouchStart={(e) => handleStickerPointerDown(e, st.id, 'resize')}
+                        className="pointer-events-auto absolute -bottom-3 -right-3 w-6 h-6 bg-blue-600 text-white rounded-full flex items-center justify-center shadow-md hover:bg-blue-700 active:scale-90 transition-transform cursor-nwse-resize"
+                        title="Ubah Ukuran Stiker"
+                      >
+                        <Maximize2 size={11} strokeWidth={2.5} />
+                      </div>
+
+                      {/* Angle & Scale badge indicator */}
+                      <div className="absolute -top-7 left-1/2 -translate-x-1/2 bg-zinc-900/90 text-white text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-full flex items-center gap-1 shadow-sm whitespace-nowrap pointer-events-none">
+                        <span>{Math.round((st.scale || 1.0) * 100)}%</span>
+                        {st.rotation !== 0 && <span>• {st.rotation}°</span>}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -3530,6 +3794,14 @@ export default function CanvasEditor({
           Render & Style Memories
         </button>
       )}
+
+      {/* ── GIPHY Sticker Drawer Modal (Phase 6) ── */}
+      <StickerDrawerModal
+        isOpen={isStickerDrawerOpen}
+        onClose={() => setIsStickerDrawerOpen(false)}
+        onSelectSticker={(item) => addSticker(item)}
+        placedCount={placedStickers.length}
+      />
 
       {/* Hidden Master Canvas */}
       <canvas ref={canvasRef} className="hidden touch-none" style={{ touchAction: 'none' }} />
