@@ -24,6 +24,8 @@ import {
   RotateCcw,
   Check,
   Move,
+  Contrast,
+  RotateCw,
 } from 'lucide-react';
 import {
   type FilterName,
@@ -92,6 +94,60 @@ const FRAME_PRESETS: { id: FramePreset; label: string; emoji: string; desc: stri
   { id: 'film35mm', label: '35mm Film Strip', emoji: '🎞', desc: 'Kodak sprockets & metadata', textConfig: PRESET_DEFAULT_TEXT_CONFIGS.film35mm },
 ];
 
+export type PhotoFilterId = 'normal' | 'bw' | 'warm' | 'vintage' | 'cool';
+
+export interface PhotoFilterPreset {
+  id: PhotoFilterId;
+  label: string;
+  tag: string;
+  desc: string;
+  css: string;
+  previewBg: string;
+}
+
+export const PHOTO_FILTER_PRESETS: PhotoFilterPreset[] = [
+  {
+    id: 'normal',
+    label: 'Normal',
+    tag: 'Original',
+    desc: 'True-to-life studio tone',
+    css: 'none',
+    previewBg: 'linear-gradient(135deg, #f8fafc, #cbd5e1)',
+  },
+  {
+    id: 'bw',
+    label: 'B&W',
+    tag: 'Monochrome',
+    desc: 'Studio grayscale & skin glow',
+    css: 'grayscale(1) contrast(1.22) brightness(1.04)',
+    previewBg: 'linear-gradient(135deg, #18181b, #71717a)',
+  },
+  {
+    id: 'warm',
+    label: 'Warm',
+    tag: 'Golden Hour',
+    desc: 'Golden warmth & soft sepia',
+    css: 'sepia(0.28) saturate(1.18) brightness(1.04) contrast(1.02)',
+    previewBg: 'linear-gradient(135deg, #fef3c7, #f59e0b)',
+  },
+  {
+    id: 'vintage',
+    label: 'Vintage',
+    tag: 'Film Tone',
+    desc: '90s disposable high-contrast film',
+    css: 'contrast(1.22) brightness(0.96) saturate(0.85) sepia(0.18)',
+    previewBg: 'linear-gradient(135deg, #fed7aa, #9a3412)',
+  },
+  {
+    id: 'cool',
+    label: 'Cool',
+    tag: 'Clean Korean',
+    desc: 'Crisp Korean studio cyan-blue tone',
+    css: 'brightness(1.05) contrast(1.03) saturate(1.08) hue-rotate(8deg)',
+    previewBg: 'linear-gradient(135deg, #e0f2fe, #0284c7)',
+  },
+];
+
 const STICKER_DEFS = [
   { name: 'Couple', src: '/sticker/Couple.png' },
   { name: 'Angry',  src: '/sticker/Angry.png'  },
@@ -128,6 +184,20 @@ function drawHaloLunaWatermark(
 }
 
 // ─── Utilities ────────────────────────────────────────────
+function formatSubText(text: string): string {
+  const trimmed = (text || '').trim();
+  if (!trimmed) return '';
+  if (/^\d{1,3}$/.test(trimmed)) {
+    const num = parseInt(trimmed, 10);
+    const j = num % 10;
+    const k = num % 100;
+    const suffix =
+      j === 1 && k !== 11 ? 'st' : j === 2 && k !== 12 ? 'nd' : j === 3 && k !== 13 ? 'rd' : 'th';
+    return `${num}${suffix}`;
+  }
+  return trimmed;
+}
+
 const yieldToMain = () => new Promise<void>((r) => setTimeout(r, 0));
 
 function isMobileDevice(): boolean {
@@ -623,6 +693,7 @@ export default function CanvasEditor({
   } | null>(null);
 
   const textDragState = useRef<{
+    layer: 'main' | 'sub';
     startMX: number;
     startMY: number;
     startXPct: number;
@@ -639,10 +710,17 @@ export default function CanvasEditor({
   const activeTextConfig = getPresetTextConfig(preset);
   const [location, setLocation] = useState('SEOUL STUDIO');
   const [nowPlaying, setNowPlaying] = useState('NewJeans - Hype Boy');
+
+  // Multi-layer Independent Text Engine (Phase 5)
+  const [selectedTextLayer, setSelectedTextLayer] = useState<'main' | 'sub'>('main');
   const [customTextInput, setCustomTextInput] = useState(initialConfig.defaultText);
   const [customText, setCustomText] = useState(initialConfig.defaultText);
+  const [subTextInput, setSubTextInput] = useState(initialConfig.defaultSubText ?? '21');
+  const [subText, setSubText] = useState(initialConfig.defaultSubText ?? '21');
   const [customFont, setCustomFont] = useState(initialConfig.fontFamily);
   const [customColor, setCustomColor] = useState(initialConfig.color);
+
+  // Main Caption coordinates, scale & rotation
   const [textXPct, setTextXPct] = useState<number>(
     initialConfig.hasCustomText ? initialConfig.xPercent : 50
   );
@@ -650,10 +728,24 @@ export default function CanvasEditor({
     initialConfig.hasCustomText ? initialConfig.yPercent : 90
   );
   const [fontScale, setFontScale] = useState<number>(1.0);
-  const [isTextActive, setIsTextActive] = useState<boolean>(false);
+  const [mainRotation, setMainRotation] = useState<number>(0);
+
+  // Sub-text / Age coordinates, scale & rotation
+  const [subTextXPct, setSubTextXPct] = useState<number>(
+    initialConfig.hasCustomText ? initialConfig.xPercent : 50
+  );
+  const [subTextYPct, setSubTextYPct] = useState<number>(
+    initialConfig.hasCustomText
+      ? (initialConfig.subYPercent ?? Math.min(97, Number((initialConfig.yPercent + 3.2).toFixed(1))))
+      : 94.5
+  );
+  const [subFontScale, setSubFontScale] = useState<number>(1.0);
+  const [subRotation, setSubRotation] = useState<number>(0);
+
+  const [photoFilter, setPhotoFilter] = useState<PhotoFilterId>('normal');
+  const [isTextActive, setIsTextActive] = useState<'main' | 'sub' | null>(null);
   const [previewHeight, setPreviewHeight] = useState<number>(0);
   const [birthdayTheme, setBirthdayTheme] = useState<'cream' | 'black'>('cream');
-  const [birthdayAge, setBirthdayAge] = useState('');
   const [birthdayPalette, setBirthdayPalette] = useState<BirthdayPaletteId>('ivory');
   const [renderProgress, setRenderProgress] = useState<number | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
@@ -661,13 +753,20 @@ export default function CanvasEditor({
   const [activeStickerID, setActiveStickerID] = useState<string | null>(null);
   const [stickerThumbnails, setStickerThumbnails] = useState<Record<string, string>>({});
 
-  // Debounce custom text input to keep UI snappy and prevent canvas re-render thrashing
+  // Debounce text inputs to keep UI snappy and prevent canvas re-render thrashing
   useEffect(() => {
     const timer = setTimeout(() => {
       setCustomText(customTextInput.trim());
     }, 300);
     return () => clearTimeout(timer);
   }, [customTextInput]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSubText(subTextInput.trim());
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [subTextInput]);
 
   const placedStickersRef = useRef<PlacedSticker[]>(placedStickers);
   useEffect(() => {
@@ -681,26 +780,41 @@ export default function CanvasEditor({
   const locationRef = useRef(location);
   const nowPlayingRef = useRef(nowPlaying);
   const customTextRef = useRef(customText);
+  const subTextRef = useRef(subText);
   const customFontRef = useRef(customFont);
   const customColorRef = useRef(customColor);
   const textXPctRef = useRef(textXPct);
   const textYPctRef = useRef(textYPct);
   const fontScaleRef = useRef(fontScale);
+  const mainRotationRef = useRef(mainRotation);
+  const subTextXPctRef = useRef(subTextXPct);
+  const subTextYPctRef = useRef(subTextYPct);
+  const subFontScaleRef = useRef(subFontScale);
+  const subRotationRef = useRef(subRotation);
+  const photoFilterRef = useRef<PhotoFilterId>(photoFilter);
   const birthdayNameRef = useRef(customText);
   const birthdayThemeRef = useRef(birthdayTheme);
-  const birthdayAgeRef = useRef(birthdayAge);
+  const birthdayAgeRef = useRef(subText);
   const birthdayPaletteRef = useRef(birthdayPalette);
+
   locationRef.current = location;
   nowPlayingRef.current = nowPlaying;
   customTextRef.current = customText;
+  subTextRef.current = subText;
   customFontRef.current = customFont;
   customColorRef.current = customColor;
   textXPctRef.current = textXPct;
   textYPctRef.current = textYPct;
   fontScaleRef.current = fontScale;
+  mainRotationRef.current = mainRotation;
+  subTextXPctRef.current = subTextXPct;
+  subTextYPctRef.current = subTextYPct;
+  subFontScaleRef.current = subFontScale;
+  subRotationRef.current = subRotation;
+  photoFilterRef.current = photoFilter;
   birthdayNameRef.current = customText;
   birthdayThemeRef.current = birthdayTheme;
-  birthdayAgeRef.current = birthdayAge;
+  birthdayAgeRef.current = subText;
   birthdayPaletteRef.current = birthdayPalette;
 
   // Dynamically observe preview container height to maintain pixel-perfect font scaling
@@ -736,12 +850,21 @@ export default function CanvasEditor({
   // Global drag listeners for placed stickers & draggable text layer with requestAnimationFrame throttling
   useEffect(() => {
     let animationFrameId: number | null = null;
+    const wrapEl = previewWrapRef.current;
+
+    // Dedicated non-passive touchmove on the preview container to safely prevent browser scroll during drag
+    const handleContainerTouchMove = (e: TouchEvent) => {
+      if ((dragState.current || textDragState.current) && e.cancelable) {
+        e.preventDefault();
+      }
+    };
+
+    if (wrapEl) {
+      wrapEl.addEventListener('touchmove', handleContainerTouchMove, { passive: false });
+    }
 
     const handleMove = (e: MouseEvent | TouchEvent) => {
       if ((!dragState.current && !textDragState.current) || !previewWrapRef.current) return;
-      if (e.cancelable && (dragState.current || textDragState.current)) {
-        e.preventDefault();
-      }
 
       const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
       const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
@@ -786,8 +909,13 @@ export default function CanvasEditor({
             Math.min(95, Number((textDragState.current.startYPct + dyPct).toFixed(1)))
           );
 
-          setTextXPct(clampedX);
-          setTextYPct(clampedY);
+          if (textDragState.current.layer === 'main') {
+            setTextXPct(clampedX);
+            setTextYPct(clampedY);
+          } else {
+            setSubTextXPct(clampedX);
+            setSubTextYPct(clampedY);
+          }
         }
       });
     };
@@ -801,14 +929,17 @@ export default function CanvasEditor({
       textDragState.current = null;
     };
 
-    window.addEventListener('mousemove', handleMove, { passive: true });
+    window.addEventListener('mousemove', handleMove);
     window.addEventListener('mouseup', handleUp);
-    window.addEventListener('touchmove', handleMove, { passive: false });
+    window.addEventListener('touchmove', handleMove, { passive: true });
     window.addEventListener('touchend', handleUp);
 
     return () => {
       if (animationFrameId !== null) {
         cancelAnimationFrame(animationFrameId);
+      }
+      if (wrapEl) {
+        wrapEl.removeEventListener('touchmove', handleContainerTouchMove);
       }
       window.removeEventListener('mousemove', handleMove);
       window.removeEventListener('mouseup', handleUp);
@@ -875,6 +1006,7 @@ export default function CanvasEditor({
       h: number,
       s: number,
       isExport: boolean = false,
+      filterCss?: string,
     ) => {
       try {
         await loadCuteBirthdayFonts();
@@ -915,7 +1047,7 @@ export default function CanvasEditor({
           const [c2, r] = pos[i];
           const ix = pad + c2 * (cw + gap);
           const iy = headerH + r * (ch + gap);
-          drawGradedPhoto(ctx, imgs[i], ix, iy, cw, ch, cornerRadius, isExport);
+          drawGradedPhoto(ctx, imgs[i], ix, iy, cw, ch, cornerRadius, isExport, filterCss);
           ctx.strokeStyle = borderCol;
           ctx.lineWidth = 1 * s;
           roundRect(ctx, ix, iy, cw, ch, cornerRadius);
@@ -927,7 +1059,7 @@ export default function CanvasEditor({
         for (let i = 0; i < count; i++) {
           if (!imgs[i]) continue;
           const iy = headerH + i * (ih + gap);
-          drawGradedPhoto(ctx, imgs[i], pad, iy, iw, ih, cornerRadius, isExport);
+          drawGradedPhoto(ctx, imgs[i], pad, iy, iw, ih, cornerRadius, isExport, filterCss);
           ctx.strokeStyle = borderCol;
           ctx.lineWidth = 1 * s;
           roundRect(ctx, pad, iy, iw, ih, cornerRadius);
@@ -968,6 +1100,7 @@ export default function CanvasEditor({
       h: number,
       s: number,
       isExport: boolean = false,
+      filterCss?: string,
     ) => {
       try {
         await loadCuteBirthdayFonts();
@@ -1011,7 +1144,7 @@ export default function CanvasEditor({
         const dh = Math.round(slot.h * scaleY);
 
         // Anti-distortion center-crop
-        drawGradedPhoto(ctx, img, dx, dy, dw, dh, 0, isExport);
+        drawGradedPhoto(ctx, img, dx, dy, dw, dh, 0, isExport, filterCss);
       }
       ctx.restore();
 
@@ -1060,6 +1193,7 @@ export default function CanvasEditor({
       h: number,
       _s: number,
       isExport: boolean = false,
+      filterCss?: string,
     ) => {
       const scaleX = w / RETRO_BASE_W;
       const scaleY = h / RETRO_BASE_H;
@@ -1080,6 +1214,7 @@ export default function CanvasEditor({
           Math.round(slot.h * scaleY),
           0,
           isExport,
+          filterCss,
         );
       }
 
@@ -1104,6 +1239,7 @@ export default function CanvasEditor({
       h: number,
       s: number,
       isExport: boolean = false,
+      filterCss?: string,
     ) => {
       ctx.fillStyle = '#0D0D0D';
       ctx.fillRect(0, 0, w, h);
@@ -1146,7 +1282,7 @@ export default function CanvasEditor({
         ctx.fillText('ISO 400 • 35mm', fX + 8 * s, fy + 24 * s);
 
         if (imgs[i]) {
-          drawGradedPhoto(ctx, imgs[i], fX, fy + metaH, fW2, photoH, 0, isExport);
+          drawGradedPhoto(ctx, imgs[i], fX, fy + metaH, fW2, photoH, 0, isExport, filterCss);
           ctx.save();
           ctx.globalAlpha = 0.08;
           ctx.fillStyle = '#FF6B00';
@@ -1281,32 +1417,37 @@ export default function CanvasEditor({
           )
         );
 
+        const activeFilterPreset =
+          PHOTO_FILTER_PRESETS.find((p) => p.id === photoFilterRef.current) ?? PHOTO_FILTER_PRESETS[0];
+        const activeFilterCss = activeFilterPreset.css;
+
         switch (preset) {
           case 'birthdayCatPink':
-            await drawBirthdayCatPink(ctx, imgs, w, h, s, isExport);
+            await drawBirthdayCatPink(ctx, imgs, w, h, s, isExport, activeFilterCss);
             break;
           case 'retroTerracotta':
-            await drawRetroTerracotta(ctx, imgs, w, h, s, isExport);
+            await drawRetroTerracotta(ctx, imgs, w, h, s, isExport, activeFilterCss);
             break;
           case 'film35mm':
-            await drawFilm(ctx, imgs, w, h, s, isExport);
+            await drawFilm(ctx, imgs, w, h, s, isExport, activeFilterCss);
             break;
           case 'birthday':
           default:
-            await drawCinemaTicketBirthday(ctx, imgs, w, h, s, isExport);
+            await drawCinemaTicketBirthday(ctx, imgs, w, h, s, isExport, activeFilterCss);
             break;
         }
 
         if (isExport || liveOpts) {
           await compositePlacedStickers(ctx, w, h);
 
-          // ── PRD v2 Phase 5: Percentage-Based Interactive Text Layer ──────────
+          // ── PRD v2 Phase 5: Multi-Layer Independent Draggable Text & Rotation Engine ──
           const activeTextConfig = getPresetTextConfig(preset);
           if (activeTextConfig.hasCustomText) {
-            const textToDraw = (customTextRef.current || '').trim();
-            const guestAge = (birthdayAgeRef.current || '').trim();
+            const mainText = (customTextRef.current || '').trim();
+            const subRaw = (subTextRef.current || '').trim();
+            const subTextToDraw = formatSubText(subRaw);
 
-            if (textToDraw || guestAge) {
+            if (mainText || subTextToDraw) {
               const activeFont = customFontRef.current || activeTextConfig.fontFamily;
               const activeColor = customColorRef.current || activeTextConfig.color;
               const fontObj = getCuratedFont(activeFont);
@@ -1314,52 +1455,68 @@ export default function CanvasEditor({
               // Pre-flight font glyph rasterization to prevent font flash or coordinate shifting
               await ensureFontLoaded(fontObj.googleFontFamily);
 
-              ctx.save();
-              ctx.textAlign = 'center';
-              ctx.textBaseline = 'middle';
-              ctx.lineJoin = 'round';
-              ctx.miterLimit = 2;
-
-              const posX = (textXPctRef.current / 100) * w;
-              const posY = (textYPctRef.current / 100) * h;
-              const activeScale = fontScaleRef.current || 1.0;
-              const fontSize = Math.max(10, Math.round(activeTextConfig.fontSizeRatio * h * activeScale));
-
               const isHeavy = fontObj.category === 'bubble' || fontObj.category === 'chunky';
-              ctx.font = `${isHeavy ? '900' : '700'} ${fontSize}px ${fontObj.fontFamily}`;
-
-              const hasAge = !!guestAge;
-              const mainY = hasAge ? posY - Math.round(fontSize * 0.45) : posY;
-
-              // Contrasting outline stroke for sticker-like readability across any background
               const isWhiteText = activeColor.toUpperCase() === '#FFFFFF';
-              ctx.strokeStyle = isWhiteText ? 'rgba(0, 0, 0, 0.4)' : '#FFFFFF';
-              ctx.lineWidth = Math.max(2, fontSize * 0.14);
+              const strokeColor = isWhiteText ? 'rgba(0, 0, 0, 0.4)' : '#FFFFFF';
 
-              if (textToDraw) {
-                ctx.strokeText(textToDraw, posX, mainY);
+              // 1. Render Main Caption Layer (Independent Position & Rotation)
+              if (mainText) {
+                ctx.save();
+                const mainX = (textXPctRef.current / 100) * w;
+                const mainY = (textYPctRef.current / 100) * h;
+                const mainScale = fontScaleRef.current || 1.0;
+                const mainFontSize = Math.max(10, Math.round(activeTextConfig.fontSizeRatio * h * mainScale));
+                const mainStrokeWidth = Math.max(2, mainFontSize * 0.14);
+                const mainAngleRad = ((mainRotationRef.current || 0) * Math.PI) / 180;
+
+                ctx.translate(mainX, mainY);
+                if (mainAngleRad !== 0) {
+                  ctx.rotate(mainAngleRad);
+                }
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.lineJoin = 'round';
+                ctx.miterLimit = 2;
+
+                ctx.font = `${isHeavy ? '900' : '700'} ${mainFontSize}px ${fontObj.fontFamily}`;
+                ctx.strokeStyle = strokeColor;
+                ctx.lineWidth = mainStrokeWidth;
+                ctx.strokeText(mainText, 0, 0);
+
                 ctx.fillStyle = activeColor;
-                ctx.fillText(textToDraw, posX, mainY);
+                ctx.fillText(mainText, 0, 0);
+                ctx.restore();
               }
 
-              if (hasAge) {
-                const num = parseInt(guestAge, 10);
-                const j = num % 10;
-                const k = num % 100;
-                const suffix =
-                  j === 1 && k !== 11 ? 'st' : j === 2 && k !== 12 ? 'nd' : j === 3 && k !== 13 ? 'rd' : 'th';
-                const ageLabel = Number.isNaN(num) ? guestAge : `${num}${suffix}`;
-                const ageFontSize = Math.max(10, Math.round(fontSize * 0.62));
-                const ageY = mainY + Math.round(fontSize * 0.85);
+              // 2. Render Sub-text / Age Layer (Independent Position & Rotation)
+              if (subTextToDraw) {
+                ctx.save();
+                const subX = (subTextXPctRef.current / 100) * w;
+                const subY = (subTextYPctRef.current / 100) * h;
+                const subScale = subFontScaleRef.current || 1.0;
+                const baseSubRatio = activeTextConfig.fontSizeRatio * 0.65;
+                const subFontSize = Math.max(10, Math.round(baseSubRatio * h * subScale));
+                const subStrokeWidth = Math.max(1.5, subFontSize * 0.12);
+                const subAngleRad = ((subRotationRef.current || 0) * Math.PI) / 180;
 
-                ctx.font = `${isHeavy ? '900' : '700'} ${ageFontSize}px ${fontObj.fontFamily}`;
-                ctx.lineWidth = Math.max(1.5, ageFontSize * 0.12);
-                ctx.strokeText(ageLabel, posX, ageY);
+                ctx.translate(subX, subY);
+                if (subAngleRad !== 0) {
+                  ctx.rotate(subAngleRad);
+                }
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.lineJoin = 'round';
+                ctx.miterLimit = 2;
+
+                ctx.font = `${isHeavy ? '900' : '700'} ${subFontSize}px ${fontObj.fontFamily}`;
+                ctx.strokeStyle = strokeColor;
+                ctx.lineWidth = subStrokeWidth;
+                ctx.strokeText(subTextToDraw, 0, 0);
+
                 ctx.fillStyle = activeColor;
-                ctx.fillText(ageLabel, posX, ageY);
+                ctx.fillText(subTextToDraw, 0, 0);
+                ctx.restore();
               }
-
-              ctx.restore();
             }
           }
         }
@@ -1424,14 +1581,30 @@ export default function CanvasEditor({
     }
   }, [frames, preset, layout, birthdayPalette, triggerRender]);
 
-  // Quiet caption refresh: keep the existing preview on screen while we redraw
+  // Quiet caption & text layer refresh: keep the existing preview on screen while we redraw
   useEffect(() => {
     if (!hasRenderedRef.current) return;
     const timer = setTimeout(() => {
       void triggerRender(true);
-    }, 450);
+    }, 350);
     return () => clearTimeout(timer);
-  }, [customText, customFont, customColor, birthdayAge, triggerRender]);
+  }, [
+    customText,
+    subText,
+    customFont,
+    customColor,
+    mainRotation,
+    subRotation,
+    fontScale,
+    subFontScale,
+    triggerRender,
+  ]);
+
+  // Real-time photo filter refresh: update preview quietly and immediately
+  useEffect(() => {
+    if (!hasRenderedRef.current) return;
+    void triggerRender(true);
+  }, [photoFilter, triggerRender]);
 
   const waitForRenderIdle = async () => {
     let spins = 0;
@@ -1535,17 +1708,33 @@ export default function CanvasEditor({
     if (!newConfig.hasCustomText) {
       setCustomTextInput('');
       setCustomText('');
+      setSubTextInput('');
+      setSubText('');
       setFontScale(1.0);
-      setIsTextActive(false);
+      setSubFontScale(1.0);
+      setMainRotation(0);
+      setSubRotation(0);
+      setIsTextActive(null);
     } else {
+      const defaultSubY =
+        newConfig.subYPercent ?? Math.min(97, Number((newConfig.yPercent + 3.2).toFixed(1)));
       setTextXPct(newConfig.xPercent);
       setTextYPct(newConfig.yPercent);
       setFontScale(1.0);
+      setMainRotation(0);
+
+      setSubTextXPct(newConfig.xPercent);
+      setSubTextYPct(defaultSubY);
+      setSubFontScale(1.0);
+      setSubRotation(0);
+
       setCustomFont(newConfig.fontFamily);
       setCustomColor(newConfig.color);
       setCustomTextInput(newConfig.defaultText);
       setCustomText(newConfig.defaultText);
-      setIsTextActive(false);
+      setSubTextInput(newConfig.defaultSubText ?? '');
+      setSubText(newConfig.defaultSubText ?? '');
+      setIsTextActive(null);
     }
     setPreset(newPreset);
   };
@@ -1639,16 +1828,22 @@ export default function CanvasEditor({
     JSON.stringify([
       preset,
       layout,
+      photoFilterRef.current,
       customTextRef.current,
+      subTextRef.current,
       customFontRef.current,
       customColorRef.current,
-      birthdayAgeRef.current,
       birthdayPaletteRef.current,
       locationRef.current,
       nowPlayingRef.current,
       textXPctRef.current,
       textYPctRef.current,
       fontScaleRef.current,
+      mainRotationRef.current,
+      subTextXPctRef.current,
+      subTextYPctRef.current,
+      subFontScaleRef.current,
+      subRotationRef.current,
       placedStickersRef.current.map((st) => [st.id, st.xPct, st.yPct, st.scale]),
       frames.map((f) => f.dataUrl.length),
     ]);
@@ -2029,7 +2224,7 @@ export default function CanvasEditor({
     id: string,
   ) => {
     e.stopPropagation();
-    setIsTextActive(false);
+    setIsTextActive(null);
     setActiveStickerID(id);
     const st = placedStickers.find((s) => s.id === id);
     if (!st) return;
@@ -2046,19 +2241,24 @@ export default function CanvasEditor({
     };
   };
 
-  const handleTextPointerDown = (e: React.MouseEvent | React.TouchEvent) => {
+  const handleTextPointerDown = (
+    e: React.MouseEvent | React.TouchEvent,
+    layer: 'main' | 'sub' = 'main'
+  ) => {
     e.stopPropagation();
     setActiveStickerID(null);
-    setIsTextActive(true);
+    setIsTextActive(layer);
+    setSelectedTextLayer(layer);
 
     const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
     const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
 
     textDragState.current = {
+      layer,
       startMX: clientX,
       startMY: clientY,
-      startXPct: textXPctRef.current,
-      startYPct: textYPctRef.current,
+      startXPct: layer === 'main' ? textXPctRef.current : subTextXPctRef.current,
+      startYPct: layer === 'main' ? textYPctRef.current : subTextYPctRef.current,
     };
   };
 
@@ -2128,17 +2328,74 @@ export default function CanvasEditor({
             </div>
           </div>
 
+          {/* ── Photo Filters & Tone Presets (Phase 5 Task 5.4) ── */}
+          <div className="p-3.5 bg-white rounded-xl border border-zinc-200/90 shadow-xs flex flex-col gap-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <Contrast size={14} className="text-zinc-700" />
+                <p className="text-[11px] font-bold text-zinc-800 uppercase tracking-wider">
+                  Photo Filters & Tone
+                </p>
+              </div>
+              <span className="text-[9.5px] font-medium text-zinc-500 bg-zinc-100 px-2 py-0.5 rounded-full border border-zinc-200">
+                {PHOTO_FILTER_PRESETS.find((f) => f.id === photoFilter)?.tag}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
+              {PHOTO_FILTER_PRESETS.map((f) => {
+                const isSelected = photoFilter === f.id;
+                return (
+                  <button
+                    key={f.id}
+                    type="button"
+                    onClick={() => setPhotoFilter(f.id)}
+                    className={`flex flex-col items-center justify-center p-2 rounded-xl border transition-all text-center relative group ${
+                      isSelected
+                        ? 'bg-zinc-900 text-white border-zinc-900 shadow-sm scale-[1.02]'
+                        : 'bg-zinc-50/70 hover:bg-zinc-100/90 text-zinc-700 border-zinc-200/80 hover:border-zinc-300'
+                    }`}
+                    title={`${f.label} (${f.tag}): ${f.desc}`}
+                  >
+                    <div
+                      className="w-5 h-5 sm:w-6 sm:h-6 rounded-full border border-black/15 shadow-xs mb-1.5 flex items-center justify-center shrink-0"
+                      style={{ background: f.previewBg }}
+                    >
+                      {isSelected && (
+                        <Check
+                          size={11}
+                          className={f.id === 'bw' || f.id === 'vintage' ? 'text-white' : 'text-zinc-900'}
+                          strokeWidth={3}
+                        />
+                      )}
+                    </div>
+                    <span className="text-[10.5px] sm:text-xs font-bold leading-tight truncate w-full">
+                      {f.label}
+                    </span>
+                    <span
+                      className={`text-[8.5px] sm:text-[9.5px] leading-tight truncate w-full mt-0.5 ${
+                        isSelected ? 'text-zinc-300' : 'text-zinc-400'
+                      }`}
+                    >
+                      {f.tag}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* ── PRD v2 Phase 5: Percentage-Based Text Config & Curated Font Layer ── */}
           {activeTextConfig.hasCustomText && (
             <form
               onSubmit={(e) => e.preventDefault()}
-              className="p-4 bg-gradient-to-br from-amber-50/70 via-white to-pink-50/70 rounded-xl border border-amber-200/90 shadow-sm flex flex-col gap-4"
+              className="p-4 bg-gradient-to-br from-amber-50/70 via-white to-pink-50/70 rounded-xl border border-amber-200/90 shadow-sm flex flex-col gap-3.5"
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
                   <Type size={14} className="text-amber-600" />
                   <span className="text-[11px] font-bold text-zinc-900 uppercase tracking-wider">
-                    Text Layer (Relative Coordinates)
+                    Text Engine (Multi-Layer)
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
@@ -2148,203 +2405,551 @@ export default function CanvasEditor({
                   <button
                     type="button"
                     onClick={() => {
+                      const defaultSubY =
+                        activeTextConfig.subYPercent ?? Math.min(97, Number((activeTextConfig.yPercent + 3.2).toFixed(1)));
                       setCustomTextInput(activeTextConfig.defaultText);
                       setCustomText(activeTextConfig.defaultText);
+                      setSubTextInput(activeTextConfig.defaultSubText ?? '');
+                      setSubText(activeTextConfig.defaultSubText ?? '');
                       setCustomFont(activeTextConfig.fontFamily);
                       setCustomColor(activeTextConfig.color);
-                      setBirthdayAge('');
                       setTextXPct(activeTextConfig.xPercent);
                       setTextYPct(activeTextConfig.yPercent);
                       setFontScale(1.0);
-                      setIsTextActive(false);
+                      setMainRotation(0);
+                      setSubTextXPct(activeTextConfig.xPercent);
+                      setSubTextYPct(defaultSubY);
+                      setSubFontScale(1.0);
+                      setSubRotation(0);
+                      setIsTextActive(null);
                     }}
                     className="text-[10px] text-zinc-500 hover:text-zinc-800 flex items-center gap-1 transition-colors"
-                    title="Reset to frame preset defaults"
+                    title="Reset semua layer teks ke pengaturan bawaan preset"
                   >
                     <RotateCcw size={10} />
-                    <span>Reset</span>
+                    <span>Reset Semua</span>
                   </button>
                 </div>
               </div>
 
-              {/* Main Text Input */}
-              <div>
-                <label className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest block mb-1.5">
-                  Custom Caption
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    name="guest-caption"
-                    autoComplete="off"
-                    value={customTextInput}
-                    onChange={(e) => setCustomTextInput(e.target.value)}
-                    onFocus={() => setIsTextActive(true)}
-                    placeholder={activeTextConfig.defaultText || 'Type your caption...'}
-                    maxLength={40}
-                    className="w-full text-xs font-semibold border border-zinc-300 rounded-lg px-3 py-2 pr-8 bg-white outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition-all shadow-xs"
-                  />
-                  {customTextInput && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setCustomTextInput('');
-                        setCustomText('');
-                      }}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700"
-                      title="Clear text"
-                    >
-                      <X size={12} />
-                    </button>
-                  )}
-                </div>
+              {/* Layer Selector Switcher: Caption Utama vs Sub-text/Usia */}
+              <div className="flex rounded-lg bg-zinc-100/90 p-0.5 border border-zinc-200/90">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedTextLayer('main');
+                    setIsTextActive('main');
+                  }}
+                  className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all flex items-center justify-center gap-1.5 ${
+                    selectedTextLayer === 'main'
+                      ? 'bg-white text-zinc-900 shadow-xs border border-zinc-200'
+                      : 'text-zinc-500 hover:text-zinc-900'
+                  }`}
+                >
+                  <Type size={12} className={selectedTextLayer === 'main' ? 'text-amber-600' : 'text-zinc-400'} />
+                  <span>Caption Utama</span>
+                  {customTextInput.trim() && <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedTextLayer('sub');
+                    setIsTextActive('sub');
+                  }}
+                  className={`flex-1 py-1.5 text-xs font-bold rounded-md transition-all flex items-center justify-center gap-1.5 ${
+                    selectedTextLayer === 'sub'
+                      ? 'bg-white text-zinc-900 shadow-xs border border-zinc-200'
+                      : 'text-zinc-500 hover:text-zinc-900'
+                  }`}
+                >
+                  <Sparkles size={12} className={selectedTextLayer === 'sub' ? 'text-amber-600' : 'text-zinc-400'} />
+                  <span>Sub-text / Usia</span>
+                  {subTextInput.trim() && <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />}
+                </button>
+              </div>
 
-                <div className="flex flex-wrap items-center gap-1.5 mt-2">
-                  <span className="text-[10px] text-zinc-400 font-mono">Quick:</span>
-                  {[activeTextConfig.defaultText, 'Andi', 'Hollie', 'Luna', 'Forever', 'Smile']
-                    .filter((item, idx, arr) => item && arr.indexOf(item) === idx)
-                    .map((sug) => (
-                      <button
-                        key={sug}
-                        type="button"
-                        onClick={() => {
-                          setCustomTextInput(sug);
-                          setCustomText(sug);
-                        }}
-                        className={`text-[10px] font-medium px-2 py-0.5 rounded-md border transition-all ${
-                          customTextInput === sug
-                            ? 'bg-zinc-900 text-white border-zinc-900'
-                            : 'bg-white border-zinc-200 hover:border-zinc-400 text-zinc-600'
-                        }`}
-                      >
-                        {sug}
-                      </button>
-                    ))}
-                </div>
-
-                {/* Position & Drag Coordinates with Reset Posisi Button (Task 5.3) */}
-                <div className="flex items-center justify-between bg-amber-50/80 px-2.5 py-1.5 rounded-lg border border-amber-200/80 text-[10.5px] mt-2">
-                  <div className="flex items-center gap-1.5 text-amber-900 font-medium">
-                    <Move size={12} className="text-amber-700" />
-                    <span>
-                      Posisi: <strong>X: {textXPct}%</strong>, <strong>Y: {textYPct}%</strong>
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTextXPct(activeTextConfig.xPercent);
-                      setTextYPct(activeTextConfig.yPercent);
-                      setFontScale(1.0);
-                    }}
-                    disabled={
-                      textXPct === activeTextConfig.xPercent &&
-                      textYPct === activeTextConfig.yPercent &&
-                      fontScale === 1.0
-                    }
-                    className="text-[10px] text-amber-800 hover:text-amber-950 font-bold flex items-center gap-1 transition-colors disabled:opacity-40 disabled:cursor-not-allowed hover:underline"
-                    title="Kembalikan posisi teks dan ukuran font ke persentase default preset"
-                  >
-                    <RotateCcw size={10} />
-                    <span>Reset Posisi</span>
-                  </button>
-                </div>
-
-                {/* Font Size Control Slider & Quick Multipliers */}
-                <div className="flex flex-col gap-2 bg-white/80 p-2.5 rounded-lg border border-amber-200/90 shadow-2xs mt-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5">
-                      <Type size={12} className="text-amber-700" />
-                      <span className="text-[10px] font-bold text-zinc-700 uppercase tracking-widest">
-                        Font Size
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10.5px] font-mono font-bold text-amber-900 bg-amber-100/90 px-2 py-0.5 rounded-md border border-amber-200">
-                        {fontScale.toFixed(2)}x ({Math.round(fontScale * 100)}%)
-                      </span>
-                      {fontScale !== 1.0 && (
+              {/* ── LAYER 1: Caption Utama Controls ── */}
+              {selectedTextLayer === 'main' && (
+                <div className="flex flex-col gap-3">
+                  <div>
+                    <label className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest block mb-1.5">
+                      Teks Caption Utama
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        name="guest-caption"
+                        autoComplete="off"
+                        value={customTextInput}
+                        onChange={(e) => setCustomTextInput(e.target.value)}
+                        onFocus={() => setIsTextActive('main')}
+                        placeholder={activeTextConfig.defaultText || 'Type your caption...'}
+                        maxLength={40}
+                        className="w-full text-xs font-semibold border border-zinc-300 rounded-lg px-3 py-2 pr-8 bg-white outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition-all shadow-xs"
+                      />
+                      {customTextInput && (
                         <button
                           type="button"
-                          onClick={() => setFontScale(1.0)}
-                          className="text-[10px] text-zinc-500 hover:text-zinc-800 flex items-center gap-0.5 transition-colors hover:underline"
-                          title="Reset font size to 1.0x"
+                          onClick={() => {
+                            setCustomTextInput('');
+                            setCustomText('');
+                          }}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700"
+                          title="Clear caption"
                         >
-                          <RotateCcw size={9} />
-                          <span>1.0x</span>
+                          <X size={12} />
                         </button>
                       )}
                     </div>
+
+                    <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                      <span className="text-[10px] text-zinc-400 font-mono">Quick:</span>
+                      {[activeTextConfig.defaultText, 'Andi', 'Hollie', 'Luna', 'Forever', 'Smile']
+                        .filter((item, idx, arr) => item && arr.indexOf(item) === idx)
+                        .map((sug) => (
+                          <button
+                            key={sug}
+                            type="button"
+                            onClick={() => {
+                              setCustomTextInput(sug);
+                              setCustomText(sug);
+                            }}
+                            className={`text-[10px] font-medium px-2 py-0.5 rounded-md border transition-all ${
+                              customTextInput === sug
+                                ? 'bg-zinc-900 text-white border-zinc-900'
+                                : 'bg-white border-zinc-200 hover:border-zinc-400 text-zinc-600'
+                            }`}
+                          >
+                            {sug}
+                          </button>
+                        ))}
+                    </div>
                   </div>
 
-                  <div className="flex items-center gap-2.5">
+                  {/* Position & Drag Coordinates with Reset Posisi Button */}
+                  <div className="flex items-center justify-between bg-amber-50/80 px-2.5 py-1.5 rounded-lg border border-amber-200/80 text-[10.5px]">
+                    <div className="flex items-center gap-1.5 text-amber-900 font-medium">
+                      <Move size={12} className="text-amber-700" />
+                      <span>
+                        Posisi: <strong>X: {textXPct}%</strong>, <strong>Y: {textYPct}%</strong>
+                      </span>
+                    </div>
                     <button
                       type="button"
-                      onClick={() => setFontScale((prev) => Math.max(0.5, Number((prev - 0.1).toFixed(2))))}
-                      disabled={fontScale <= 0.5}
-                      className="w-6 h-6 rounded bg-zinc-100 hover:bg-zinc-200 border border-zinc-200 flex items-center justify-center text-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                      title="Perkecil font"
+                      onClick={() => {
+                        setTextXPct(activeTextConfig.xPercent);
+                        setTextYPct(activeTextConfig.yPercent);
+                        setFontScale(1.0);
+                        setMainRotation(0);
+                      }}
+                      disabled={
+                        textXPct === activeTextConfig.xPercent &&
+                        textYPct === activeTextConfig.yPercent &&
+                        fontScale === 1.0 &&
+                        mainRotation === 0
+                      }
+                      className="text-[10px] text-amber-800 hover:text-amber-950 font-bold flex items-center gap-1 transition-colors disabled:opacity-40 disabled:cursor-not-allowed hover:underline"
+                      title="Kembalikan posisi, ukuran, dan rotasi caption ke bawaan preset"
                     >
-                      <Minus size={11} />
-                    </button>
-
-                    <input
-                      type="range"
-                      min={0.5}
-                      max={2.5}
-                      step={0.05}
-                      value={fontScale}
-                      onChange={(e) => setFontScale(parseFloat(e.target.value))}
-                      className="flex-1 accent-zinc-900 cursor-pointer h-1.5 bg-zinc-200 rounded-lg appearance-none"
-                    />
-
-                    <button
-                      type="button"
-                      onClick={() => setFontScale((prev) => Math.min(2.5, Number((prev + 0.1).toFixed(2))))}
-                      disabled={fontScale >= 2.5}
-                      className="w-6 h-6 rounded bg-zinc-100 hover:bg-zinc-200 border border-zinc-200 flex items-center justify-center text-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                      title="Perbesar font"
-                    >
-                      <Plus size={11} />
+                      <RotateCcw size={10} />
+                      <span>Reset Posisi</span>
                     </button>
                   </div>
 
-                  <div className="flex items-center justify-between gap-1 mt-0.5">
-                    {[0.75, 1.0, 1.25, 1.5, 2.0].map((sc) => (
+                  {/* Font Size Control Slider */}
+                  <div className="flex flex-col gap-2 bg-white/80 p-2.5 rounded-lg border border-amber-200/90 shadow-2xs">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <Type size={12} className="text-amber-700" />
+                        <span className="text-[10px] font-bold text-zinc-700 uppercase tracking-widest">
+                          Font Size (Caption)
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10.5px] font-mono font-bold text-amber-900 bg-amber-100/90 px-2 py-0.5 rounded-md border border-amber-200">
+                          {fontScale.toFixed(2)}x ({Math.round(fontScale * 100)}%)
+                        </span>
+                        {fontScale !== 1.0 && (
+                          <button
+                            type="button"
+                            onClick={() => setFontScale(1.0)}
+                            className="text-[10px] text-zinc-500 hover:text-zinc-800 flex items-center gap-0.5 transition-colors hover:underline"
+                            title="Reset font size to 1.0x"
+                          >
+                            <RotateCcw size={9} />
+                            <span>1.0x</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2.5">
                       <button
-                        key={sc}
                         type="button"
-                        onClick={() => setFontScale(sc)}
-                        className={`flex-1 py-0.5 text-[9.5px] font-mono rounded border transition-all ${
-                          Math.abs(fontScale - sc) < 0.02
-                            ? 'bg-zinc-900 text-white border-zinc-900 font-bold shadow-2xs'
-                            : 'bg-white text-zinc-600 border-zinc-200 hover:bg-zinc-50 hover:border-zinc-300'
-                        }`}
+                        onClick={() => setFontScale((prev) => Math.max(0.5, Number((prev - 0.1).toFixed(2))))}
+                        disabled={fontScale <= 0.5}
+                        className="w-6 h-6 rounded bg-zinc-100 hover:bg-zinc-200 border border-zinc-200 flex items-center justify-center text-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        title="Perkecil font"
                       >
-                        {sc === 1.0 ? 'Normal (1x)' : `${sc}x`}
+                        <Minus size={11} />
                       </button>
-                    ))}
+
+                      <input
+                        type="range"
+                        min={0.5}
+                        max={2.5}
+                        step={0.05}
+                        value={fontScale}
+                        onChange={(e) => setFontScale(parseFloat(e.target.value))}
+                        className="flex-1 accent-zinc-900 cursor-pointer h-1.5 bg-zinc-200 rounded-lg appearance-none"
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() => setFontScale((prev) => Math.min(2.5, Number((prev + 0.1).toFixed(2))))}
+                        disabled={fontScale >= 2.5}
+                        className="w-6 h-6 rounded bg-zinc-100 hover:bg-zinc-200 border border-zinc-200 flex items-center justify-center text-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        title="Perbesar font"
+                      >
+                        <Plus size={11} />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-1 mt-0.5">
+                      {[0.75, 1.0, 1.25, 1.5, 2.0].map((sc) => (
+                        <button
+                          key={sc}
+                          type="button"
+                          onClick={() => setFontScale(sc)}
+                          className={`flex-1 py-0.5 text-[9.5px] font-mono rounded border transition-all ${
+                            Math.abs(fontScale - sc) < 0.02
+                              ? 'bg-zinc-900 text-white border-zinc-900 font-bold shadow-2xs'
+                              : 'bg-white text-zinc-600 border-zinc-200 hover:bg-zinc-50 hover:border-zinc-300'
+                          }`}
+                        >
+                          {sc === 1.0 ? 'Normal (1x)' : `${sc}x`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Rotation Slider Control */}
+                  <div className="flex flex-col gap-2 bg-white/80 p-2.5 rounded-lg border border-amber-200/90 shadow-2xs">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <RotateCw size={12} className="text-amber-700" />
+                        <span className="text-[10px] font-bold text-zinc-700 uppercase tracking-widest">
+                          Rotasi Sudut (Angle)
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10.5px] font-mono font-bold text-amber-900 bg-amber-100/90 px-2 py-0.5 rounded-md border border-amber-200">
+                          {mainRotation > 0 ? `+${mainRotation}°` : `${mainRotation}°`}
+                        </span>
+                        {mainRotation !== 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setMainRotation(0)}
+                            className="text-[10px] text-zinc-500 hover:text-zinc-800 flex items-center gap-0.5 transition-colors hover:underline"
+                            title="Reset rotasi ke 0°"
+                          >
+                            <RotateCcw size={9} />
+                            <span>0°</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setMainRotation((prev) => Math.max(-180, prev - 5))}
+                        className="w-6 h-6 rounded bg-zinc-100 hover:bg-zinc-200 border border-zinc-200 flex items-center justify-center text-zinc-700 transition-colors"
+                        title="Putar ke kiri (-5°)"
+                      >
+                        <Minus size={11} />
+                      </button>
+
+                      <input
+                        type="range"
+                        min={-180}
+                        max={180}
+                        step={1}
+                        value={mainRotation}
+                        onChange={(e) => setMainRotation(parseInt(e.target.value, 10))}
+                        className="flex-1 accent-zinc-900 cursor-pointer h-1.5 bg-zinc-200 rounded-lg appearance-none"
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() => setMainRotation((prev) => Math.min(180, prev + 5))}
+                        className="w-6 h-6 rounded bg-zinc-100 hover:bg-zinc-200 border border-zinc-200 flex items-center justify-center text-zinc-700 transition-colors"
+                        title="Putar ke kanan (+5°)"
+                      >
+                        <Plus size={11} />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-1 mt-0.5">
+                      {[-90, -15, 0, 15, 90].map((deg) => (
+                        <button
+                          key={deg}
+                          type="button"
+                          onClick={() => setMainRotation(deg)}
+                          className={`flex-1 py-0.5 text-[9.5px] font-mono rounded border transition-all ${
+                            mainRotation === deg
+                              ? 'bg-zinc-900 text-white border-zinc-900 font-bold shadow-2xs'
+                              : 'bg-white text-zinc-600 border-zinc-200 hover:bg-zinc-50 hover:border-zinc-300'
+                          }`}
+                        >
+                          {deg === 0 ? '0° (Tegak)' : `${deg > 0 ? '+' : ''}${deg}°`}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
 
-              {/* Optional Age Input (Only for birthday presets or when user wants ordinal age) */}
-              {(preset === 'birthday' || preset === 'birthdayCatPink') && (
-                <div>
-                  <label className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest block mb-1.5">
-                    Age (printed under the name)
-                  </label>
-                  <input
-                    type="text"
-                    name="guest-age"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    autoComplete="off"
-                    value={birthdayAge}
-                    onChange={(e) => setBirthdayAge(e.target.value.replace(/\D/g, '').slice(0, 3))}
-                    placeholder="e.g. 21"
-                    className="w-full text-xs font-semibold border border-zinc-300 rounded-lg px-3 py-2 bg-white outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition-all shadow-xs"
-                  />
+              {/* ── LAYER 2: Sub-text / Usia Controls ── */}
+              {selectedTextLayer === 'sub' && (
+                <div className="flex flex-col gap-3">
+                  <div>
+                    <label className="text-[10px] font-bold text-zinc-600 uppercase tracking-widest block mb-1.5">
+                      Teks Usia / Sub-text
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        name="guest-subtext"
+                        autoComplete="off"
+                        value={subTextInput}
+                        onChange={(e) => setSubTextInput(e.target.value)}
+                        onFocus={() => setIsTextActive('sub')}
+                        placeholder="e.g. 21, Sweet 17, Forever Young, 2026.10.07"
+                        maxLength={30}
+                        className="w-full text-xs font-semibold border border-zinc-300 rounded-lg px-3 py-2 pr-8 bg-white outline-none focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 transition-all shadow-xs"
+                      />
+                      {subTextInput && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSubTextInput('');
+                            setSubText('');
+                          }}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700"
+                          title="Clear sub-text"
+                        >
+                          <X size={12} />
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                      <span className="text-[10px] text-zinc-400 font-mono">Quick:</span>
+                      {['21', '17', '20', '25', 'Forever', 'Besties', 'Sweet 17', 'Love']
+                        .map((sug) => (
+                          <button
+                            key={sug}
+                            type="button"
+                            onClick={() => {
+                              setSubTextInput(sug);
+                              setSubText(sug);
+                            }}
+                            className={`text-[10px] font-medium px-2 py-0.5 rounded-md border transition-all ${
+                              subTextInput === sug
+                                ? 'bg-zinc-900 text-white border-zinc-900'
+                                : 'bg-white border-zinc-200 hover:border-zinc-400 text-zinc-600'
+                            }`}
+                          >
+                            {sug}
+                          </button>
+                        ))}
+                    </div>
+                  </div>
+
+                  {/* Position & Drag Coordinates with Reset Posisi Button */}
+                  <div className="flex items-center justify-between bg-amber-50/80 px-2.5 py-1.5 rounded-lg border border-amber-200/80 text-[10.5px]">
+                    <div className="flex items-center gap-1.5 text-amber-900 font-medium">
+                      <Move size={12} className="text-amber-700" />
+                      <span>
+                        Posisi: <strong>X: {subTextXPct}%</strong>, <strong>Y: {subTextYPct}%</strong>
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const defaultSubY =
+                          activeTextConfig.subYPercent ?? Math.min(97, Number((activeTextConfig.yPercent + 3.2).toFixed(1)));
+                        setSubTextXPct(activeTextConfig.xPercent);
+                        setSubTextYPct(defaultSubY);
+                        setSubFontScale(1.0);
+                        setSubRotation(0);
+                      }}
+                      disabled={
+                        subTextXPct === activeTextConfig.xPercent &&
+                        subTextYPct === (activeTextConfig.subYPercent ?? Math.min(97, Number((activeTextConfig.yPercent + 3.2).toFixed(1)))) &&
+                        subFontScale === 1.0 &&
+                        subRotation === 0
+                      }
+                      className="text-[10px] text-amber-800 hover:text-amber-950 font-bold flex items-center gap-1 transition-colors disabled:opacity-40 disabled:cursor-not-allowed hover:underline"
+                      title="Kembalikan posisi, ukuran, dan rotasi sub-text ke bawaan preset"
+                    >
+                      <RotateCcw size={10} />
+                      <span>Reset Posisi</span>
+                    </button>
+                  </div>
+
+                  {/* Font Size Control Slider */}
+                  <div className="flex flex-col gap-2 bg-white/80 p-2.5 rounded-lg border border-amber-200/90 shadow-2xs">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <Type size={12} className="text-amber-700" />
+                        <span className="text-[10px] font-bold text-zinc-700 uppercase tracking-widest">
+                          Font Size (Sub-text)
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10.5px] font-mono font-bold text-amber-900 bg-amber-100/90 px-2 py-0.5 rounded-md border border-amber-200">
+                          {subFontScale.toFixed(2)}x ({Math.round(subFontScale * 100)}%)
+                        </span>
+                        {subFontScale !== 1.0 && (
+                          <button
+                            type="button"
+                            onClick={() => setSubFontScale(1.0)}
+                            className="text-[10px] text-zinc-500 hover:text-zinc-800 flex items-center gap-0.5 transition-colors hover:underline"
+                            title="Reset font size to 1.0x"
+                          >
+                            <RotateCcw size={9} />
+                            <span>1.0x</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setSubFontScale((prev) => Math.max(0.5, Number((prev - 0.1).toFixed(2))))}
+                        disabled={subFontScale <= 0.5}
+                        className="w-6 h-6 rounded bg-zinc-100 hover:bg-zinc-200 border border-zinc-200 flex items-center justify-center text-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        title="Perkecil font"
+                      >
+                        <Minus size={11} />
+                      </button>
+
+                      <input
+                        type="range"
+                        min={0.5}
+                        max={2.5}
+                        step={0.05}
+                        value={subFontScale}
+                        onChange={(e) => setSubFontScale(parseFloat(e.target.value))}
+                        className="flex-1 accent-zinc-900 cursor-pointer h-1.5 bg-zinc-200 rounded-lg appearance-none"
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() => setSubFontScale((prev) => Math.min(2.5, Number((prev + 0.1).toFixed(2))))}
+                        disabled={subFontScale >= 2.5}
+                        className="w-6 h-6 rounded bg-zinc-100 hover:bg-zinc-200 border border-zinc-200 flex items-center justify-center text-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        title="Perbesar font"
+                      >
+                        <Plus size={11} />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-1 mt-0.5">
+                      {[0.75, 1.0, 1.25, 1.5, 2.0].map((sc) => (
+                        <button
+                          key={sc}
+                          type="button"
+                          onClick={() => setSubFontScale(sc)}
+                          className={`flex-1 py-0.5 text-[9.5px] font-mono rounded border transition-all ${
+                            Math.abs(subFontScale - sc) < 0.02
+                              ? 'bg-zinc-900 text-white border-zinc-900 font-bold shadow-2xs'
+                              : 'bg-white text-zinc-600 border-zinc-200 hover:bg-zinc-50 hover:border-zinc-300'
+                          }`}
+                        >
+                          {sc === 1.0 ? 'Normal (1x)' : `${sc}x`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Rotation Slider Control */}
+                  <div className="flex flex-col gap-2 bg-white/80 p-2.5 rounded-lg border border-amber-200/90 shadow-2xs">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5">
+                        <RotateCw size={12} className="text-amber-700" />
+                        <span className="text-[10px] font-bold text-zinc-700 uppercase tracking-widest">
+                          Rotasi Sudut (Angle)
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10.5px] font-mono font-bold text-amber-900 bg-amber-100/90 px-2 py-0.5 rounded-md border border-amber-200">
+                          {subRotation > 0 ? `+${subRotation}°` : `${subRotation}°`}
+                        </span>
+                        {subRotation !== 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setSubRotation(0)}
+                            className="text-[10px] text-zinc-500 hover:text-zinc-800 flex items-center gap-0.5 transition-colors hover:underline"
+                            title="Reset rotasi ke 0°"
+                          >
+                            <RotateCcw size={9} />
+                            <span>0°</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setSubRotation((prev) => Math.max(-180, prev - 5))}
+                        className="w-6 h-6 rounded bg-zinc-100 hover:bg-zinc-200 border border-zinc-200 flex items-center justify-center text-zinc-700 transition-colors"
+                        title="Putar ke kiri (-5°)"
+                      >
+                        <Minus size={11} />
+                      </button>
+
+                      <input
+                        type="range"
+                        min={-180}
+                        max={180}
+                        step={1}
+                        value={subRotation}
+                        onChange={(e) => setSubRotation(parseInt(e.target.value, 10))}
+                        className="flex-1 accent-zinc-900 cursor-pointer h-1.5 bg-zinc-200 rounded-lg appearance-none"
+                      />
+
+                      <button
+                        type="button"
+                        onClick={() => setSubRotation((prev) => Math.min(180, prev + 5))}
+                        className="w-6 h-6 rounded bg-zinc-100 hover:bg-zinc-200 border border-zinc-200 flex items-center justify-center text-zinc-700 transition-colors"
+                        title="Putar ke kanan (+5°)"
+                      >
+                        <Plus size={11} />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-1 mt-0.5">
+                      {[-90, -15, 0, 15, 90].map((deg) => (
+                        <button
+                          key={deg}
+                          type="button"
+                          onClick={() => setSubRotation(deg)}
+                          className={`flex-1 py-0.5 text-[9.5px] font-mono rounded border transition-all ${
+                            subRotation === deg
+                              ? 'bg-zinc-900 text-white border-zinc-900 font-bold shadow-2xs'
+                              : 'bg-white text-zinc-600 border-zinc-200 hover:bg-zinc-50 hover:border-zinc-300'
+                          }`}
+                        >
+                          {deg === 0 ? '0° (Tegak)' : `${deg > 0 ? '+' : ''}${deg}°`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               )}
 
@@ -2638,10 +3243,11 @@ export default function CanvasEditor({
         <div className="flex flex-col gap-4 items-center w-full">
           <div
             ref={previewWrapRef}
-            className="relative w-full max-w-[340px] sm:max-w-[400px] border border-zinc-300/80 rounded-lg shadow-xl overflow-hidden bg-white select-none transition-shadow hover:shadow-2xl"
+            className="relative w-full max-w-[340px] sm:max-w-[400px] border border-zinc-300/80 rounded-lg shadow-xl overflow-hidden bg-white select-none transition-shadow hover:shadow-2xl touch-none"
+            style={{ touchAction: 'none' }}
             onClick={() => {
               setActiveStickerID(null);
-              setIsTextActive(false);
+              setIsTextActive(null);
             }}
           >
             {/* Rendered Base Photo Strip */}
@@ -2679,6 +3285,7 @@ export default function CanvasEditor({
                     top: `${st.yPct * 100}%`,
                     transform: 'translate(-50%, -50%)',
                     width: `${st.scale * 22}%`,
+                    touchAction: 'none',
                   }}
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -2708,96 +3315,128 @@ export default function CanvasEditor({
               );
             })}
 
-            {/* Draggable Text Layer Overlay (Task 5.3) */}
+            {/* 1. Draggable & Rotatable Main Caption Layer */}
             {activeTextConfig.hasCustomText &&
-              ((customTextInput.trim() || customText.trim()) || birthdayAge.trim()) && (() => {
+              (customTextInput.trim() || customText.trim()) && (() => {
                 const textStr = customTextInput.trim() || customText.trim();
-                const ageStr = birthdayAge.trim();
                 const curFont = getCuratedFont(customFont || activeTextConfig.fontFamily);
                 const isHeavy = curFont.category === 'bubble' || curFont.category === 'chunky';
                 const activeScale = fontScale || 1.0;
+                const baseH = previewHeight > 0 ? previewHeight : layout === 'grid2x2' ? 380 : 850;
                 const previewFontSize = Math.max(
                   10,
-                  Math.round(
-                    (previewHeight > 0 ? previewHeight : layout === 'grid2x2' ? 380 : 850) *
-                      activeTextConfig.fontSizeRatio *
-                      activeScale
-                  )
+                  Math.round(baseH * activeTextConfig.fontSizeRatio * activeScale)
                 );
                 const isWhite =
                   (customColor || activeTextConfig.color).toUpperCase() === '#FFFFFF';
                 const strokeColor = isWhite ? 'rgba(0, 0, 0, 0.45)' : '#FFFFFF';
                 const strokeWidth = Math.max(1.5, Math.round(previewFontSize * 0.12));
-
-                const num = parseInt(ageStr, 10);
-                const j = num % 10;
-                const k = num % 100;
-                const suffix =
-                  j === 1 && k !== 11 ? 'st' : j === 2 && k !== 12 ? 'nd' : j === 3 && k !== 13 ? 'rd' : 'th';
-                const ageLabel = Number.isNaN(num) ? ageStr : `${num}${suffix}`;
-                const ageFontSize = Math.max(10, Math.round(previewFontSize * 0.62));
-                const ageStrokeWidth = Math.max(1.2, Math.round(ageFontSize * 0.12));
+                const isSelected = isTextActive === 'main';
 
                 return (
                   <div
-                    onMouseDown={handleTextPointerDown}
-                    onTouchStart={handleTextPointerDown}
+                    onMouseDown={(e) => handleTextPointerDown(e, 'main')}
+                    onTouchStart={(e) => handleTextPointerDown(e, 'main')}
                     className={`absolute cursor-grab active:cursor-grabbing select-none touch-none text-center ${
-                      isTextActive ? 'z-30' : 'z-20'
+                      isSelected ? 'z-30' : 'z-20'
                     }`}
                     style={{
                       left: `${textXPct}%`,
                       top: `${textYPct}%`,
-                      transform: 'translate(-50%, -50%)',
+                      transform: `translate(-50%, -50%) rotate(${mainRotation}deg)`,
+                      transformOrigin: 'center center',
                       maxWidth: '92%',
+                      touchAction: 'none',
                     }}
                   >
-                    {/* Visual dashed bounding box indicator (Hidden in exports) */}
-                    {isTextActive && (
+                    {/* Visual dashed bounding box indicator (rotates along with text angle) */}
+                    {isSelected && (
                       <div className="absolute -inset-2 border-2 border-dashed border-amber-500 rounded-lg pointer-events-none shadow-xs">
-                        <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-amber-500 text-white text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-full flex items-center gap-1 shadow pointer-events-none">
+                        <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-amber-500 text-white text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-full flex items-center gap-1 shadow pointer-events-none whitespace-nowrap">
                           <Move size={8} />
-                          <span>Drag</span>
+                          <span>Caption{mainRotation !== 0 ? ` (${mainRotation}°)` : ''}</span>
                         </div>
                       </div>
                     )}
 
-                    {/* Main Caption */}
-                    {textStr && (
-                      <div
-                        style={{
-                          fontFamily: curFont.fontFamily,
-                          fontWeight: isHeavy ? 900 : 700,
-                          color: customColor || activeTextConfig.color,
-                          fontSize: `${previewFontSize}px`,
-                          lineHeight: 1.15,
-                          WebkitTextStroke: `${strokeWidth}px ${strokeColor}`,
-                          paintOrder: 'stroke fill',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {textStr}
+                    <div
+                      style={{
+                        fontFamily: curFont.fontFamily,
+                        fontWeight: isHeavy ? 900 : 700,
+                        color: customColor || activeTextConfig.color,
+                        fontSize: `${previewFontSize}px`,
+                        lineHeight: 1.15,
+                        WebkitTextStroke: `${strokeWidth}px ${strokeColor}`,
+                        paintOrder: 'stroke fill',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {textStr}
+                    </div>
+                  </div>
+                );
+              })()}
+
+            {/* 2. Draggable & Rotatable Sub-text / Age Layer */}
+            {activeTextConfig.hasCustomText &&
+              (subTextInput.trim() || subText.trim()) && (() => {
+                const subRaw = subTextInput.trim() || subText.trim();
+                const subStr = formatSubText(subRaw);
+                const curFont = getCuratedFont(customFont || activeTextConfig.fontFamily);
+                const isHeavy = curFont.category === 'bubble' || curFont.category === 'chunky';
+                const activeScale = subFontScale || 1.0;
+                const baseH = previewHeight > 0 ? previewHeight : layout === 'grid2x2' ? 380 : 850;
+                const baseSubRatio = activeTextConfig.fontSizeRatio * 0.65;
+                const previewFontSize = Math.max(
+                  10,
+                  Math.round(baseH * baseSubRatio * activeScale)
+                );
+                const isWhite =
+                  (customColor || activeTextConfig.color).toUpperCase() === '#FFFFFF';
+                const strokeColor = isWhite ? 'rgba(0, 0, 0, 0.45)' : '#FFFFFF';
+                const strokeWidth = Math.max(1.2, Math.round(previewFontSize * 0.12));
+                const isSelected = isTextActive === 'sub';
+
+                return (
+                  <div
+                    onMouseDown={(e) => handleTextPointerDown(e, 'sub')}
+                    onTouchStart={(e) => handleTextPointerDown(e, 'sub')}
+                    className={`absolute cursor-grab active:cursor-grabbing select-none touch-none text-center ${
+                      isSelected ? 'z-30' : 'z-20'
+                    }`}
+                    style={{
+                      left: `${subTextXPct}%`,
+                      top: `${subTextYPct}%`,
+                      transform: `translate(-50%, -50%) rotate(${subRotation}deg)`,
+                      transformOrigin: 'center center',
+                      maxWidth: '92%',
+                      touchAction: 'none',
+                    }}
+                  >
+                    {/* Visual dashed bounding box indicator (rotates along with text angle) */}
+                    {isSelected && (
+                      <div className="absolute -inset-2 border-2 border-dashed border-amber-500 rounded-lg pointer-events-none shadow-xs">
+                        <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-amber-500 text-white text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-full flex items-center gap-1 shadow pointer-events-none whitespace-nowrap">
+                          <Move size={8} />
+                          <span>Sub-text{subRotation !== 0 ? ` (${subRotation}°)` : ''}</span>
+                        </div>
                       </div>
                     )}
 
-                    {/* Optional Age Label */}
-                    {ageStr && (
-                      <div
-                        style={{
-                          fontFamily: curFont.fontFamily,
-                          fontWeight: isHeavy ? 900 : 700,
-                          color: customColor || activeTextConfig.color,
-                          fontSize: `${ageFontSize}px`,
-                          lineHeight: 1.1,
-                          WebkitTextStroke: `${ageStrokeWidth}px ${strokeColor}`,
-                          paintOrder: 'stroke fill',
-                          marginTop: `${Math.round(previewFontSize * 0.1)}px`,
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        {ageLabel}
-                      </div>
-                    )}
+                    <div
+                      style={{
+                        fontFamily: curFont.fontFamily,
+                        fontWeight: isHeavy ? 900 : 700,
+                        color: customColor || activeTextConfig.color,
+                        fontSize: `${previewFontSize}px`,
+                        lineHeight: 1.15,
+                        WebkitTextStroke: `${strokeWidth}px ${strokeColor}`,
+                        paintOrder: 'stroke fill',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {subStr}
+                    </div>
                   </div>
                 );
               })()}
@@ -2893,7 +3532,7 @@ export default function CanvasEditor({
       )}
 
       {/* Hidden Master Canvas */}
-      <canvas ref={canvasRef} className="hidden" />
+      <canvas ref={canvasRef} className="hidden touch-none" style={{ touchAction: 'none' }} />
     </div>
   );
 }

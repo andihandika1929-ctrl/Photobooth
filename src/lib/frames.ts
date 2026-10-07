@@ -8,49 +8,59 @@ import type { FramePreset, LayoutType } from '@/components/CanvasEditor';
 export interface TextConfig {
   hasCustomText: boolean;
   defaultText: string;
+  defaultSubText?: string;
   fontFamily: string;     // Value from Curated Font Catalog (e.g. 'Caveat', 'Cherry Bomb One')
   color: string;          // Hex code, e.g. '#FF5E7E'
   xPercent: number;       // 0 - 100, e.g. 50 (horizontal center)
   yPercent: number;       // 0 - 100, e.g. 88 (bottom area)
   fontSizeRatio: number;  // Ratio relative to canvas height, e.g. 0.045
+  subYPercent?: number;   // 0 - 100, default position for sub-text
 }
 
 export const PRESET_DEFAULT_TEXT_CONFIGS: Record<FramePreset, TextConfig> = {
   birthdayCatPink: {
     hasCustomText: true,
     defaultText: 'Happy Birthday',
+    defaultSubText: '21',
     fontFamily: 'Caveat',
     color: '#FF69B4',
     xPercent: 50,
     yPercent: 94.6,
     fontSizeRatio: 0.032,
+    subYPercent: 97.2,
   },
   retroTerracotta: {
     hasCustomText: true,
     defaultText: 'Smile came from inside',
+    defaultSubText: 'Forever',
     fontFamily: 'Caveat',
     color: '#FFFFFF',
     xPercent: 50,
     yPercent: 92.4,
     fontSizeRatio: 0.039,
+    subYPercent: 95.6,
   },
   birthday: {
     hasCustomText: true,
     defaultText: 'Happy Birthday',
+    defaultSubText: '21',
     fontFamily: 'Caveat',
     color: '#FF69B4',
     xPercent: 50,
     yPercent: 91,
     fontSizeRatio: 0.035,
+    subYPercent: 94.2,
   },
   film35mm: {
     hasCustomText: false,
     defaultText: '',
+    defaultSubText: '',
     fontFamily: 'Inter',
     color: '#E8890A',
     xPercent: 50,
     yPercent: 98,
     fontSizeRatio: 0.02,
+    subYPercent: 98,
   },
 };
 
