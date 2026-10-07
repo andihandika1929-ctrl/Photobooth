@@ -5,6 +5,7 @@ import {
   useState,
   useEffect,
   useCallback,
+  useMemo,
 } from 'react';
 import {
   Download,
@@ -51,8 +52,18 @@ import {
 } from '@/lib/fonts';
 import {
   type TextConfig,
+  type FrameTheme,
+  type StandardLayoutType,
   getPresetTextConfig,
   PRESET_DEFAULT_TEXT_CONFIGS,
+  getActiveFrames,
+  saveStoredFrames,
+  FRAMES_UPDATED_EVENT,
+  normalizeLayoutType,
+  toLegacyLayout,
+  getSlotsForCanvas,
+  STANDARD_LAYOUT_DEFINITIONS,
+  isBuiltinTheme,
 } from '@/lib/frames';
 
 // ─── Types ───────────────────────────────────────────────
@@ -87,6 +98,7 @@ interface CanvasEditorProps {
   allFrames?: CapturedFrame[];
   layout: LayoutType;
   initialPreset?: FramePreset;
+  initialThemeId?: string;
   onAutoUpload?: (blob: Blob, templateType: string, isSyncUpdate?: boolean) => void;
   onShare: (blob: Blob, templateType: string) => void;
   onReset: () => void;
@@ -464,6 +476,35 @@ function loadRetroTerracottaFrame(): Promise<HTMLImageElement> {
   return retroLoadingPromise;
 }
 
+// In-memory cache for custom uploaded frame PNG overlay assets
+const customOverlayCache = new Map<string, HTMLImageElement>();
+
+function loadCustomOverlay(url: string): Promise<HTMLImageElement | null> {
+  if (typeof window === 'undefined') return Promise.resolve(null);
+  if (customOverlayCache.has(url)) {
+    const cached = customOverlayCache.get(url)!;
+    if (cached.complete && cached.naturalWidth > 0) return Promise.resolve(cached);
+  }
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = async () => {
+      try {
+        if ('decode' in img) await img.decode();
+      } catch {
+        // decode is best-effort
+      }
+      customOverlayCache.set(url, img);
+      resolve(img);
+    };
+    img.onerror = (e) => {
+      console.warn('[HaloLuna] Failed to load custom frame overlay:', url, e);
+      resolve(null);
+    };
+    img.src = url;
+  });
+}
+
 // In-memory cache for transparent sticker assets (GIPHY / external)
 const remoteStickerCache = new Map<string, HTMLImageElement>();
 
@@ -687,10 +728,13 @@ function drawGradedPhoto(
   explicitFilterCss?: string,
 ) {
   ctx.save();
+  ctx.beginPath();
   if (borderRadius > 0) {
     roundRect(ctx, dx, dy, dw, dh, borderRadius);
-    ctx.clip();
+  } else {
+    ctx.rect(dx, dy, dw, dh);
   }
+  ctx.clip();
 
   // The snapshot data URL already contains the true baked filter pixels.
   // If an explicit override filter is passed, apply it; otherwise keep ctx.filter as 'none'.
@@ -721,6 +765,7 @@ export default function CanvasEditor({
   allFrames,
   layout,
   initialPreset,
+  initialThemeId,
   onAutoUpload,
   onShare,
   onReset,
@@ -762,12 +807,56 @@ export default function CanvasEditor({
 
   const [activeTab, setActiveTab] = useState<'style' | 'stickers'>('style');
   const [isStickerDrawerOpen, setIsStickerDrawerOpen] = useState(false);
+
+  // Dynamic Frames from Shared Data Layer
+  const [availableThemes, setAvailableThemes] = useState<FrameTheme[]>(() => getActiveFrames());
+  const [selectedThemeId, setSelectedThemeId] = useState<string | null>(initialThemeId || null);
+
+  useEffect(() => {
+    fetch('/api/frames')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.success && Array.isArray(data.frames) && data.frames.length > 0) {
+          setAvailableThemes(data.frames);
+          saveStoredFrames(data.frames);
+        }
+      })
+      .catch(() => {});
+
+    const handleUpdate = () => {
+      setAvailableThemes(getActiveFrames());
+    };
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'haloluna:custom-frame-presets') {
+        setAvailableThemes(getActiveFrames());
+      }
+    };
+    window.addEventListener(FRAMES_UPDATED_EVENT, handleUpdate);
+    window.addEventListener('storage', handleStorage);
+    return () => {
+      window.removeEventListener(FRAMES_UPDATED_EVENT, handleUpdate);
+      window.removeEventListener('storage', handleStorage);
+    };
+  }, []);
+
   const initialActivePreset: FramePreset =
     initialPreset ||
     (layout === 'grid2x3' ? 'birthdayCatPink' : layout === 'grid2x2' ? 'retroTerracotta' : 'birthday');
   const initialConfig = getPresetTextConfig(initialActivePreset);
 
   const [preset, setPreset] = useState<FramePreset>(initialActivePreset);
+
+  const activeTheme = useMemo(() => {
+    if (selectedThemeId) {
+      const match = availableThemes.find((t) => t.id === selectedThemeId);
+      if (match) return match;
+    }
+    return availableThemes.find((t) => t.preset === preset) ?? availableThemes[0];
+  }, [availableThemes, selectedThemeId, preset]);
+
+  const activeThemeRef = useRef<FrameTheme | null>(null);
+  activeThemeRef.current = activeTheme;
+
   const activeTextConfig = getPresetTextConfig(preset);
   const [location, setLocation] = useState('SEOUL STUDIO');
   const [nowPlaying, setNowPlaying] = useState('NewJeans - Hype Boy');
@@ -1033,6 +1122,19 @@ export default function CanvasEditor({
   // Proportional Dimensions: Downscaled for preview, 2x Retina for export
   const getDimensions = useCallback(
     (isExport: boolean = false) => {
+      const activeTh = activeThemeRef.current;
+      const isCustom = Boolean(activeTh && !isBuiltinTheme(activeTh.id));
+
+      if (isCustom && activeTh) {
+        const norm = normalizeLayoutType(activeTh.layout_type || activeTh.layout || layout);
+        const def = STANDARD_LAYOUT_DEFINITIONS[norm] ?? STANDARD_LAYOUT_DEFINITIONS['strip-1x4'];
+        if (isExport) {
+          return { w: def.exportWidth, h: def.exportHeight, s: norm === 'grid-2x2' ? 1.2 : 2.31 };
+        } else {
+          return { w: def.previewWidth, h: def.previewHeight, s: norm === 'grid-2x2' ? 0.4 : 0.75 };
+        }
+      }
+
       if (preset === 'birthdayCatPink') {
         if (isExport) {
           return { w: CAT_PINK_BASE_W, h: CAT_PINK_BASE_H, s: 1.0 };
@@ -1097,9 +1199,9 @@ export default function CanvasEditor({
       }
 
       const palette = BIRTHDAY_PALETTES[birthdayPaletteRef.current] ?? BIRTHDAY_PALETTES.ivory;
-      const bg = palette.bg;
+      const bg = activeThemeRef.current?.paper || palette.bg;
       const muted = palette.muted;
-      const borderCol = palette.accent + '44';
+      const borderCol = (activeThemeRef.current?.accent || palette.accent) + '44';
 
       // Slim top margin — name & age live in the footer only
       const headerH = Math.round(h * (layout === 'grid2x2' ? 0.06 : 0.055));
@@ -1168,6 +1270,16 @@ export default function CanvasEditor({
       // Clean subtle watermark at the very bottom
       drawHaloLunaWatermark(ctx, w, footerStartY + footerH * 0.86, muted, s);
 
+      const customUrl = activeThemeRef.current?.frame_image_url;
+      if (customUrl) {
+        try {
+          const customOverlay = await loadCustomOverlay(customUrl);
+          if (customOverlay && customOverlay.complete && customOverlay.naturalWidth > 0) {
+            ctx.drawImage(customOverlay, 0, 0, w, h);
+          }
+        } catch {}
+      }
+
       ctx.restore();
     },
     [layout]
@@ -1212,7 +1324,8 @@ export default function CanvasEditor({
       // LAYER 1: Photos (drawn into cutout slots behind the frame)
       // Blush base matches the artwork exactly so the caption band is seamless
       ctx.save();
-      ctx.fillStyle = CAT_PINK_BLUSH;
+      const paperColor = activeThemeRef.current?.paper || CAT_PINK_BLUSH;
+      ctx.fillStyle = paperColor;
       ctx.fillRect(0, 0, w, h);
 
       for (let i = 0; i < 6; i++) {
@@ -1232,16 +1345,24 @@ export default function CanvasEditor({
 
       // LAYER 2: Transparent PNG Frame Overlay (Guaranteed safe fallback)
       try {
-        const frameImg = await loadBirthdayCatPinkFrame();
-        if (frameImg && frameImg.complete && frameImg.naturalWidth > 0) {
-          // Crop the artwork's faded bottom rows so it meets the band cleanly
-          const srcH = Math.round(frameImg.naturalHeight * (CAT_PINK_ART_H / CAT_PINK_FRAME_H));
-          ctx.drawImage(frameImg, 0, 0, frameImg.naturalWidth, srcH, 0, 0, w, artH);
+        const customUrl = activeThemeRef.current?.frame_image_url;
+        if (customUrl) {
+          const customOverlay = await loadCustomOverlay(customUrl);
+          if (customOverlay && customOverlay.complete && customOverlay.naturalWidth > 0) {
+            ctx.drawImage(customOverlay, 0, 0, w, artH);
+          }
         } else {
-          console.warn('[HaloLuna] Frame overlay loaded with 0 width, using fallback');
-          ctx.strokeStyle = '#F472B6';
-          ctx.lineWidth = 8 * scaleX;
-          ctx.strokeRect(10 * scaleX, 10 * scaleY, w - 20 * scaleX, artH - 20 * scaleY);
+          const frameImg = await loadBirthdayCatPinkFrame();
+          if (frameImg && frameImg.complete && frameImg.naturalWidth > 0) {
+            // Crop the artwork's faded bottom rows so it meets the band cleanly
+            const srcH = Math.round(frameImg.naturalHeight * (CAT_PINK_ART_H / CAT_PINK_FRAME_H));
+            ctx.drawImage(frameImg, 0, 0, frameImg.naturalWidth, srcH, 0, 0, w, artH);
+          } else {
+            console.warn('[HaloLuna] Frame overlay loaded with 0 width, using fallback');
+            ctx.strokeStyle = '#F472B6';
+            ctx.lineWidth = 8 * scaleX;
+            ctx.strokeRect(10 * scaleX, 10 * scaleY, w - 20 * scaleX, artH - 20 * scaleY);
+          }
         }
       } catch (frameErr) {
         console.warn('[HaloLuna] Frame overlay load error (drawing fallback frame):', frameErr);
@@ -1280,7 +1401,8 @@ export default function CanvasEditor({
       const scaleX = w / RETRO_BASE_W;
       const scaleY = h / RETRO_BASE_H;
 
-      ctx.fillStyle = '#C74913';
+      const paperColor = activeThemeRef.current?.paper || '#C74913';
+      ctx.fillStyle = paperColor;
       ctx.fillRect(0, 0, w, h);
 
       for (let i = 0; i < RETRO_SLOTS.length; i++) {
@@ -1301,9 +1423,17 @@ export default function CanvasEditor({
       }
 
       try {
-        const frameImg = await loadRetroTerracottaFrame();
-        if (frameImg && frameImg.complete && frameImg.naturalWidth > 0) {
-          ctx.drawImage(frameImg, 0, 0, w, h);
+        const customUrl = activeThemeRef.current?.frame_image_url;
+        if (customUrl) {
+          const customOverlay = await loadCustomOverlay(customUrl);
+          if (customOverlay && customOverlay.complete && customOverlay.naturalWidth > 0) {
+            ctx.drawImage(customOverlay, 0, 0, w, h);
+          }
+        } else {
+          const frameImg = await loadRetroTerracottaFrame();
+          if (frameImg && frameImg.complete && frameImg.naturalWidth > 0) {
+            ctx.drawImage(frameImg, 0, 0, w, h);
+          }
         }
       } catch (err) {
         console.warn('[HaloLuna] Retro terracotta overlay failed:', err);
@@ -1323,7 +1453,8 @@ export default function CanvasEditor({
       isExport: boolean = false,
       filterCss?: string,
     ) => {
-      ctx.fillStyle = '#0D0D0D';
+      const paperColor = activeThemeRef.current?.paper || '#0D0D0D';
+      ctx.fillStyle = paperColor;
       ctx.fillRect(0, 0, w, h);
       const spW = 40 * s;
       const sH = 24 * s;
@@ -1373,12 +1504,88 @@ export default function CanvasEditor({
         }
       }
 
+      const customUrl = activeThemeRef.current?.frame_image_url;
+      if (customUrl) {
+        try {
+          const customOverlay = await loadCustomOverlay(customUrl);
+          if (customOverlay && customOverlay.complete && customOverlay.naturalWidth > 0) {
+            ctx.drawImage(customOverlay, 0, 0, w, h);
+          }
+        } catch {}
+      }
+
       ctx.fillStyle = 'rgba(232, 137, 10, 0.6)';
       ctx.font = `600 ${8.5 * s}px "Courier New", monospace`;
       ctx.textAlign = 'center';
       ctx.fillText(SIGNATURE, w / 2, h - 14 * s);
     },
     [layout]
+  );
+
+  // 5. Standard Layout Preset + Frame Overlay Renderer (Dynamic Custom Frames)
+  const drawStandardOverlayFrame = useCallback(
+    async (
+      ctx: CanvasRenderingContext2D,
+      imgs: SlotImage[],
+      w: number,
+      h: number,
+      s: number,
+      isExport: boolean = false,
+      filterCss?: string,
+    ) => {
+      const theme = activeThemeRef.current;
+      const bgColor = theme?.bg_color || theme?.paper || '#FDFBF7';
+      const layoutType = theme?.layout_type || (theme?.layout === 'strip3' ? 'strip-1x3' : theme?.layout === 'grid2x2' ? 'grid-2x2' : 'strip-1x4');
+      const slots = getSlotsForCanvas(layoutType, w, h);
+
+      // 1. Background Paper Layer
+      ctx.save();
+      ctx.fillStyle = bgColor;
+      ctx.fillRect(0, 0, w, h);
+
+      // 2. Photo Slots Layer (placed strictly according to standard coordinates with explicit clipping)
+      for (let i = 0; i < slots.length; i++) {
+        if (!imgs[i]) continue;
+        const slot = slots[i];
+        ctx.save();
+        ctx.beginPath();
+        if (slot.radius && slot.radius > 0) {
+          roundRect(ctx, slot.x, slot.y, slot.w, slot.h, slot.radius);
+        } else {
+          ctx.rect(slot.x, slot.y, slot.w, slot.h);
+        }
+        ctx.clip();
+
+        drawGradedPhoto(
+          ctx,
+          imgs[i],
+          slot.x,
+          slot.y,
+          slot.w,
+          slot.h,
+          slot.radius,
+          isExport,
+          filterCss,
+        );
+        ctx.restore();
+      }
+
+      // 3. Top Layer: Transparent PNG Overlay Frame (bingkai dekorasi di atas foto)
+      const overlayUrl = theme?.overlay_image_url || theme?.frame_image_url;
+      if (overlayUrl) {
+        try {
+          const overlayImg = await loadCustomOverlay(overlayUrl);
+          if (overlayImg && overlayImg.complete && overlayImg.naturalWidth > 0) {
+            ctx.drawImage(overlayImg, 0, 0, w, h);
+          }
+        } catch (err) {
+          console.warn('Could not draw overlay frame image:', err);
+        }
+      }
+
+      ctx.restore();
+    },
+    []
   );
 
   // ═══════════════════════════════════════════════════════
@@ -1522,20 +1729,28 @@ export default function CanvasEditor({
           PHOTO_FILTER_PRESETS.find((p) => p.id === photoFilterRef.current) ?? PHOTO_FILTER_PRESETS[0];
         const activeFilterCss = activeFilterPreset.css;
 
-        switch (preset) {
-          case 'birthdayCatPink':
-            await drawBirthdayCatPink(ctx, imgs, w, h, s, isExport, activeFilterCss);
-            break;
-          case 'retroTerracotta':
-            await drawRetroTerracotta(ctx, imgs, w, h, s, isExport, activeFilterCss);
-            break;
-          case 'film35mm':
-            await drawFilm(ctx, imgs, w, h, s, isExport, activeFilterCss);
-            break;
-          case 'birthday':
-          default:
-            await drawCinemaTicketBirthday(ctx, imgs, w, h, s, isExport, activeFilterCss);
-            break;
+        const activeTh = activeThemeRef.current;
+        const isCustom = Boolean(activeTh && !isBuiltinTheme(activeTh.id));
+
+        if (isCustom) {
+          // Custom Admin Frame: Use standard layout slots + overlay PNG
+          await drawStandardOverlayFrame(ctx, imgs, w, h, s, isExport, activeFilterCss);
+        } else {
+          switch (preset) {
+            case 'birthdayCatPink':
+              await drawBirthdayCatPink(ctx, imgs, w, h, s, isExport, activeFilterCss);
+              break;
+            case 'retroTerracotta':
+              await drawRetroTerracotta(ctx, imgs, w, h, s, isExport, activeFilterCss);
+              break;
+            case 'film35mm':
+              await drawFilm(ctx, imgs, w, h, s, isExport, activeFilterCss);
+              break;
+            case 'birthday':
+            default:
+              await drawCinemaTicketBirthday(ctx, imgs, w, h, s, isExport, activeFilterCss);
+              break;
+          }
         }
 
         if (isExport || liveOpts) {
@@ -1646,6 +1861,7 @@ export default function CanvasEditor({
       drawRetroTerracotta,
       drawCinemaTicketBirthday,
       drawFilm,
+      drawStandardOverlayFrame,
       compositePlacedStickers,
     ]
   );
@@ -1838,6 +2054,23 @@ export default function CanvasEditor({
       setIsTextActive(null);
     }
     setPreset(newPreset);
+  };
+
+  const handleThemeSelect = (newTheme: FrameTheme) => {
+    setSelectedThemeId(newTheme.id);
+    handlePresetSelect(newTheme.preset);
+    if (newTheme.textConfig) {
+      if (newTheme.textConfig.defaultText) {
+        setCustomTextInput(newTheme.textConfig.defaultText);
+        setCustomText(newTheme.textConfig.defaultText);
+      }
+      if (newTheme.textConfig.fontFamily) {
+        setCustomFont(newTheme.textConfig.fontFamily);
+      }
+      if (newTheme.ink) {
+        setCustomColor(newTheme.ink);
+      }
+    }
   };
 
   // ─── Phase 0 Fix: Decoupled Local Download Handler ───────────────────────
@@ -2445,38 +2678,80 @@ export default function CanvasEditor({
       {/* ── STYLE TAB ── */}
       {activeTab === 'style' && (
         <div className="flex flex-col gap-5">
-          {/* Cute Themes Picker */}
+          {/* Frame Themes Picker */}
           <div>
-            <div className="flex items-center gap-1.5 mb-2.5">
-              <Sparkles size={13} className="text-amber-500" />
-              <p className="text-[11px] font-bold text-zinc-700 uppercase tracking-widest">
-                Cute Aesthetic Themes
-              </p>
+            <div className="flex items-center justify-between mb-2.5">
+              <div className="flex items-center gap-1.5">
+                <Palette size={13} className="text-zinc-700" />
+                <p className="text-[11px] font-bold text-zinc-700 uppercase tracking-widest">
+                  Frame Themes
+                </p>
+              </div>
+              <span className="text-[10px] font-mono text-zinc-400">
+                {availableThemes.length} Active
+              </span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {FRAME_PRESETS.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => handlePresetSelect(p.id)}
-                  className={`p-3 text-left rounded-xl border transition-all flex items-center gap-3 ${
-                    preset === p.id
-                      ? 'bg-zinc-900 text-white border-zinc-900 shadow-md scale-[1.01]'
-                      : 'bg-white text-zinc-800 border-zinc-200/90 hover:border-zinc-400 hover:bg-zinc-50/80 shadow-sm'
-                  }`}
-                >
-                  <span className="text-2xl">{p.emoji}</span>
-                  <div>
-                    <p className="text-xs font-bold leading-tight">{p.label}</p>
-                    <p
-                      className={`text-[10px] mt-0.5 ${
-                        preset === p.id ? 'text-zinc-300' : 'text-zinc-500'
-                      }`}
-                    >
-                      {p.desc}
-                    </p>
-                  </div>
-                </button>
-              ))}
+              {availableThemes.map((theme) => {
+                const isSelected = activeTheme?.id === theme.id || (!selectedThemeId && preset === theme.preset);
+                return (
+                  <button
+                    key={theme.id}
+                    type="button"
+                    onClick={() => handleThemeSelect(theme)}
+                    className={`p-3 text-left rounded-xl border transition-all flex items-center gap-3 relative ${
+                      isSelected
+                        ? 'bg-zinc-900 text-white border-zinc-900 shadow-md scale-[1.01]'
+                        : 'bg-white text-zinc-800 border-zinc-200/90 hover:border-zinc-400 hover:bg-zinc-50/80 shadow-sm'
+                    }`}
+                  >
+                    {/* Visual icon or thumbnail */}
+                    {(theme.overlay_image_url || theme.frame_image_url) ? (
+                      <div className="w-9 h-9 rounded-lg bg-zinc-100 border border-zinc-300 overflow-hidden flex items-center justify-center p-0.5 shrink-0">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={theme.overlay_image_url || theme.frame_image_url}
+                          alt={theme.name}
+                          className="max-h-full max-w-full object-contain"
+                        />
+                      </div>
+                    ) : (
+                      <div
+                        className="w-9 h-9 rounded-lg border flex items-center justify-center text-[10px] font-bold font-mono shrink-0 shadow-2xs"
+                        style={{
+                          backgroundColor: theme.bg_color || theme.paper || '#FDFBF7',
+                          color: theme.ink || '#1A1A1A',
+                          borderColor: theme.accent || '#E8DFCE',
+                        }}
+                      >
+                        {(theme.layout_type || theme.layout || '').startsWith('grid') ? 'GRID' : 'STRIP'}
+                      </div>
+                    )}
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-xs font-bold leading-tight truncate">{theme.name}</p>
+                        {theme.badge && (
+                          <span
+                            className={`text-[9px] font-mono px-1 py-0 rounded ${
+                              isSelected ? 'bg-zinc-800 text-zinc-200' : 'bg-zinc-100 text-zinc-600'
+                            }`}
+                          >
+                            {theme.badge}
+                          </span>
+                        )}
+                      </div>
+                      <p
+                        className={`text-[10px] mt-0.5 truncate ${
+                          isSelected ? 'text-zinc-300' : 'text-zinc-500'
+                        }`}
+                      >
+                        {theme.tagline || theme.description}
+                      </p>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -3706,10 +3981,13 @@ export default function CanvasEditor({
               })()}
           </div>
 
-          <p className="text-[11px] text-zinc-500 font-mono text-center">
-            {activeTextConfig.hasCustomText || placedStickers.length > 0
-              ? '💡 Tip: Click & drag text caption or stickers directly on the strip to reposition.'
-              : 'Add cute stickers above to customize your strip!'}
+          <p className="text-[11px] text-zinc-500 font-mono text-center flex items-center justify-center gap-1.5">
+            <Sparkles size={12} className="text-amber-500 shrink-0" />
+            <span>
+              {activeTextConfig.hasCustomText || placedStickers.length > 0
+                ? 'Tip: Click & drag text caption or stickers directly on the strip to reposition.'
+                : 'Add stickers above to customize your strip!'}
+            </span>
           </p>
 
           {/* Export Action Buttons */}

@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { ArrowRight, Camera, Check, Sparkles, Timer, Wand2 } from 'lucide-react';
 import {
   FRAME_THEMES,
+  getActiveFrames,
+  FRAMES_UPDATED_EVENT,
   persistFrameTheme,
   slotsForLayout,
   type FrameTheme,
@@ -51,18 +53,27 @@ function FramePreview({ theme }: { theme: FrameTheme }) {
 
 export default function LandingPage() {
   const router = useRouter();
+  const [themes, setThemes] = useState<FrameTheme[]>(FRAME_THEMES);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isEntering, setIsEntering] = useState(false);
   const enterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const selectedTheme = FRAME_THEMES.find((theme) => theme.id === selectedId) ?? null;
+  useEffect(() => {
+    const active = getActiveFrames();
+    setThemes(active);
+    const handleUpdate = () => setThemes(getActiveFrames());
+    window.addEventListener(FRAMES_UPDATED_EVENT, handleUpdate);
+    return () => window.removeEventListener(FRAMES_UPDATED_EVENT, handleUpdate);
+  }, []);
+
+  const selectedTheme = themes.find((theme) => theme.id === selectedId) ?? null;
 
   useEffect(() => {
-    FRAME_THEMES.forEach((theme) => router.prefetch(`/booth?frame=${theme.id}`));
+    themes.forEach((theme) => router.prefetch(`/booth?frame=${theme.id}`));
     return () => {
       if (enterTimerRef.current) clearTimeout(enterTimerRef.current);
     };
-  }, [router]);
+  }, [router, themes]);
 
   const chooseFrame = useCallback((themeId: string) => {
     setSelectedId(themeId);
@@ -171,12 +182,12 @@ export default function LandingPage() {
               </p>
             </div>
             <span className="hidden sm:block text-[11px] font-mono text-zinc-400 shrink-0">
-              {FRAME_THEMES.length} AVAILABLE
+              {themes.length} AVAILABLE
             </span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8 max-w-5xl mx-auto items-stretch">
-            {FRAME_THEMES.map((theme) => {
+            {themes.map((theme) => {
               const isSelected = selectedId === theme.id;
               return (
                 <button

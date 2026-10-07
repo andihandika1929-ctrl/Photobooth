@@ -32,9 +32,19 @@ import {
   Heart,
   Volume2,
   VolumeX,
+  AlertCircle,
+  CheckCircle2,
 } from 'lucide-react';
 import { savePhotoToSupabase } from '@/utils/supabasePhotoPipeline';
-import { getFrameTheme, persistFrameTheme, readPersistedFrameId, slotsForLayout } from '@/lib/frames';
+import {
+  getFrameTheme,
+  persistFrameTheme,
+  readPersistedFrameId,
+  slotsForLayout,
+  saveStoredFrames,
+  FRAMES_UPDATED_EVENT,
+  type FrameTheme,
+} from '@/lib/frames';
 
 type AppStep = 'capture' | 'select' | 'edit';
 
@@ -56,11 +66,11 @@ const LAYOUTS: { id: LayoutType; label: string; icon: React.ReactNode; frames: n
 function CaptureRoom() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const frameTheme = getFrameTheme(searchParams.get('frame'));
+  const [frameTheme, setFrameTheme] = useState<FrameTheme>(() => getFrameTheme(searchParams.get('frame')));
 
   const [appLoaded, setAppLoaded] = useState(false);
   const [step, setStep] = useState<AppStep>('capture');
-  const [layout, setLayout] = useState<LayoutType>(frameTheme.layout);
+  const [layout, setLayout] = useState<LayoutType>(() => getFrameTheme(searchParams.get('frame')).layout);
   const [countdownDuration, setCountdownDuration] = useState<CountdownDuration>(3);
   const [capturedFrames, setCapturedFrames] = useState<CapturedFrame[]>([]);
   const [selectedIndices, setSelectedIndices] = useState<number[]>([0, 1, 2, 3]);
@@ -97,12 +107,54 @@ function CaptureRoom() {
     const fromUrl = searchParams.get('frame');
     if (!fromUrl) {
       const saved = readPersistedFrameId();
-      if (saved) router.replace(`/booth?frame=${saved}`);
-      return;
+      if (saved) {
+        router.replace(`/booth?frame=${saved}`);
+        return;
+      }
+    } else {
+      persistFrameTheme(fromUrl);
     }
-    persistFrameTheme(fromUrl);
-    setLayout(getFrameTheme(fromUrl).layout);
+    const currentTheme = getFrameTheme(fromUrl);
+    setFrameTheme(currentTheme);
+    setLayout(currentTheme.layout);
   }, [searchParams, router]);
+
+  // Synchronize frames from API route & respond to Admin updates in real-time
+  useEffect(() => {
+    const syncFramesWithApi = async () => {
+      try {
+        const res = await fetch('/api/frames');
+        if (res.ok) {
+          const raw = await res.json();
+          const list: FrameTheme[] = Array.isArray(raw) ? raw : (raw.frames || []);
+          if (list.length > 0) {
+            saveStoredFrames(list);
+            const current = getFrameTheme(searchParams.get('frame'));
+            setFrameTheme(current);
+            setLayout(current.layout);
+          }
+        }
+      } catch (err) {
+        console.warn('Could not sync frames in booth:', err);
+      }
+    };
+
+    syncFramesWithApi();
+
+    const handleFramesUpdate = () => {
+      const current = getFrameTheme(searchParams.get('frame'));
+      setFrameTheme(current);
+      setLayout(current.layout);
+    };
+
+    window.addEventListener(FRAMES_UPDATED_EVENT, handleFramesUpdate);
+    window.addEventListener('storage', handleFramesUpdate);
+
+    return () => {
+      window.removeEventListener(FRAMES_UPDATED_EVENT, handleFramesUpdate);
+      window.removeEventListener('storage', handleFramesUpdate);
+    };
+  }, [searchParams]);
 
   // Target count of photos to select based on layout
   const targetCount = slotsForLayout(layout);
@@ -367,10 +419,10 @@ function CaptureRoom() {
               className="group flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-full border border-[#E8DFCE] bg-white/80 shadow-xs transition-all hover:border-zinc-400 hover:shadow-sm"
             >
               <span
-                className="w-6 h-6 rounded-full flex items-center justify-center text-[13px] leading-none shrink-0"
-                style={{ backgroundColor: frameTheme.wash }}
+                className="w-6 h-6 rounded-full flex items-center justify-center shrink-0"
+                style={{ backgroundColor: frameTheme.wash || '#FAF7F0' }}
               >
-                {frameTheme.emoji}
+                <Sparkles size={12} style={{ color: frameTheme.accent || '#18181B' }} />
               </span>
               <span className="flex flex-col items-start leading-none">
                 <span className="text-[11px] font-bold text-zinc-800">{frameTheme.name}</span>
@@ -538,8 +590,15 @@ function CaptureRoom() {
                     GetAngie Flow
                   </span>
                 </p>
-                <span className="text-[11px] font-mono text-zinc-500">
-                  {capturedFrames.length === STUDIO_SHOT_COUNT ? '✓ All 6 Snapped' : `${capturedFrames.length}/${STUDIO_SHOT_COUNT}`}
+                <span className="text-[11px] font-mono text-zinc-500 flex items-center gap-1">
+                  {capturedFrames.length === STUDIO_SHOT_COUNT ? (
+                    <>
+                      <Check size={12} className="text-emerald-600" />
+                      <span>All 6 Snapped</span>
+                    </>
+                  ) : (
+                    `${capturedFrames.length}/${STUDIO_SHOT_COUNT}`
+                  )}
                 </span>
               </div>
 
@@ -823,6 +882,7 @@ function CaptureRoom() {
               allFrames={capturedFrames}
               layout={layout}
               initialPreset={frameTheme.preset}
+              initialThemeId={frameTheme.id}
               onAutoUpload={handleAutoUpload}
               onShare={handleShare}
               onReset={handleReset}
@@ -863,19 +923,21 @@ function CaptureRoom() {
       {/* Visual Feedback Toasts for Cloud Sync */}
       {uploadToast && (
         <div className="fixed bottom-6 right-6 z-50 bg-zinc-900 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-2xl border border-white/20 flex items-center gap-2 animate-bounce">
-          <span className="text-emerald-400">✓</span>
+          <CheckCircle2 size={15} className="text-emerald-400 shrink-0" />
           <span>{uploadToast}</span>
         </div>
       )}
 
       {uploadError && (
         <div className="fixed bottom-6 right-6 z-50 bg-red-900/90 backdrop-blur-md text-white text-xs px-4 py-3 rounded-xl shadow-2xl border border-red-500/30 flex items-center gap-2.5">
-          <span>⚠️ {uploadError}</span>
+          <AlertCircle size={15} className="text-red-300 shrink-0" />
+          <span>{uploadError}</span>
           <button
             onClick={() => setUploadError(null)}
-            className="text-white/60 hover:text-white font-bold ml-1"
+            className="text-white/60 hover:text-white p-0.5 ml-1 transition-colors"
+            title="Dismiss error"
           >
-            ✕
+            <X size={14} />
           </button>
         </div>
       )}
