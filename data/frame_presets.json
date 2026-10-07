@@ -1,5 +1,24 @@
 [
   {
+    "id": "summer",
+    "name": "Summer",
+    "category": "Seasonal",
+    "layout_type": "strip-1x3",
+    "layout": "strip3",
+    "overlay_image_url": "https://rgkjeoclhrmlqhledoyi.supabase.co/storage/v1/object/public/photos/frames/upload-1791384324069-Salinan_50_TAMPLATE_PHOTOBOOTH__1_.png",
+    "frame_image_url": "https://rgkjeoclhrmlqhledoyi.supabase.co/storage/v1/object/public/photos/frames/upload-1791384324069-Salinan_50_TAMPLATE_PHOTOBOOTH__1_.png",
+    "bg_color": "#FEF3C7",
+    "paper": "#FEF3C7",
+    "is_active": true,
+    "preset": "film35mm",
+    "tagline": "Summer",
+    "description": "Summer customized photobooth frame layout.",
+    "ink": "#1A1A1A",
+    "accent": "#C4B99A",
+    "wash": "#F5F0E8",
+    "created_at": "2026-10-07T14:45:30.006Z"
+  },
+  {
     "id": "alo",
     "name": "Alo",
     "category": "Seasonal",

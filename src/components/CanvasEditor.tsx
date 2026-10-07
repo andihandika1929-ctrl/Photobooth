@@ -31,6 +31,7 @@ import {
   Trash2,
   Maximize2,
   Search,
+  ZoomIn,
 } from 'lucide-react';
 import {
   type FilterName,
@@ -687,6 +688,18 @@ function drawKoreanStickerCaption(
 // while the animated BTS strip video is being recorded.
 type SlotImage = HTMLImageElement | HTMLCanvasElement;
 
+export interface PhotoAdjustment {
+  panX: number; // -1 (left) to 1 (right)
+  panY: number; // -1 (top / forehead) to 1 (bottom)
+  zoom: number; // 1.0 to 2.5
+}
+
+export const DEFAULT_ADJUSTMENT: PhotoAdjustment = {
+  panX: 0,
+  panY: 0,
+  zoom: 1,
+};
+
 function drawImageCover(
   ctx: CanvasRenderingContext2D,
   img: SlotImage,
@@ -694,26 +707,66 @@ function drawImageCover(
   dy: number,
   dw: number,
   dh: number,
+  adjustment?: PhotoAdjustment,
+  bleed = 1,
 ) {
   const natW = img instanceof HTMLImageElement ? img.naturalWidth : img.width;
   const natH = img instanceof HTMLImageElement ? img.naturalHeight : img.height;
+  if (!natW || !natH || dw <= 0 || dh <= 0) return;
+
+  const adj = adjustment || DEFAULT_ADJUSTMENT;
+  const zoom = Math.max(1, Math.min(2.5, adj.zoom ?? 1));
+  const panX = Math.max(-1, Math.min(1, adj.panX ?? 0));
+  const panY = Math.max(-1, Math.min(1, adj.panY ?? 0));
+
   const imgAspect = natW / natH;
   const dstAspect = dw / dh;
-  let sx: number, sy: number, sWidth: number, sHeight: number;
+
+  let baseW: number;
+  let baseH: number;
+
   if (imgAspect > dstAspect) {
     // Image is wider than destination — crop left/right
-    sHeight = natH;
-    sWidth = sHeight * dstAspect;
-    sx = (natW - sWidth) / 2;
-    sy = 0;
+    baseH = natH;
+    baseW = baseH * dstAspect;
   } else {
     // Image is taller than destination — crop top/bottom
-    sWidth = natW;
-    sHeight = sWidth / dstAspect;
-    sx = 0;
-    sy = (natH - sHeight) / 2;
+    baseW = natW;
+    baseH = baseW / dstAspect;
   }
-  ctx.drawImage(img, sx, sy, sWidth, sHeight, dx, dy, dw, dh);
+
+  // Zooming in reduces the sampled source rectangle
+  const sWidth = baseW / zoom;
+  const sHeight = baseH / zoom;
+
+  // Maximum pan allowable in source coordinates from center
+  const maxPanX = (natW - sWidth) / 2;
+  const maxPanY = (natH - sHeight) / 2;
+
+  // Center coordinates in source
+  const centerSx = (natW - sWidth) / 2;
+  const centerSy = (natH - sHeight) / 2;
+
+  // Apply pan (panX/panY from -1 to 1)
+  let sx = centerSx + panX * maxPanX;
+  let sy = centerSy + panY * maxPanY;
+
+  // Strictly clamp source rectangle so it never samples outside image bounds [0, natW] and [0, natH]
+  sx = Math.max(0, Math.min(natW - sWidth, sx));
+  sy = Math.max(0, Math.min(natH - sHeight, sy));
+
+  // Add bleed to destination dimensions to avoid subpixel white gaps at borders
+  ctx.drawImage(
+    img,
+    sx,
+    sy,
+    sWidth,
+    sHeight,
+    dx - bleed,
+    dy - bleed,
+    dw + bleed * 2,
+    dh + bleed * 2
+  );
 }
 
 function drawGradedPhoto(
@@ -726,13 +779,15 @@ function drawGradedPhoto(
   borderRadius = 0,
   applyGrain = false,
   explicitFilterCss?: string,
+  adjustment?: PhotoAdjustment,
 ) {
   ctx.save();
   ctx.beginPath();
   if (borderRadius > 0) {
-    roundRect(ctx, dx, dy, dw, dh, borderRadius);
+    roundRect(ctx, dx - 1, dy - 1, dw + 2, dh + 2, borderRadius);
   } else {
-    ctx.rect(dx, dy, dw, dh);
+    // 1px bleed on clipping slot eliminates white hairline gaps
+    ctx.rect(dx - 1, dy - 1, dw + 2, dh + 2);
   }
   ctx.clip();
 
@@ -743,7 +798,7 @@ function drawGradedPhoto(
   } else {
     ctx.filter = 'none';
   }
-  drawImageCover(ctx, img, dx, dy, dw, dh);
+  drawImageCover(ctx, img, dx, dy, dw, dh, adjustment, 1);
   ctx.filter = 'none';
 
   // Apply procedural film grain only when requested (export mode)
@@ -752,7 +807,7 @@ function drawGradedPhoto(
     if (pattern) {
       ctx.fillStyle = pattern;
       ctx.globalCompositeOperation = 'overlay';
-      ctx.fillRect(dx, dy, dw, dh);
+      ctx.fillRect(dx - 1, dy - 1, dw + 2, dh + 2);
     }
   }
 
@@ -803,6 +858,26 @@ export default function CanvasEditor({
     startMY: number;
     startXPct: number;
     startYPct: number;
+  } | null>(null);
+
+  // Photo slot repositioning & zoom state
+  const [photoAdjustments, setPhotoAdjustments] = useState<PhotoAdjustment[]>(() =>
+    Array.from({ length: 6 }, () => ({ ...DEFAULT_ADJUSTMENT }))
+  );
+  const photoAdjustmentsRef = useRef<PhotoAdjustment[]>(photoAdjustments);
+  useEffect(() => {
+    photoAdjustmentsRef.current = photoAdjustments;
+  }, [photoAdjustments]);
+
+  const [activeSlotIndex, setActiveSlotIndex] = useState<number>(0);
+  const slotDragState = useRef<{
+    slotIndex: number;
+    startMX: number;
+    startMY: number;
+    startPanX: number;
+    startPanY: number;
+    slotWidth: number;
+    slotHeight: number;
   } | null>(null);
 
   const [activeTab, setActiveTab] = useState<'style' | 'stickers'>('style');
@@ -997,6 +1072,8 @@ export default function CanvasEditor({
     };
   }, []);
 
+  const triggerRenderRef = useRef<((silent?: boolean) => Promise<void>) | null>(null);
+
   // Global drag listeners for placed stickers & draggable text layer with requestAnimationFrame throttling
   useEffect(() => {
     let animationFrameId: number | null = null;
@@ -1004,7 +1081,7 @@ export default function CanvasEditor({
 
     // Dedicated non-passive touchmove on the preview container to safely prevent browser scroll during drag
     const handleContainerTouchMove = (e: TouchEvent) => {
-      if ((dragState.current || textDragState.current) && e.cancelable) {
+      if ((dragState.current || textDragState.current || slotDragState.current) && e.cancelable) {
         e.preventDefault();
       }
     };
@@ -1014,7 +1091,7 @@ export default function CanvasEditor({
     }
 
     const handleMove = (e: MouseEvent | TouchEvent) => {
-      if ((!dragState.current && !textDragState.current) || !previewWrapRef.current) return;
+      if ((!dragState.current && !textDragState.current && !slotDragState.current) || !previewWrapRef.current) return;
 
       const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
       const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
@@ -1088,6 +1165,30 @@ export default function CanvasEditor({
             setSubTextYPct(clampedY);
           }
         }
+
+        // 3. Photo slot pan drag interaction (reposition face/crop)
+        if (slotDragState.current) {
+          const state = slotDragState.current;
+          const dx = clientX - state.startMX;
+          const dy = clientY - state.startMY;
+          // Dragging down (dy > 0) pulls the photo down, showing the top of the photo (sy decreases, so panY decreases towards -1)
+          const deltaPanX = (dx / state.slotWidth) * 2;
+          const deltaPanY = (dy / state.slotHeight) * 2;
+          const nextPanX = Math.max(-1, Math.min(1, Number((state.startPanX - deltaPanX).toFixed(3))));
+          const nextPanY = Math.max(-1, Math.min(1, Number((state.startPanY - deltaPanY).toFixed(3))));
+
+          setPhotoAdjustments((prev) => {
+            const next = [...prev];
+            const cur = next[state.slotIndex] || { ...DEFAULT_ADJUSTMENT };
+            next[state.slotIndex] = {
+              ...cur,
+              panX: nextPanX,
+              panY: nextPanY,
+            };
+            photoAdjustmentsRef.current = next;
+            return next;
+          });
+        }
       });
     };
 
@@ -1095,6 +1196,10 @@ export default function CanvasEditor({
       if (animationFrameId !== null) {
         cancelAnimationFrame(animationFrameId);
         animationFrameId = null;
+      }
+      if (slotDragState.current) {
+        slotDragState.current = null;
+        void triggerRenderRef.current?.(true);
       }
       dragState.current = null;
       textDragState.current = null;
@@ -1177,6 +1282,175 @@ export default function CanvasEditor({
     [layout, preset]
   );
 
+  // ─── Slot Coordinate Calculation & Interactive Photo Positioning ─────────
+  const currentSlots = useMemo(() => {
+    const { w, h, s } = getDimensions(false);
+    const activeTh = activeTheme;
+    const isCustom = Boolean(activeTh && !isBuiltinTheme(activeTh.id));
+
+    if (isCustom && activeTh) {
+      const norm = normalizeLayoutType(activeTh.layout_type || activeTh.layout || layout);
+      const slots = getSlotsForCanvas(norm, w, h);
+      return slots.map((sl, idx) => ({
+        index: idx,
+        xPct: (sl.x / w) * 100,
+        yPct: (sl.y / h) * 100,
+        wPct: (sl.w / w) * 100,
+        hPct: (sl.h / h) * 100,
+      }));
+    }
+
+    if (preset === 'birthdayCatPink') {
+      const SLOTS_6 = [
+        { x: 30,  y: 38,   w: 536, h: 460 },
+        { x: 30,  y: 530,  w: 536, h: 464 },
+        { x: 30,  y: 1026, w: 536, h: 460 },
+        { x: 622, y: 290,  w: 540, h: 460 },
+        { x: 622, y: 782,  w: 540, h: 460 },
+        { x: 622, y: 1274, w: 540, h: 464 },
+      ];
+      return SLOTS_6.map((sl, idx) => ({
+        index: idx,
+        xPct: (sl.x / CAT_PINK_BASE_W) * 100,
+        yPct: (sl.y / CAT_PINK_BASE_H) * 100,
+        wPct: (sl.w / CAT_PINK_BASE_W) * 100,
+        hPct: (sl.h / CAT_PINK_BASE_H) * 100,
+      }));
+    }
+
+    if (preset === 'retroTerracotta') {
+      return RETRO_SLOTS.map((sl, idx) => ({
+        index: idx,
+        xPct: (sl.x / RETRO_BASE_W) * 100,
+        yPct: (sl.y / RETRO_BASE_H) * 100,
+        wPct: (sl.w / RETRO_BASE_W) * 100,
+        hPct: (sl.h / RETRO_BASE_H) * 100,
+      }));
+    }
+
+    if (preset === 'film35mm') {
+      const count = layout === 'strip4' ? 4 : layout === 'strip3' ? 3 : 4;
+      const spW = 40 * s;
+      const fX = spW + 6 * s;
+      const fW2 = w - spW * 2 - 12 * s;
+      const metaH = 30 * s;
+      const frameH = (h - 16 * s) / count;
+      return Array.from({ length: count }, (_, i) => {
+        const fy = 8 * s + i * frameH;
+        const photoH = frameH - metaH - 4 * s;
+        return {
+          index: i,
+          xPct: (fX / w) * 100,
+          yPct: ((fy + metaH) / h) * 100,
+          wPct: (fW2 / w) * 100,
+          hPct: (photoH / h) * 100,
+        };
+      });
+    }
+
+    // Default CinemaTicket / Editorial Birthday
+    const count = layout === 'strip4' ? 4 : layout === 'strip3' ? 3 : 4;
+    const pad = Math.round(w * 0.09);
+    const headerH = Math.round(h * (layout === 'grid2x2' ? 0.06 : 0.055));
+    const footerH = Math.round(h * (layout === 'grid2x2' ? 0.18 : 0.20));
+    const gap = Math.round(w * 0.035);
+
+    if (layout === 'grid2x2') {
+      const cw = (w - pad * 2 - gap) / 2;
+      const ch = (h - headerH - footerH - gap) / 2;
+      const pos = [
+        [0, 0],
+        [1, 0],
+        [0, 1],
+        [1, 1],
+      ];
+      return [0, 1, 2, 3].map((i) => {
+        const [c2, r] = pos[i];
+        const ix = pad + c2 * (cw + gap);
+        const iy = headerH + r * (ch + gap);
+        return {
+          index: i,
+          xPct: (ix / w) * 100,
+          yPct: (iy / h) * 100,
+          wPct: (cw / w) * 100,
+          hPct: (ch / h) * 100,
+        };
+      });
+    } else {
+      const iw = w - pad * 2;
+      const ih = (h - headerH - footerH - gap * (count - 1)) / count;
+      return Array.from({ length: count }, (_, i) => {
+        const iy = headerH + i * (ih + gap);
+        return {
+          index: i,
+          xPct: (pad / w) * 100,
+          yPct: (iy / h) * 100,
+          wPct: (iw / w) * 100,
+          hPct: (ih / h) * 100,
+        };
+      });
+    }
+  }, [getDimensions, layout, preset, activeTheme]);
+
+  useEffect(() => {
+    if (currentSlots.length > 0 && activeSlotIndex >= currentSlots.length) {
+      setActiveSlotIndex(0);
+    }
+  }, [currentSlots.length, activeSlotIndex]);
+
+  const handleUpdateActiveAdjustment = useCallback(
+    (partial: Partial<PhotoAdjustment>) => {
+      setPhotoAdjustments((prev) => {
+        const next = [...prev];
+        const cur = next[activeSlotIndex] || { ...DEFAULT_ADJUSTMENT };
+        next[activeSlotIndex] = {
+          ...cur,
+          ...partial,
+        };
+        photoAdjustmentsRef.current = next;
+        return next;
+      });
+    },
+    [activeSlotIndex]
+  );
+
+  const handleResetActiveSlot = useCallback(() => {
+    handleUpdateActiveAdjustment({ panX: 0, panY: 0, zoom: 1 });
+  }, [handleUpdateActiveAdjustment]);
+
+  const handleResetAllSlots = useCallback(() => {
+    const reset = Array.from({ length: 6 }, () => ({ ...DEFAULT_ADJUSTMENT }));
+    setPhotoAdjustments(reset);
+    photoAdjustmentsRef.current = reset;
+  }, []);
+
+  const handleSlotPointerDown = useCallback(
+    (e: React.MouseEvent | React.TouchEvent, slotIndex: number) => {
+      e.stopPropagation();
+      setActiveStickerID(null);
+      setIsTextActive(null);
+      setActiveSlotIndex(slotIndex);
+
+      const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+      const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+
+      const currentAdj = photoAdjustmentsRef.current[slotIndex] || DEFAULT_ADJUSTMENT;
+      const el = e.currentTarget as HTMLElement;
+      const rect = el.getBoundingClientRect();
+
+      slotDragState.current = {
+        slotIndex,
+        startMX: clientX,
+        startMY: clientY,
+        startPanX: currentAdj.panX ?? 0,
+        startPanY: currentAdj.panY ?? 0,
+        slotWidth: rect.width || 100,
+        slotHeight: rect.height || 100,
+      };
+    },
+    []
+  );
+
   // ═══════════════════════════════════════════════════════
   //  PRESET RENDERERS (PROCEDURAL ACCENTS)
   // ═══════════════════════════════════════════════════════
@@ -1231,7 +1505,7 @@ export default function CanvasEditor({
           const [c2, r] = pos[i];
           const ix = pad + c2 * (cw + gap);
           const iy = headerH + r * (ch + gap);
-          drawGradedPhoto(ctx, imgs[i], ix, iy, cw, ch, cornerRadius, isExport, filterCss);
+          drawGradedPhoto(ctx, imgs[i], ix, iy, cw, ch, cornerRadius, isExport, filterCss, photoAdjustmentsRef.current?.[i]);
           ctx.strokeStyle = borderCol;
           ctx.lineWidth = 1 * s;
           roundRect(ctx, ix, iy, cw, ch, cornerRadius);
@@ -1243,7 +1517,7 @@ export default function CanvasEditor({
         for (let i = 0; i < count; i++) {
           if (!imgs[i]) continue;
           const iy = headerH + i * (ih + gap);
-          drawGradedPhoto(ctx, imgs[i], pad, iy, iw, ih, cornerRadius, isExport, filterCss);
+          drawGradedPhoto(ctx, imgs[i], pad, iy, iw, ih, cornerRadius, isExport, filterCss, photoAdjustmentsRef.current?.[i]);
           ctx.strokeStyle = borderCol;
           ctx.lineWidth = 1 * s;
           roundRect(ctx, pad, iy, iw, ih, cornerRadius);
@@ -1339,7 +1613,7 @@ export default function CanvasEditor({
         const dh = Math.round(slot.h * scaleY);
 
         // Anti-distortion center-crop
-        drawGradedPhoto(ctx, img, dx, dy, dw, dh, 0, isExport, filterCss);
+        drawGradedPhoto(ctx, img, dx, dy, dw, dh, 0, isExport, filterCss, photoAdjustmentsRef.current?.[i]);
       }
       ctx.restore();
 
@@ -1419,6 +1693,7 @@ export default function CanvasEditor({
           0,
           isExport,
           filterCss,
+          photoAdjustmentsRef.current?.[i],
         );
       }
 
@@ -1495,7 +1770,7 @@ export default function CanvasEditor({
         ctx.fillText('ISO 400 • 35mm', fX + 8 * s, fy + 24 * s);
 
         if (imgs[i]) {
-          drawGradedPhoto(ctx, imgs[i], fX, fy + metaH, fW2, photoH, 0, isExport, filterCss);
+          drawGradedPhoto(ctx, imgs[i], fX, fy + metaH, fW2, photoH, 0, isExport, filterCss, photoAdjustmentsRef.current?.[i]);
           ctx.save();
           ctx.globalAlpha = 0.08;
           ctx.fillStyle = '#FF6B00';
@@ -1543,19 +1818,10 @@ export default function CanvasEditor({
       ctx.fillStyle = bgColor;
       ctx.fillRect(0, 0, w, h);
 
-      // 2. Photo Slots Layer (placed strictly according to standard coordinates with explicit clipping)
+      // 2. Photo Slots Layer (placed strictly according to standard coordinates with bleed clipping)
       for (let i = 0; i < slots.length; i++) {
         if (!imgs[i]) continue;
         const slot = slots[i];
-        ctx.save();
-        ctx.beginPath();
-        if (slot.radius && slot.radius > 0) {
-          roundRect(ctx, slot.x, slot.y, slot.w, slot.h, slot.radius);
-        } else {
-          ctx.rect(slot.x, slot.y, slot.w, slot.h);
-        }
-        ctx.clip();
-
         drawGradedPhoto(
           ctx,
           imgs[i],
@@ -1566,8 +1832,8 @@ export default function CanvasEditor({
           slot.radius,
           isExport,
           filterCss,
+          photoAdjustmentsRef.current?.[i],
         );
-        ctx.restore();
       }
 
       // 3. Top Layer: Transparent PNG Overlay Frame (bingkai dekorasi di atas foto)
@@ -1866,8 +2132,13 @@ export default function CanvasEditor({
     ]
   );
 
+  const renderPendingRef = useRef(false);
+
   const triggerRender = useCallback(async (silent = false) => {
-    if (isRenderingRef.current) return;
+    if (isRenderingRef.current) {
+      renderPendingRef.current = true;
+      return;
+    }
     isRenderingRef.current = true;
     if (!silent) setRenderProgress(15);
     try {
@@ -1888,8 +2159,16 @@ export default function CanvasEditor({
     } finally {
       if (!silent) setRenderProgress(null);
       isRenderingRef.current = false;
+      if (renderPendingRef.current) {
+        renderPendingRef.current = false;
+        void triggerRender(true);
+      }
     }
   }, [renderToCanvas]);
+
+  useEffect(() => {
+    triggerRenderRef.current = triggerRender;
+  }, [triggerRender]);
 
   // Full preview only when the strip itself changes — never on each caption keystroke
   useEffect(() => {
@@ -1922,6 +2201,15 @@ export default function CanvasEditor({
     if (!hasRenderedRef.current) return;
     void triggerRender(true);
   }, [photoFilter, triggerRender]);
+
+  // Real-time photo reposition / pan / zoom refresh: update preview quietly
+  useEffect(() => {
+    if (!hasRenderedRef.current) return;
+    const timer = setTimeout(() => {
+      void triggerRender(true);
+    }, 60);
+    return () => clearTimeout(timer);
+  }, [photoAdjustments, triggerRender]);
 
   const waitForRenderIdle = async () => {
     let spins = 0;
@@ -2234,7 +2522,7 @@ export default function CanvasEditor({
         const sctx = canvas.getContext('2d') as CanvasRenderingContext2D;
         // Always seed with the still so photos without a clip (uploads) still render
         const still = await loadStill(f.dataUrl);
-        if (still) drawImageCover(sctx, still, 0, 0, SLOT_PX, SLOT_PX);
+        if (still) drawImageCover(sctx, still, 0, 0, SLOT_PX, SLOT_PX, undefined, 0);
 
         let video: HTMLVideoElement | null = null;
         if (f.clip && f.clip.blob.size > 0) {
@@ -2810,6 +3098,150 @@ export default function CanvasEditor({
                 );
               })}
             </div>
+          </div>
+
+          {/* Photo Reposition & Zoom Control Panel */}
+          <div className="p-3.5 bg-white rounded-xl border border-zinc-200/90 shadow-xs flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <Move size={14} className="text-zinc-700" />
+                <p className="text-[11px] font-bold text-zinc-800 uppercase tracking-wider">
+                  Posisi & Skala Foto
+                </p>
+              </div>
+              <span className="text-[9.5px] font-mono font-medium text-zinc-600 bg-zinc-100 px-2 py-0.5 rounded-full border border-zinc-200">
+                Slot #{activeSlotIndex + 1} Aktif
+              </span>
+            </div>
+
+            {/* Slot Selector Tabs */}
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+              {currentSlots.map((slot) => {
+                const isSelected = activeSlotIndex === slot.index;
+                return (
+                  <button
+                    key={`slot-btn-${slot.index}`}
+                    type="button"
+                    onClick={() => setActiveSlotIndex(slot.index)}
+                    className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
+                      isSelected
+                        ? 'bg-zinc-900 text-white shadow-xs'
+                        : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200/80 hover:text-zinc-900'
+                    }`}
+                  >
+                    <span>Foto #{slot.index + 1}</span>
+                    {isSelected && <Check size={12} strokeWidth={2.5} />}
+                  </button>
+                );
+              })}
+            </div>
+
+            <p className="text-[10.5px] text-zinc-500 leading-snug">
+              Klik foto di kanvas atau pilih tombol slot di atas untuk menyesuaikan posisi wajah dan zoom.
+            </p>
+
+            {/* Slider Controls for Active Slot */}
+            {(() => {
+              const adj = photoAdjustments[activeSlotIndex] || DEFAULT_ADJUSTMENT;
+              const curPanY = adj.panY ?? 0;
+              const curPanX = adj.panX ?? 0;
+              const curZoom = adj.zoom ?? 1;
+
+              return (
+                <div className="flex flex-col gap-3 pt-1 border-t border-zinc-100">
+                  {/* Pan Y (Vertical) */}
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium text-zinc-700">Geser Posisi Vertikal (Pan Y)</span>
+                      <span className="font-mono text-[11px] text-zinc-500">
+                        {curPanY > 0 ? `+${Math.round(curPanY * 100)}%` : `${Math.round(curPanY * 100)}%`}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-zinc-400 font-medium">Atas</span>
+                      <input
+                        type="range"
+                        min="-1"
+                        max="1"
+                        step="0.02"
+                        value={curPanY}
+                        onChange={(e) => handleUpdateActiveAdjustment({ panY: parseFloat(e.target.value) })}
+                        className="flex-1 accent-zinc-900 cursor-pointer h-1.5 bg-zinc-200 rounded-lg appearance-none"
+                      />
+                      <span className="text-[10px] text-zinc-400 font-medium">Bawah</span>
+                    </div>
+                  </div>
+
+                  {/* Pan X (Horizontal) */}
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-medium text-zinc-700">Geser Posisi Horisontal (Pan X)</span>
+                      <span className="font-mono text-[11px] text-zinc-500">
+                        {curPanX > 0 ? `+${Math.round(curPanX * 100)}%` : `${Math.round(curPanX * 100)}%`}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-zinc-400 font-medium">Kiri</span>
+                      <input
+                        type="range"
+                        min="-1"
+                        max="1"
+                        step="0.02"
+                        value={curPanX}
+                        onChange={(e) => handleUpdateActiveAdjustment({ panX: parseFloat(e.target.value) })}
+                        className="flex-1 accent-zinc-900 cursor-pointer h-1.5 bg-zinc-200 rounded-lg appearance-none"
+                      />
+                      <span className="text-[10px] text-zinc-400 font-medium">Kanan</span>
+                    </div>
+                  </div>
+
+                  {/* Zoom / Scale */}
+                  <div className="flex flex-col gap-1.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-1">
+                        <ZoomIn size={12} className="text-zinc-600" />
+                        <span className="font-medium text-zinc-700">Zoom / Skala Foto</span>
+                      </div>
+                      <span className="font-mono text-[11px] text-zinc-500">
+                        {curZoom.toFixed(2)}x
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-zinc-400 font-medium">1.0x</span>
+                      <input
+                        type="range"
+                        min="1.0"
+                        max="2.5"
+                        step="0.05"
+                        value={curZoom}
+                        onChange={(e) => handleUpdateActiveAdjustment({ zoom: parseFloat(e.target.value) })}
+                        className="flex-1 accent-zinc-900 cursor-pointer h-1.5 bg-zinc-200 rounded-lg appearance-none"
+                      />
+                      <span className="text-[10px] text-zinc-400 font-medium">2.5x</span>
+                    </div>
+                  </div>
+
+                  {/* Reset Actions */}
+                  <div className="flex items-center justify-between pt-2 border-t border-zinc-100">
+                    <button
+                      type="button"
+                      onClick={handleResetActiveSlot}
+                      className="flex items-center gap-1.5 text-xs text-zinc-600 hover:text-zinc-900 font-medium transition-colors"
+                    >
+                      <RotateCcw size={12} />
+                      <span>Reset Foto #{activeSlotIndex + 1}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleResetAllSlots}
+                      className="text-[11px] text-zinc-400 hover:text-zinc-600 transition-colors"
+                    >
+                      Reset Semua
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           {/* ── PRD v2 Phase 5: Percentage-Based Text Config & Curated Font Layer ── */}
@@ -3725,9 +4157,14 @@ export default function CanvasEditor({
         <div className="flex flex-col gap-3 items-center w-full">
           {/* Quick Toolbar Bar with Stickers Button */}
           <div className="flex items-center justify-between w-full max-w-[340px] sm:max-w-[400px] px-1">
-            <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-widest font-mono">
-              Strip Canvas
-            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-widest font-mono">
+                Strip Canvas
+              </span>
+              <span className="text-[10px] text-zinc-400 font-medium hidden sm:inline">
+                • Geser foto untuk reposisi
+              </span>
+            </div>
             <button
               type="button"
               onClick={() => setIsStickerDrawerOpen(true)}
@@ -3769,6 +4206,39 @@ export default function CanvasEditor({
                 backgroundSize: '120px 120px',
               }}
             />
+
+            {/* Interactive Photo Slot Hitboxes & Active Repositioning Indicators */}
+            {currentSlots.map((slot) => {
+              const isActive = activeSlotIndex === slot.index;
+              return (
+                <div
+                  key={`slot-hitbox-${slot.index}`}
+                  onMouseDown={(e) => handleSlotPointerDown(e, slot.index)}
+                  onTouchStart={(e) => handleSlotPointerDown(e, slot.index)}
+                  className={`absolute select-none touch-none transition-all duration-150 cursor-grab active:cursor-grabbing ${
+                    isActive
+                      ? 'ring-2 ring-blue-500/90 ring-inset bg-blue-500/5 z-20 shadow-xs'
+                      : 'hover:ring-1 hover:ring-zinc-400/70 hover:bg-black/5 z-10'
+                  }`}
+                  style={{
+                    left: `${slot.xPct}%`,
+                    top: `${slot.yPct}%`,
+                    width: `${slot.wPct}%`,
+                    height: `${slot.hPct}%`,
+                    touchAction: 'none',
+                  }}
+                  title={`Foto #${slot.index + 1} - Klik & Geser untuk Mengatur Posisi`}
+                >
+                  {/* Active Slot Badge Indicator */}
+                  {isActive && (
+                    <div className="absolute top-1.5 left-1.5 flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-900/90 text-white text-[9px] font-mono font-medium shadow-sm backdrop-blur-xs pointer-events-none">
+                      <Move className="w-2.5 h-2.5" />
+                      <span>Slot #{slot.index + 1}</span>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
 
             {/* Draggable Transparent Sticker Overlays with Active Bounding Box */}
             {placedStickers.map((st) => {
