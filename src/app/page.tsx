@@ -6,6 +6,7 @@ import { ArrowRight, Camera, Check, Sparkles, Timer, Wand2 } from 'lucide-react'
 import {
   FRAME_THEMES,
   getActiveFrames,
+  saveStoredFrames,
   FRAMES_UPDATED_EVENT,
   persistFrameTheme,
   slotsForLayout,
@@ -20,13 +21,15 @@ const STEPS = [
 
 /** Miniature paper strip that previews how the chosen frame will print. */
 function FramePreview({ theme }: { theme: FrameTheme }) {
-  const slots = slotsForLayout(theme.layout);
-  const isGrid = theme.layout.startsWith('grid');
+  const layoutStr = theme.layout_type || theme.layout || 'strip4';
+  const slots = slotsForLayout(layoutStr);
+  const isGrid = layoutStr.includes('grid');
+  const overlayUrl = theme.overlay_image_url || theme.frame_image_url;
 
   return (
     <div
-      className="relative w-[104px] rounded-2xl p-2.5 pb-7 shadow-[0_10px_24px_rgba(26,26,26,0.10)] transition-transform duration-500 ease-out group-hover:-rotate-3 group-hover:scale-[1.06]"
-      style={{ backgroundColor: theme.paper }}
+      className="relative w-[104px] rounded-2xl p-2.5 pb-7 shadow-[0_10px_24px_rgba(26,26,26,0.10)] transition-transform duration-500 ease-out group-hover:-rotate-3 group-hover:scale-[1.06] overflow-hidden"
+      style={{ backgroundColor: theme.paper || theme.bg_color || '#FDFBF7' }}
     >
       <div className={isGrid ? 'grid grid-cols-2 gap-1' : 'flex flex-col gap-1'}>
         {Array.from({ length: slots }).map((_, i) => (
@@ -35,15 +38,25 @@ function FramePreview({ theme }: { theme: FrameTheme }) {
             className="rounded-[3px]"
             style={{
               aspectRatio: isGrid ? '1 / 1' : '4 / 3',
-              backgroundImage: `linear-gradient(140deg, ${theme.accent}, ${theme.wash})`,
+              backgroundImage: `linear-gradient(140deg, ${theme.accent || '#D4C5A9'}, ${theme.wash || '#F5F0E8'})`,
               opacity: 0.55 + i * 0.09,
             }}
           />
         ))}
       </div>
+
+      {overlayUrl && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={overlayUrl}
+          alt={theme.name}
+          className="absolute inset-0 w-full h-full object-contain pointer-events-none"
+        />
+      )}
+
       <span
-        className="absolute inset-x-0 bottom-2 text-center font-['Caveat'] font-bold leading-none"
-        style={{ color: theme.ink, fontSize: 12 }}
+        className="absolute inset-x-0 bottom-2 text-center font-['Caveat'] font-bold leading-none z-10"
+        style={{ color: theme.ink || '#1A1A1A', fontSize: 12 }}
       >
         HaloLuna
       </span>
@@ -53,17 +66,60 @@ function FramePreview({ theme }: { theme: FrameTheme }) {
 
 export default function LandingPage() {
   const router = useRouter();
-  const [themes, setThemes] = useState<FrameTheme[]>(FRAME_THEMES);
+  const [themes, setThemes] = useState<FrameTheme[]>([]);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isEntering, setIsEntering] = useState(false);
   const enterTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Direct fetch from database on mount without relying on CanvasEditor cache
   useEffect(() => {
-    const active = getActiveFrames();
-    setThemes(active);
-    const handleUpdate = () => setThemes(getActiveFrames());
+    let mounted = true;
+    setIsLoading(true);
+
+    fetch('/api/frames', { cache: 'no-store' })
+      .then((res) => res.json())
+      .then((data) => {
+        if (!mounted) return;
+        if (data.success && Array.isArray(data.frames) && data.frames.length > 0) {
+          setThemes(data.frames);
+          saveStoredFrames(data.frames);
+        } else {
+          setThemes(getActiveFrames());
+        }
+      })
+      .catch((err) => {
+        console.warn('[HaloLuna Homepage] Direct frame fetch fallback:', err);
+        if (mounted) {
+          setThemes(getActiveFrames());
+        }
+      })
+      .finally(() => {
+        if (mounted) {
+          setIsLoading(false);
+        }
+      });
+
+    const handleUpdate = () => {
+      if (mounted) {
+        setThemes(getActiveFrames());
+      }
+    };
+
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'haloluna:custom-frame-presets' && mounted) {
+        setThemes(getActiveFrames());
+      }
+    };
+
     window.addEventListener(FRAMES_UPDATED_EVENT, handleUpdate);
-    return () => window.removeEventListener(FRAMES_UPDATED_EVENT, handleUpdate);
+    window.addEventListener('storage', handleStorage);
+
+    return () => {
+      mounted = false;
+      window.removeEventListener(FRAMES_UPDATED_EVENT, handleUpdate);
+      window.removeEventListener('storage', handleStorage);
+    };
   }, []);
 
   const selectedTheme = themes.find((theme) => theme.id === selectedId) ?? null;
@@ -182,82 +238,118 @@ export default function LandingPage() {
               </p>
             </div>
             <span className="hidden sm:block text-[11px] font-mono text-zinc-400 shrink-0">
-              {themes.length} AVAILABLE
+              {isLoading ? 'SYNCING FRAMES…' : `${themes.length} AVAILABLE`}
             </span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 md:gap-8 max-w-5xl mx-auto items-stretch">
-            {themes.map((theme) => {
-              const isSelected = selectedId === theme.id;
-              return (
-                <button
-                  key={theme.id}
-                  type="button"
-                  onClick={() => chooseFrame(theme.id)}
-                  onDoubleClick={() => enterBooth(theme.id)}
-                  aria-pressed={isSelected}
-                  className={`group relative flex flex-col h-full w-full text-left rounded-3xl border bg-white/80 backdrop-blur-xs p-5 overflow-hidden transition-all duration-300 ease-out cursor-pointer ${
-                    isSelected
-                      ? 'border-zinc-900 shadow-[0_16px_38px_rgba(26,26,26,0.15)] -translate-y-1 ring-2 ring-zinc-900/10'
-                      : 'border-[#E8DFCE] shadow-xs hover:-translate-y-1 hover:border-zinc-300 hover:shadow-[0_14px_32px_rgba(26,26,26,0.10)]'
-                  }`}
+            {isLoading ? (
+              Array.from({ length: 6 }).map((_, i) => (
+                <div
+                  key={`skeleton-${i}`}
+                  className="relative flex flex-col h-full w-full text-left rounded-3xl border border-[#E8DFCE] bg-white/70 backdrop-blur-xs p-5 overflow-hidden animate-pulse shadow-xs"
                 >
-                  <div
-                    className="absolute -top-16 -right-12 w-44 h-44 rounded-full blur-2xl opacity-70 transition-opacity duration-300 group-hover:opacity-100"
-                    style={{ backgroundColor: theme.wash }}
-                  />
+                  <div className="w-20 h-4 bg-zinc-200/80 rounded-full mb-3" />
 
-                  {theme.badge && (
-                    <span className="absolute top-4 left-4 z-10 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-200">
-                      {theme.badge}
-                    </span>
-                  )}
+                  <div className="flex justify-center items-center h-[220px] sm:h-[240px] py-6">
+                    <div className="w-[104px] h-[190px] rounded-2xl bg-zinc-200/60 p-2.5 pb-7 flex flex-col gap-1.5 shadow-inner">
+                      <div className="w-full h-8 bg-zinc-300/70 rounded-[3px]" />
+                      <div className="w-full h-8 bg-zinc-300/70 rounded-[3px]" />
+                      <div className="w-full h-8 bg-zinc-300/70 rounded-[3px]" />
+                      <div className="w-full h-8 bg-zinc-300/70 rounded-[3px]" />
+                    </div>
+                  </div>
 
-                  <span
-                    className={`absolute top-4 right-4 z-10 w-7 h-7 rounded-full flex items-center justify-center transition-all duration-300 ${
+                  <div className="mt-auto flex flex-col min-h-[148px]">
+                    <div className="w-36 h-5 bg-zinc-200/90 rounded-md mb-2" />
+                    <div className="w-24 h-3 bg-zinc-200/70 rounded-md mb-3" />
+                    <div className="w-full h-3 bg-zinc-200/60 rounded-md mb-1.5" />
+                    <div className="w-4/5 h-3 bg-zinc-200/60 rounded-md mb-4" />
+
+                    <div className="flex items-center justify-between gap-2 mt-auto pt-3 border-t border-[#E8DFCE]/80">
+                      <div className="w-14 h-3.5 bg-zinc-200/80 rounded" />
+                      <div className="w-16 h-3.5 bg-zinc-200/80 rounded" />
+                    </div>
+                  </div>
+                </div>
+              ))
+            ) : (
+              themes.map((theme) => {
+                const isSelected = selectedId === theme.id;
+                return (
+                  <button
+                    key={theme.id}
+                    type="button"
+                    onClick={() => chooseFrame(theme.id)}
+                    onDoubleClick={() => enterBooth(theme.id)}
+                    aria-pressed={isSelected}
+                    className={`group relative flex flex-col h-full w-full text-left rounded-3xl border bg-white/80 backdrop-blur-xs p-5 overflow-hidden transition-all duration-300 ease-out cursor-pointer ${
                       isSelected
-                        ? 'bg-zinc-900 text-white scale-100 shadow-md'
-                        : 'bg-white/90 text-zinc-300 border border-zinc-200 scale-90 group-hover:text-zinc-500'
+                        ? 'border-zinc-900 shadow-[0_16px_38px_rgba(26,26,26,0.15)] -translate-y-1 ring-2 ring-zinc-900/10'
+                        : 'border-[#E8DFCE] shadow-xs hover:-translate-y-1 hover:border-zinc-300 hover:shadow-[0_14px_32px_rgba(26,26,26,0.10)]'
                     }`}
                   >
-                    <Check size={13} strokeWidth={3} />
-                  </span>
+                    <div
+                      className="absolute -top-16 -right-12 w-44 h-44 rounded-full blur-2xl opacity-70 transition-opacity duration-300 group-hover:opacity-100"
+                      style={{ backgroundColor: theme.wash || '#F5F0E8' }}
+                    />
 
-                  <div className="relative z-[1] flex justify-center items-center h-[220px] sm:h-[240px] py-6">
-                    <FramePreview theme={theme} />
-                  </div>
-
-                  <div className="relative z-[1] mt-auto flex flex-col min-h-[148px]">
-                    <div className="flex items-center gap-2">
-                      <span className="text-base leading-none">{theme.emoji}</span>
-                      <h4 className="font-bold tracking-tight text-[15px]">{theme.name}</h4>
-                    </div>
-                    <p className="text-[11px] font-mono uppercase tracking-widest text-zinc-400 mt-1">
-                      {theme.tagline}
-                    </p>
-                    <p className="text-xs text-zinc-600 leading-relaxed mt-2.5 min-h-[2.5rem]">
-                      {theme.description}
-                    </p>
-
-                    <div className="flex items-center justify-between gap-2 mt-4 pt-3 border-t border-[#E8DFCE]/80">
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
-                        {slotsForLayout(theme.layout)} cuts
+                    {theme.badge && (
+                      <span className="absolute top-4 left-4 z-10 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-200">
+                        {theme.badge}
                       </span>
-                      <span
-                        className={`flex items-center gap-1 text-[11px] font-bold transition-all duration-300 ${
-                          isSelected
-                            ? 'text-zinc-900'
-                            : 'text-zinc-400 group-hover:text-zinc-900 group-hover:translate-x-0.5'
-                        }`}
-                      >
-                        {isSelected ? 'Selected' : 'Choose'}
-                        <ArrowRight size={12} />
-                      </span>
+                    )}
+
+                    <span
+                      className={`absolute top-4 right-4 z-10 w-7 h-7 rounded-full flex items-center justify-center transition-all duration-300 ${
+                        isSelected
+                          ? 'bg-zinc-900 text-white scale-100 shadow-md'
+                          : 'bg-white/90 text-zinc-300 border border-zinc-200 scale-90 group-hover:text-zinc-500'
+                      }`}
+                    >
+                      <Check size={13} strokeWidth={3} />
+                    </span>
+
+                    <div className="relative z-[1] flex justify-center items-center h-[220px] sm:h-[240px] py-6">
+                      <FramePreview theme={theme} />
                     </div>
-                  </div>
-                </button>
-              );
-            })}
+
+                    <div className="relative z-[1] mt-auto flex flex-col min-h-[148px]">
+                      <div className="flex items-center gap-2">
+                        {theme.emoji ? (
+                          <span className="text-base leading-none">{theme.emoji}</span>
+                        ) : (
+                          <Sparkles size={15} className="text-amber-500 shrink-0" />
+                        )}
+                        <h4 className="font-bold tracking-tight text-[15px]">{theme.name}</h4>
+                      </div>
+                      <p className="text-[11px] font-mono uppercase tracking-widest text-zinc-400 mt-1">
+                        {theme.tagline || theme.category || 'Custom Frame'}
+                      </p>
+                      <p className="text-xs text-zinc-600 leading-relaxed mt-2.5 min-h-[2.5rem]">
+                        {theme.description || `${theme.name} frame preset ready for your photo strip.`}
+                      </p>
+
+                      <div className="flex items-center justify-between gap-2 mt-4 pt-3 border-t border-[#E8DFCE]/80">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                          {slotsForLayout(theme.layout_type || theme.layout || 'strip4')} cuts
+                        </span>
+                        <span
+                          className={`flex items-center gap-1 text-[11px] font-bold transition-all duration-300 ${
+                            isSelected
+                              ? 'text-zinc-900'
+                              : 'text-zinc-400 group-hover:text-zinc-900 group-hover:translate-x-0.5'
+                          }`}
+                        >
+                          {isSelected ? 'Selected' : 'Choose'}
+                          <ArrowRight size={12} />
+                        </span>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })
+            )}
           </div>
         </section>
       </main>
@@ -293,7 +385,11 @@ export default function LandingPage() {
             className="w-10 h-10 rounded-2xl flex items-center justify-center text-lg shrink-0"
             style={{ backgroundColor: selectedTheme?.wash ?? '#F3EEE4' }}
           >
-            {selectedTheme?.emoji}
+            {selectedTheme?.emoji ? (
+              selectedTheme.emoji
+            ) : (
+              <Camera size={18} className="text-zinc-800" />
+            )}
           </span>
           <div className="min-w-0 flex-1">
             <p className="text-[9px] font-bold uppercase tracking-[0.18em] text-zinc-400">
