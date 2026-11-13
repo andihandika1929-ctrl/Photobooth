@@ -65,6 +65,8 @@ import {
   getSlotsForCanvas,
   STANDARD_LAYOUT_DEFINITIONS,
   isBuiltinTheme,
+  LEGACY_SLUG_BY_UUID,
+  toValidUuid,
 } from '@/lib/frames';
 
 // ─── Types ───────────────────────────────────────────────
@@ -74,7 +76,7 @@ export type FramePreset =
   | 'film35mm'
   | 'retroTerracotta';
 
-export type LayoutType = 'strip3' | 'strip4' | 'grid2x2' | 'grid2x3';
+export type LayoutType = 'strip3' | 'strip4' | 'grid2x2' | 'grid2x3' | 'strip2' | 'polaroid';
 
 export type BirthdayPaletteId = 'burgundy' | 'espresso' | 'sage' | 'pink' | 'ivory' | 'charcoal';
 
@@ -98,22 +100,37 @@ interface CanvasEditorProps {
   frames: CapturedFrame[];
   allFrames?: CapturedFrame[];
   layout: LayoutType;
+  layout_type?: StandardLayoutType | string;
   initialPreset?: FramePreset;
   initialThemeId?: string;
+  initialFilter?: string;
+  initialStickers?: PlacedSticker[];
   onAutoUpload?: (blob: Blob, templateType: string, isSyncUpdate?: boolean) => void;
   onShare: (blob: Blob, templateType: string) => void;
   onReset: () => void;
 }
 
 // ─── Constants ────────────────────────────────────────────
-const FRAME_PRESETS: { id: FramePreset; label: string; emoji: string; desc: string; textConfig: TextConfig }[] = [
-  { id: 'birthdayCatPink', label: 'Birthday Cat Pink', emoji: '🐱', desc: 'Party cat, cake & 6-photo custom PNG', textConfig: PRESET_DEFAULT_TEXT_CONFIGS.birthdayCatPink },
-  { id: 'retroTerracotta', label: 'Retro Terracotta', emoji: '📎', desc: 'Scrapbook 4-cut with paperclips', textConfig: PRESET_DEFAULT_TEXT_CONFIGS.retroTerracotta },
-  { id: 'birthday', label: 'Editorial Birthday', emoji: '🎂', desc: 'Clean Korean strip, name & age at the bottom', textConfig: PRESET_DEFAULT_TEXT_CONFIGS.birthday },
-  { id: 'film35mm', label: '35mm Film Strip', emoji: '🎞', desc: 'Kodak sprockets & metadata', textConfig: PRESET_DEFAULT_TEXT_CONFIGS.film35mm },
+const FRAME_PRESETS: { id: FramePreset; label: string; desc: string; textConfig: TextConfig }[] = [
+  { id: 'birthdayCatPink', label: 'Birthday Cat Pink', desc: 'Party cat, cake & 6-photo custom PNG', textConfig: PRESET_DEFAULT_TEXT_CONFIGS.birthdayCatPink },
+  { id: 'retroTerracotta', label: 'Retro Terracotta', desc: 'Scrapbook 4-cut with paperclips', textConfig: PRESET_DEFAULT_TEXT_CONFIGS.retroTerracotta },
+  { id: 'birthday', label: 'Editorial Birthday', desc: 'Clean Korean strip, name & age at the bottom', textConfig: PRESET_DEFAULT_TEXT_CONFIGS.birthday },
+  { id: 'film35mm', label: '35mm Film Strip', desc: 'Kodak sprockets & metadata', textConfig: PRESET_DEFAULT_TEXT_CONFIGS.film35mm },
 ];
 
-export type PhotoFilterId = 'normal' | 'bw' | 'warm' | 'vintage' | 'cool';
+export type PhotoFilterId =
+  | 'none'
+  | 'mono'
+  | 'retro'
+  | 'film'
+  | 'cool'
+  | 'peach'
+  | 'automat'
+  | 'namsan'
+  | 'normal'
+  | 'bw'
+  | 'warm'
+  | 'vintage';
 
 export interface PhotoFilterPreset {
   id: PhotoFilterId;
@@ -125,6 +142,71 @@ export interface PhotoFilterPreset {
 }
 
 export const PHOTO_FILTER_PRESETS: PhotoFilterPreset[] = [
+  {
+    id: 'none',
+    label: 'Original',
+    tag: 'Original',
+    desc: 'True-to-life studio tone',
+    css: 'none',
+    previewBg: 'linear-gradient(135deg, #f8fafc, #cbd5e1)',
+  },
+  {
+    id: 'mono',
+    label: 'Mono',
+    tag: 'B&W',
+    desc: 'Studio grayscale & skin glow',
+    css: 'grayscale(1) contrast(1.06)',
+    previewBg: 'linear-gradient(135deg, #18181b, #71717a)',
+  },
+  {
+    id: 'retro',
+    label: 'Retro',
+    tag: 'Sepia',
+    desc: 'Warm nostalgic 70s tone',
+    css: 'sepia(0.5) contrast(1.05) saturate(1.4) hue-rotate(-10deg)',
+    previewBg: 'linear-gradient(135deg, #fef3c7, #f59e0b)',
+  },
+  {
+    id: 'film',
+    label: 'Film',
+    tag: '35mm',
+    desc: 'Classic soft film roll tone',
+    css: 'contrast(0.9) saturate(0.85) brightness(1.08) sepia(0.18)',
+    previewBg: 'linear-gradient(135deg, #fed7aa, #9a3412)',
+  },
+  {
+    id: 'cool',
+    label: 'Cool',
+    tag: 'Cyan',
+    desc: 'Crisp Korean studio cyan-blue tone',
+    css: 'saturate(1.15) contrast(1.05) hue-rotate(18deg) brightness(1.03)',
+    previewBg: 'linear-gradient(135deg, #e0f2fe, #0284c7)',
+  },
+  {
+    id: 'peach',
+    label: 'Peach',
+    tag: 'Pastel',
+    desc: 'Soft warm peachy tone',
+    css: 'saturate(1.25) contrast(0.98) brightness(1.07) sepia(0.28) hue-rotate(-12deg)',
+    previewBg: 'linear-gradient(135deg, #ffe4e6, #fb7185)',
+  },
+  {
+    id: 'automat',
+    label: 'Automat',
+    tag: 'Vintage 1930',
+    desc: 'Silvery-sepia Automat booth',
+    css: 'grayscale(0.5) sepia(0.45) contrast(1.14) brightness(1.02) saturate(0.9)',
+    previewBg: 'linear-gradient(135deg, #e7e5e4, #78716c)',
+  },
+  {
+    id: 'namsan',
+    label: 'Tower Glow',
+    tag: 'Namsan',
+    desc: 'Golden evening dinner light',
+    css: 'saturate(1.12) contrast(1.04) brightness(1.04) sepia(0.14) hue-rotate(-8deg)',
+    previewBg: 'linear-gradient(135deg, #fef08a, #ca8a04)',
+  },
+  // Compatibility Aliases
   {
     id: 'normal',
     label: 'Normal',
@@ -138,7 +220,7 @@ export const PHOTO_FILTER_PRESETS: PhotoFilterPreset[] = [
     label: 'B&W',
     tag: 'Monochrome',
     desc: 'Studio grayscale & skin glow',
-    css: 'grayscale(1) contrast(1.22) brightness(1.04)',
+    css: 'grayscale(1) contrast(1.06)',
     previewBg: 'linear-gradient(135deg, #18181b, #71717a)',
   },
   {
@@ -156,14 +238,6 @@ export const PHOTO_FILTER_PRESETS: PhotoFilterPreset[] = [
     desc: '90s disposable high-contrast film',
     css: 'contrast(1.22) brightness(0.96) saturate(0.85) sepia(0.18)',
     previewBg: 'linear-gradient(135deg, #fed7aa, #9a3412)',
-  },
-  {
-    id: 'cool',
-    label: 'Cool',
-    tag: 'Clean Korean',
-    desc: 'Crisp Korean studio cyan-blue tone',
-    css: 'brightness(1.05) contrast(1.03) saturate(1.08) hue-rotate(8deg)',
-    previewBg: 'linear-gradient(135deg, #e0f2fe, #0284c7)',
   },
 ];
 
@@ -377,10 +451,10 @@ function getNoisePattern(ctx: CanvasRenderingContext2D): CanvasPattern | null {
 // that holds the guest's name and age.
 const CAT_PINK_BASE_W = 1181;
 const CAT_PINK_FRAME_H = 1772;
-const CAT_PINK_EDGE_BLEED = 3;
-const CAT_PINK_CAPTION_H = 168;
-const CAT_PINK_ART_H = CAT_PINK_FRAME_H - CAT_PINK_EDGE_BLEED;
-const CAT_PINK_BASE_H = CAT_PINK_ART_H + CAT_PINK_CAPTION_H;
+const CAT_PINK_EDGE_BLEED = 0;
+const CAT_PINK_CAPTION_H = 0;
+const CAT_PINK_ART_H = 1772;
+const CAT_PINK_BASE_H = 1772;
 const CAT_PINK_BLUSH = '#FFE1EA';
 
 // Retro Terracotta Scrapbook — native PNG is 1333 × 2000 with 4 transparent cutouts
@@ -814,13 +888,182 @@ function drawGradedPhoto(
   ctx.restore();
 }
 
+/**
+ * Resolves layout_type strictly from the active theme.
+ * Fallback is ALWAYS 'strip-1x4', never hardcoded to 1x3!
+ */
+export function getThemeLayoutType(theme?: FrameTheme | null, fallbackProp?: string | null): StandardLayoutType {
+  const lower = (theme?.name || theme?.id || '').toLowerCase();
+  const themeId = theme?.id || '';
+  if (
+    themeId === '0ddf1377-236a-5690-8c68-9493ea9e3cc0' ||
+    lower.includes('birthdaycat') ||
+    lower.includes('catpink') ||
+    (lower.includes('birthday') && !lower.includes('cinema'))
+  ) {
+    return 'grid-2x3';
+  }
+  if (lower.includes('summer') || lower.includes('halloween') || lower.includes('film-35mm') || lower.includes('film35mm')) {
+    return 'strip-1x3';
+  }
+  if (lower.includes('retro') || lower.includes('terracotta')) {
+    return 'grid-2x2';
+  }
+  if (lower.includes('alo') || lower.includes('minimal')) {
+    return 'strip-1x4';
+  }
+  if (theme?.layout_type) return normalizeLayoutType(theme.layout_type);
+  if (theme?.layout) return normalizeLayoutType(theme.layout);
+  if (!theme && fallbackProp) return normalizeLayoutType(fallbackProp);
+  return 'strip-1x4';
+}
+
+export interface SlotRect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export interface LayoutConfig {
+  maxPhotos: number;
+  slots: SlotRect[];
+}
+
+export function getLayoutConfig(
+  layoutType: StandardLayoutType | string | undefined | null,
+  canvasWidth: number,
+  canvasHeight: number,
+  preset?: FramePreset | string | null,
+  themeIdOrName?: string | null
+): LayoutConfig {
+  const norm = normalizeLayoutType(layoutType);
+  const W = canvasWidth;
+  const H = canvasHeight;
+
+  if (norm === 'grid-2x3' || preset === 'birthdayCatPink') {
+    const scaleX = W / CAT_PINK_BASE_W;
+    const scaleY = H / CAT_PINK_BASE_H;
+    return {
+      maxPhotos: 6,
+      slots: [
+        // Left Column (top to bottom - 3 slots)
+        { x: Math.round(28 * scaleX), y: Math.round(38 * scaleY), w: Math.round(538 * scaleX), h: Math.round(458 * scaleY) },
+        { x: Math.round(28 * scaleX), y: Math.round(530 * scaleY), w: Math.round(538 * scaleX), h: Math.round(458 * scaleY) },
+        { x: Math.round(28 * scaleX), y: Math.round(1028 * scaleY), w: Math.round(538 * scaleX), h: Math.round(454 * scaleY) },
+        // Right Column (top to bottom - 3 slots)
+        { x: Math.round(626 * scaleX), y: Math.round(290 * scaleY), w: Math.round(530 * scaleX), h: Math.round(450 * scaleY) },
+        { x: Math.round(626 * scaleX), y: Math.round(780 * scaleY), w: Math.round(530 * scaleX), h: Math.round(460 * scaleY) },
+        { x: Math.round(626 * scaleX), y: Math.round(1274 * scaleY), w: Math.round(530 * scaleX), h: Math.round(460 * scaleY) },
+      ],
+    };
+  }
+
+  if (preset === 'retroTerracotta' && (norm === 'grid-2x2' || !layoutType)) {
+    const scaleX = W / RETRO_BASE_W;
+    const scaleY = H / RETRO_BASE_H;
+    return {
+      maxPhotos: 4,
+      slots: [
+        { x: Math.round(92 * scaleX), y: Math.round(220 * scaleY), w: Math.round(496 * scaleX), h: Math.round(704 * scaleY) },
+        { x: Math.round(746 * scaleX), y: Math.round(220 * scaleY), w: Math.round(496 * scaleX), h: Math.round(704 * scaleY) },
+        { x: Math.round(92 * scaleX), y: Math.round(996 * scaleY), w: Math.round(496 * scaleX), h: Math.round(700 * scaleY) },
+        { x: Math.round(746 * scaleX), y: Math.round(996 * scaleY), w: Math.round(496 * scaleX), h: Math.round(700 * scaleY) },
+      ],
+    };
+  }
+
+  switch (norm) {
+    case 'strip-1x3': {
+      const isSummer = themeIdOrName && themeIdOrName.toLowerCase().includes('summer');
+      if (isSummer) {
+        // Summer has cutouts at 0.0863..0.2963, 0.3510..0.5609, 0.6157..0.8256
+        const slotW = Math.round(W * 0.82);
+        const slotH = Math.round(H * 0.222);
+        const slotX = Math.round(W * 0.09);
+        return {
+          maxPhotos: 3,
+          slots: [
+            { x: slotX, y: Math.round(H * 0.080), w: slotW, h: slotH },
+            { x: slotX, y: Math.round(H * 0.345), w: slotW, h: slotH },
+            { x: slotX, y: Math.round(H * 0.610), w: slotW, h: slotH },
+          ],
+        };
+      }
+
+      // Default 1x3 strip (Halloween, 35mm Film, etc.)
+      const slotW = Math.round(W * 0.86);
+      const slotH = Math.round(H * 0.245);
+      const slotX = Math.round(W * 0.07);
+
+      return {
+        maxPhotos: 3,
+        slots: [
+          { x: slotX, y: Math.round(H * 0.100), w: slotW, h: slotH },
+          { x: slotX, y: Math.round(H * 0.368), w: slotW, h: slotH },
+          { x: slotX, y: Math.round(H * 0.632), w: slotW, h: slotH },
+        ],
+      };
+    }
+
+    case 'grid-2x2': {
+      const slotW = Math.round(W * 0.42);
+      const slotH = Math.round(H * 0.42);
+      const col0X = Math.round(W * 0.06);
+      const col1X = Math.round(W * 0.52);
+      const row0Y = Math.round(H * 0.06);
+      const row1Y = Math.round(H * 0.52);
+
+      return {
+        maxPhotos: 4,
+        slots: [
+          { x: col0X, y: row0Y, w: slotW, h: slotH },
+          { x: col1X, y: row0Y, w: slotW, h: slotH },
+          { x: col0X, y: row1Y, w: slotW, h: slotH },
+          { x: col1X, y: row1Y, w: slotW, h: slotH },
+        ],
+      };
+    }
+
+    case 'strip-1x4':
+    default: {
+      const slotW = Math.round(W * 0.86);
+      const slotH = Math.round(H * 0.180);
+      const slotX = Math.round(W * 0.07);
+
+      return {
+        maxPhotos: 4,
+        slots: [
+          { x: slotX, y: Math.round(H * 0.045), w: slotW, h: slotH },
+          { x: slotX, y: Math.round(H * 0.240), w: slotW, h: slotH },
+          { x: slotX, y: Math.round(H * 0.440), w: slotW, h: slotH },
+          { x: slotX, y: Math.round(H * 0.640), w: slotW, h: slotH },
+        ],
+      };
+    }
+  }
+}
+
+export function getLayoutSlots(
+  layoutType: StandardLayoutType | string | undefined | null,
+  w: number,
+  h: number,
+  preset?: FramePreset | string | null,
+  themeIdOrName?: string | null
+) {
+  return getLayoutConfig(layoutType, w, h, preset, themeIdOrName).slots;
+}
+
 // ─── Main Component ───────────────────────────────────────
 export default function CanvasEditor({
   frames,
   allFrames,
   layout,
+  layout_type: propLayoutType,
   initialPreset,
   initialThemeId,
+  initialFilter,
+  initialStickers,
   onAutoUpload,
   onShare,
   onReset,
@@ -923,7 +1166,12 @@ export default function CanvasEditor({
 
   const activeTheme = useMemo(() => {
     if (selectedThemeId) {
-      const match = availableThemes.find((t) => t.id === selectedThemeId);
+      const match = availableThemes.find(
+        (t) =>
+          t.id === selectedThemeId ||
+          LEGACY_SLUG_BY_UUID[t.id] === selectedThemeId ||
+          toValidUuid(selectedThemeId) === t.id
+      );
       if (match) return match;
     }
     return availableThemes.find((t) => t.preset === preset) ?? availableThemes[0];
@@ -932,18 +1180,48 @@ export default function CanvasEditor({
   const activeThemeRef = useRef<FrameTheme | null>(null);
   activeThemeRef.current = activeTheme;
 
+  const effectiveLayoutType: StandardLayoutType = getThemeLayoutType(activeTheme, propLayoutType);
+  const activeLayoutTypeRef = useRef<StandardLayoutType>(effectiveLayoutType);
+  activeLayoutTypeRef.current = effectiveLayoutType;
+
   const activeTextConfig = getPresetTextConfig(preset);
   const [location, setLocation] = useState('SEOUL STUDIO');
   const [nowPlaying, setNowPlaying] = useState('NewJeans - Hype Boy');
 
+  const activeFrame = activeTheme;
+  const isFrameTextEnabled = Boolean(activeTheme?.enable_text);
+  const initialFrameText = isFrameTextEnabled
+    ? (activeTheme?.default_text ?? activeTheme?.textConfig?.defaultText ?? initialConfig.defaultText)
+    : '';
+  const initialFrameColor = activeTheme?.text_color ?? activeTheme?.textConfig?.color ?? initialConfig.color ?? '#000000';
+
   // Multi-layer Independent Text Engine (Phase 5)
   const [selectedTextLayer, setSelectedTextLayer] = useState<'main' | 'sub'>('main');
-  const [customTextInput, setCustomTextInput] = useState(initialConfig.defaultText);
-  const [customText, setCustomText] = useState(initialConfig.defaultText);
+  const [customTextInput, setCustomTextInput] = useState(initialFrameText);
+  const [customText, setCustomText] = useState(initialFrameText);
   const [subTextInput, setSubTextInput] = useState(initialConfig.defaultSubText ?? '21');
   const [subText, setSubText] = useState(initialConfig.defaultSubText ?? '21');
-  const [customFont, setCustomFont] = useState(initialConfig.fontFamily);
-  const [customColor, setCustomColor] = useState(initialConfig.color);
+  const [customFont, setCustomFont] = useState(activeTheme?.textConfig?.fontFamily ?? initialConfig.fontFamily);
+  const [customColor, setCustomColor] = useState(initialFrameColor);
+
+  // Synchronize text when active theme changes
+  useEffect(() => {
+    if (activeTheme) {
+      if (activeTheme.enable_text) {
+        const txt = activeTheme.default_text ?? activeTheme.textConfig?.defaultText ?? '';
+        setCustomTextInput(txt);
+        setCustomText(txt);
+        if (activeTheme.text_color) {
+          setCustomColor(activeTheme.text_color);
+        } else if (activeTheme.textConfig?.color) {
+          setCustomColor(activeTheme.textConfig.color);
+        }
+      } else {
+        setCustomTextInput('');
+        setCustomText('');
+      }
+    }
+  }, [activeTheme?.id, activeTheme?.enable_text, activeTheme?.default_text, activeTheme?.text_color]);
 
   // Main Caption coordinates, scale & rotation
   const [textXPct, setTextXPct] = useState<number>(
@@ -967,14 +1245,29 @@ export default function CanvasEditor({
   const [subFontScale, setSubFontScale] = useState<number>(1.0);
   const [subRotation, setSubRotation] = useState<number>(0);
 
-  const [photoFilter, setPhotoFilter] = useState<PhotoFilterId>('normal');
+  const resolveInitialFilter = (raw?: string): PhotoFilterId => {
+    if (!raw) return 'none';
+    if (raw === 'normal') return 'none';
+    if (raw === 'bw') return 'mono';
+    if (raw === 'warm') return 'peach';
+    if (raw === 'vintage') return 'automat';
+    return (raw as PhotoFilterId);
+  };
+
+  const [photoFilter, setPhotoFilter] = useState<PhotoFilterId>(() => resolveInitialFilter(initialFilter));
+
+  useEffect(() => {
+    if (initialFilter) {
+      setPhotoFilter(resolveInitialFilter(initialFilter));
+    }
+  }, [initialFilter]);
   const [isTextActive, setIsTextActive] = useState<'main' | 'sub' | null>(null);
   const [previewHeight, setPreviewHeight] = useState<number>(0);
   const [birthdayTheme, setBirthdayTheme] = useState<'cream' | 'black'>('cream');
   const [birthdayPalette, setBirthdayPalette] = useState<BirthdayPaletteId>('ivory');
   const [renderProgress, setRenderProgress] = useState<number | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [placedStickers, setPlacedStickers] = useState<PlacedSticker[]>([]);
+  const [placedStickers, setPlacedStickers] = useState<PlacedSticker[]>(() => initialStickers || []);
   const [activeStickerID, setActiveStickerID] = useState<string | null>(null);
   const [stickerThumbnails, setStickerThumbnails] = useState<Record<string, string>>({});
 
@@ -1224,173 +1517,50 @@ export default function CanvasEditor({
     };
   }, []);
 
-  // Proportional Dimensions: Downscaled for preview, 2x Retina for export
+  // 1. STANDARISASI UKURAN KANVAS PER LAYOUT TYPE
+  // - 'strip-1x3': 600 x 1800 px (Rasio 1:3)
+  // - 'strip-1x4': 600 x 1800 px (Rasio 1:3)
+  // - 'grid-2x2' : 1200 x 1200 px (Rasio 1:1) / Retro Terracotta 1333 x 2000 px
+  // - 'grid-2x3' : 1181 x 1937 px (Birthday Cat Pink 6-shot)
   const getDimensions = useCallback(
-    (isExport: boolean = false) => {
+    (_isExport: boolean = false) => {
       const activeTh = activeThemeRef.current;
-      const isCustom = Boolean(activeTh && !isBuiltinTheme(activeTh.id));
+      const layoutType = getThemeLayoutType(activeTh, propLayoutType);
 
-      if (isCustom && activeTh) {
-        const norm = normalizeLayoutType(activeTh.layout_type || activeTh.layout || layout);
-        const def = STANDARD_LAYOUT_DEFINITIONS[norm] ?? STANDARD_LAYOUT_DEFINITIONS['strip-1x4'];
-        if (isExport) {
-          return { w: def.exportWidth, h: def.exportHeight, s: norm === 'grid-2x2' ? 1.2 : 2.31 };
-        } else {
-          return { w: def.previewWidth, h: def.previewHeight, s: norm === 'grid-2x2' ? 0.4 : 0.75 };
-        }
-      }
+      switch (layoutType) {
+        case 'grid-2x3':
+          return { w: CAT_PINK_BASE_W, h: CAT_PINK_BASE_H, s: 1 };
 
-      if (preset === 'birthdayCatPink') {
-        if (isExport) {
-          return { w: CAT_PINK_BASE_W, h: CAT_PINK_BASE_H, s: 1.0 };
-        }
-        const previewW = 390;
-        return {
-          w: previewW,
-          h: Math.round((previewW / CAT_PINK_BASE_W) * CAT_PINK_BASE_H),
-          s: previewW / CAT_PINK_BASE_W,
-        };
-      }
-      if (preset === 'retroTerracotta') {
-        if (isExport) {
-          return { w: RETRO_BASE_W, h: RETRO_BASE_H, s: 1.0 };
-        }
-        const previewW = 390;
-        return {
-          w: previewW,
-          h: Math.round((previewW / RETRO_BASE_W) * RETRO_BASE_H),
-          s: previewW / RETRO_BASE_W,
-        };
-      }
-      if (layout === 'grid2x3') {
-        // Other presets on the 6-shot layout keep the plain 1181 × 1772 canvas
-        if (isExport) return { w: CAT_PINK_BASE_W, h: CAT_PINK_FRAME_H, s: 1.0 };
-        return { w: 390, h: 585, s: 390 / CAT_PINK_BASE_W };
-      }
-      if (isExport) {
-        // High-DPI print-ready 300 DPI base: 1200×3600 strip4 (1:3), 1200×2800 strip3, 1200×1200 grid
-        if (layout === 'grid2x2') return { w: 1200, h: 1200, s: 1.2 };
-        if (layout === 'strip4') return { w: 1200, h: 3600, s: 2.31 };
-        return { w: 1200, h: 2800, s: 2.31 }; // strip3
-      } else {
-        // Downscaled interactive preview canvas — exactly 1:1 proportional with export
-        if (layout === 'grid2x2') return { w: 400, h: 400, s: 0.4 };
-        if (layout === 'strip4') return { w: 390, h: 1170, s: 0.75 };
-        return { w: 390, h: 910, s: 0.75 }; // strip3
+        case 'strip-1x3':
+          return { w: 600, h: 1800, s: 1 };
+
+        case 'grid-2x2':
+          if (activeTh?.preset === 'retroTerracotta') {
+            return { w: RETRO_BASE_W, h: RETRO_BASE_H, s: 1 };
+          }
+          return { w: 1200, h: 1200, s: 1 };
+
+        case 'strip-1x4':
+        default:
+          return { w: 600, h: 1800, s: 1 };
       }
     },
-    [layout, preset]
+    [propLayoutType]
   );
 
   // ─── Slot Coordinate Calculation & Interactive Photo Positioning ─────────
   const currentSlots = useMemo(() => {
-    const { w, h, s } = getDimensions(false);
-    const activeTh = activeTheme;
-    const isCustom = Boolean(activeTh && !isBuiltinTheme(activeTh.id));
-
-    if (isCustom && activeTh) {
-      const norm = normalizeLayoutType(activeTh.layout_type || activeTh.layout || layout);
-      const slots = getSlotsForCanvas(norm, w, h);
-      return slots.map((sl, idx) => ({
-        index: idx,
-        xPct: (sl.x / w) * 100,
-        yPct: (sl.y / h) * 100,
-        wPct: (sl.w / w) * 100,
-        hPct: (sl.h / h) * 100,
-      }));
-    }
-
-    if (preset === 'birthdayCatPink') {
-      const SLOTS_6 = [
-        { x: 30,  y: 38,   w: 536, h: 460 },
-        { x: 30,  y: 530,  w: 536, h: 464 },
-        { x: 30,  y: 1026, w: 536, h: 460 },
-        { x: 622, y: 290,  w: 540, h: 460 },
-        { x: 622, y: 782,  w: 540, h: 460 },
-        { x: 622, y: 1274, w: 540, h: 464 },
-      ];
-      return SLOTS_6.map((sl, idx) => ({
-        index: idx,
-        xPct: (sl.x / CAT_PINK_BASE_W) * 100,
-        yPct: (sl.y / CAT_PINK_BASE_H) * 100,
-        wPct: (sl.w / CAT_PINK_BASE_W) * 100,
-        hPct: (sl.h / CAT_PINK_BASE_H) * 100,
-      }));
-    }
-
-    if (preset === 'retroTerracotta') {
-      return RETRO_SLOTS.map((sl, idx) => ({
-        index: idx,
-        xPct: (sl.x / RETRO_BASE_W) * 100,
-        yPct: (sl.y / RETRO_BASE_H) * 100,
-        wPct: (sl.w / RETRO_BASE_W) * 100,
-        hPct: (sl.h / RETRO_BASE_H) * 100,
-      }));
-    }
-
-    if (preset === 'film35mm') {
-      const count = layout === 'strip4' ? 4 : layout === 'strip3' ? 3 : 4;
-      const spW = 40 * s;
-      const fX = spW + 6 * s;
-      const fW2 = w - spW * 2 - 12 * s;
-      const metaH = 30 * s;
-      const frameH = (h - 16 * s) / count;
-      return Array.from({ length: count }, (_, i) => {
-        const fy = 8 * s + i * frameH;
-        const photoH = frameH - metaH - 4 * s;
-        return {
-          index: i,
-          xPct: (fX / w) * 100,
-          yPct: ((fy + metaH) / h) * 100,
-          wPct: (fW2 / w) * 100,
-          hPct: (photoH / h) * 100,
-        };
-      });
-    }
-
-    // Default CinemaTicket / Editorial Birthday
-    const count = layout === 'strip4' ? 4 : layout === 'strip3' ? 3 : 4;
-    const pad = Math.round(w * 0.09);
-    const headerH = Math.round(h * (layout === 'grid2x2' ? 0.06 : 0.055));
-    const footerH = Math.round(h * (layout === 'grid2x2' ? 0.18 : 0.20));
-    const gap = Math.round(w * 0.035);
-
-    if (layout === 'grid2x2') {
-      const cw = (w - pad * 2 - gap) / 2;
-      const ch = (h - headerH - footerH - gap) / 2;
-      const pos = [
-        [0, 0],
-        [1, 0],
-        [0, 1],
-        [1, 1],
-      ];
-      return [0, 1, 2, 3].map((i) => {
-        const [c2, r] = pos[i];
-        const ix = pad + c2 * (cw + gap);
-        const iy = headerH + r * (ch + gap);
-        return {
-          index: i,
-          xPct: (ix / w) * 100,
-          yPct: (iy / h) * 100,
-          wPct: (cw / w) * 100,
-          hPct: (ch / h) * 100,
-        };
-      });
-    } else {
-      const iw = w - pad * 2;
-      const ih = (h - headerH - footerH - gap * (count - 1)) / count;
-      return Array.from({ length: count }, (_, i) => {
-        const iy = headerH + i * (ih + gap);
-        return {
-          index: i,
-          xPct: (pad / w) * 100,
-          yPct: (iy / h) * 100,
-          wPct: (iw / w) * 100,
-          hPct: (ih / h) * 100,
-        };
-      });
-    }
-  }, [getDimensions, layout, preset, activeTheme]);
+    const { w, h } = getDimensions(false);
+    const layoutType = getThemeLayoutType(activeTheme, propLayoutType);
+    const slots = getLayoutSlots(layoutType, w, h, activeTheme?.preset || preset, activeTheme?.name || activeTheme?.id);
+    return slots.map((sl, idx) => ({
+      index: idx,
+      xPct: (sl.x / w) * 100,
+      yPct: (sl.y / h) * 100,
+      wPct: (sl.w / w) * 100,
+      hPct: (sl.h / h) * 100,
+    }));
+  }, [getDimensions, activeTheme, propLayoutType, preset]);
 
   useEffect(() => {
     if (currentSlots.length > 0 && activeSlotIndex >= currentSlots.length) {
@@ -1455,7 +1625,7 @@ export default function CanvasEditor({
   //  PRESET RENDERERS (PROCEDURAL ACCENTS)
   // ═══════════════════════════════════════════════════════
 
-  // 1. Retro Cinema Ticket Birthday (OURstudio Korean Aesthetic) 🎟️
+  // 1. Retro Cinema Ticket Birthday (OURstudio Korean Aesthetic)
   const drawCinemaTicketBirthday = useCallback(
     async (
       ctx: CanvasRenderingContext2D,
@@ -1488,10 +1658,12 @@ export default function CanvasEditor({
       ctx.fillRect(0, 0, w, h);
 
       // ── Crisp Photo Frames ──
-      const count = layout === 'strip4' ? 4 : layout === 'strip3' ? 3 : 4;
+      const activeTh = activeThemeRef.current;
+      const activeLayoutType = getThemeLayoutType(activeTh, propLayoutType);
+      const isGrid = activeLayoutType === 'grid-2x2';
       const cornerRadius = 4 * s;
 
-      if (layout === 'grid2x2') {
+      if (isGrid) {
         const cw = (w - pad * 2 - gap) / 2;
         const ch = (h - headerH - footerH - gap) / 2;
         const pos = [
@@ -1511,7 +1683,24 @@ export default function CanvasEditor({
           roundRect(ctx, ix, iy, cw, ch, cornerRadius);
           ctx.stroke();
         }
+      } else if (activeLayoutType === 'strip-1x3') {
+        const slots1x3 = [
+          { y: h * 0.10, h: h * 0.24, x: w * 0.08, w: w * 0.84 },
+          { y: h * 0.36, h: h * 0.24, x: w * 0.08, w: w * 0.84 },
+          { y: h * 0.62, h: h * 0.24, x: w * 0.08, w: w * 0.84 },
+        ];
+        const photosToDraw = imgs.slice(0, 3);
+        for (let i = 0; i < slots1x3.length; i++) {
+          if (!photosToDraw[i]) continue;
+          const slot = slots1x3[i];
+          drawGradedPhoto(ctx, photosToDraw[i], slot.x, slot.y, slot.w, slot.h, cornerRadius, isExport, filterCss, photoAdjustmentsRef.current?.[i]);
+          ctx.strokeStyle = borderCol;
+          ctx.lineWidth = 1 * s;
+          roundRect(ctx, slot.x, slot.y, slot.w, slot.h, cornerRadius);
+          ctx.stroke();
+        }
       } else {
+        const count = 4;
         const iw = w - pad * 2;
         const ih = (h - headerH - footerH - gap * (count - 1)) / count;
         for (let i = 0; i < count; i++) {
@@ -1559,7 +1748,7 @@ export default function CanvasEditor({
     [layout]
   );
 
-  // 3. Birthday Cat Pink 6-Shot Custom PNG Frame Template 🐱🎂
+  // 3. Birthday Cat Pink 6-Shot Custom PNG Frame Template
   const drawBirthdayCatPink = useCallback(
     async (
       ctx: CanvasRenderingContext2D,
@@ -1734,7 +1923,11 @@ export default function CanvasEditor({
       const spW = 40 * s;
       const sH = 24 * s;
       const sGap = 28 * s;
-      const count = layout === 'strip4' ? 4 : layout === 'strip3' ? 3 : 4;
+      const activeTh = activeThemeRef.current;
+      const count =
+        activeTh?.layout_type === 'strip-1x3' || activeTh?.layout === 'strip3' || layout === 'strip3'
+          ? 3
+          : 4;
 
       ['left', 'right'].forEach((side) => {
         let sy = 28 * s;
@@ -1797,46 +1990,96 @@ export default function CanvasEditor({
     [layout]
   );
 
-  // 5. Standard Layout Preset + Frame Overlay Renderer (Dynamic Custom Frames)
+  // 5. Standard Layout Preset + Frame Overlay Renderer
   const drawStandardOverlayFrame = useCallback(
     async (
       ctx: CanvasRenderingContext2D,
       imgs: SlotImage[],
       w: number,
       h: number,
-      s: number,
+      _s: number,
       isExport: boolean = false,
       filterCss?: string,
     ) => {
       const theme = activeThemeRef.current;
       const bgColor = theme?.bg_color || theme?.paper || '#FDFBF7';
-      const layoutType = theme?.layout_type || (theme?.layout === 'strip3' ? 'strip-1x3' : theme?.layout === 'grid2x2' ? 'grid-2x2' : 'strip-1x4');
-      const slots = getSlotsForCanvas(layoutType, w, h);
+      const layoutType = getThemeLayoutType(theme, propLayoutType);
 
-      // 1. Background Paper Layer
-      ctx.save();
-      ctx.fillStyle = bgColor;
-      ctx.fillRect(0, 0, w, h);
-
-      // 2. Photo Slots Layer (placed strictly according to standard coordinates with bleed clipping)
-      for (let i = 0; i < slots.length; i++) {
-        if (!imgs[i]) continue;
-        const slot = slots[i];
-        drawGradedPhoto(
-          ctx,
-          imgs[i],
-          slot.x,
-          slot.y,
-          slot.w,
-          slot.h,
-          slot.radius,
-          isExport,
-          filterCss,
-          photoAdjustmentsRef.current?.[i],
-        );
+      // =======================================================
+      // 3. SISTEM LAYER & CLIPPING MASK (WAJIB BLEED)
+      // =======================================================
+      // 1. Render background canvas: pakai activeFrame.bg_color
+      ctx.clearRect(0, 0, w, h);
+      if (bgColor && bgColor !== 'transparent') {
+        ctx.save();
+        ctx.fillStyle = bgColor;
+        ctx.fillRect(0, 0, w, h);
+        ctx.restore();
       }
 
-      // 3. Top Layer: Transparent PNG Overlay Frame (bingkai dekorasi di atas foto)
+      // 2. Render foto di setiap slot:
+      // - Lebarkan slot sebesar 15px (bleed) ke tiap sisi agar tepi foto masuk ke bawah bingkai PNG.
+      // - Wajib pakai ctx.save(), ctx.beginPath(), ctx.rect(slot.x, slot.y, slot.w, slot.h), ctx.clip().
+      // - Gambar foto dengan drawImageCover.
+      // - ctx.restore().
+      const BLEED = 15;
+      const drawSlotPhoto = (
+        photo: SlotImage | undefined,
+        baseSlot: SlotRect,
+        idx: number
+      ) => {
+        if (!photo) return;
+        const slotX = baseSlot.x - BLEED;
+        const slotY = baseSlot.y - BLEED;
+        const slotW = baseSlot.w + BLEED * 2;
+        const slotH = baseSlot.h + BLEED * 2;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(slotX, slotY, slotW, slotH);
+        ctx.clip();
+
+        if (filterCss && filterCss !== 'none') {
+          ctx.filter = filterCss;
+        } else {
+          ctx.filter = 'none';
+        }
+
+        drawImageCover(
+          ctx,
+          photo,
+          slotX,
+          slotY,
+          slotW,
+          slotH,
+          photoAdjustmentsRef.current?.[idx],
+          1
+        );
+
+        ctx.filter = 'none';
+
+        if (isExport && photoFilterRef.current === 'vintage') {
+          const pattern = getNoisePattern(ctx);
+          if (pattern) {
+            ctx.fillStyle = pattern;
+            ctx.globalCompositeOperation = 'overlay';
+            ctx.fillRect(slotX, slotY, slotW, slotH);
+          }
+        }
+
+        ctx.restore();
+      };
+
+      // Render slot photos based on layoutConfig (supports grid-2x3 6-shots, strip-1x4, strip-1x3, grid-2x2)
+      const layoutConfig = getLayoutConfig(layoutType, w, h, theme?.preset, theme?.name || theme?.id);
+      const slots = layoutConfig.slots;
+      const photosToDraw = imgs.slice(0, layoutConfig.maxPhotos);
+      for (let i = 0; i < slots.length; i++) {
+        drawSlotPhoto(photosToDraw[i], slots[i], i);
+      }
+
+      // ── 3. Render Overlay Frame PNG ──
+      // Gambar overlay PNG paling atas menimpa canvas: ctx.drawImage(overlayImg, 0, 0, canvas.width, canvas.height)
       const overlayUrl = theme?.overlay_image_url || theme?.frame_image_url;
       if (overlayUrl) {
         try {
@@ -1848,10 +2091,8 @@ export default function CanvasEditor({
           console.warn('Could not draw overlay frame image:', err);
         }
       }
-
-      ctx.restore();
     },
-    []
+    [propLayoutType]
   );
 
   // ═══════════════════════════════════════════════════════
@@ -1961,10 +2202,37 @@ export default function CanvasEditor({
         const ctx = canvas.getContext('2d');
         if (!ctx) return null;
 
-        const effectiveFrames =
-          preset === 'birthdayCatPink' && allFrames && allFrames.length >= 6
-            ? allFrames
-            : frames;
+        const activeTh = activeThemeRef.current;
+        const currentLayoutType = getThemeLayoutType(activeTh, propLayoutType);
+
+        let neededPhotos = 4;
+        switch (currentLayoutType) {
+          case 'grid-2x3':
+            neededPhotos = 6;
+            break;
+          case 'strip-1x3':
+            neededPhotos = 3;
+            break;
+          case 'grid-2x2':
+          case 'strip-1x4':
+          default:
+            neededPhotos = 4;
+            break;
+        }
+
+        // Collect candidate frames: prioritize selected frames, then backfill with any unselected studio frames
+        let candidateFrames = [...frames];
+        if (allFrames && allFrames.length > candidateFrames.length) {
+          const unselected = allFrames.filter((af) => !candidateFrames.some((cf) => cf.dataUrl === af.dataUrl));
+          candidateFrames = [...candidateFrames, ...unselected];
+        }
+
+        if (candidateFrames.length === 0) candidateFrames = frames;
+
+        // If candidateFrames is still fewer than neededPhotos, cycle/repeat frames so NO slot is ever empty
+        const effectiveFrames = candidateFrames.length > 0
+          ? Array.from({ length: neededPhotos }, (_, i) => candidateFrames[i % candidateFrames.length])
+          : [];
 
         const imgs: SlotImage[] = liveOpts ? liveOpts.slots : await Promise.all(
           effectiveFrames.map(
@@ -1995,110 +2263,100 @@ export default function CanvasEditor({
           PHOTO_FILTER_PRESETS.find((p) => p.id === photoFilterRef.current) ?? PHOTO_FILTER_PRESETS[0];
         const activeFilterCss = activeFilterPreset.css;
 
-        const activeTh = activeThemeRef.current;
-        const isCustom = Boolean(activeTh && !isBuiltinTheme(activeTh.id));
+        // ── ATURAN RENDER MUTLAK (LAYER 1, LAYER 2, LAYER 3, LAYER 4) ──
+        // LAYER 1 (Background): Bersihkan kanvas dan isi dengan activeFrame.bg_color (atau transparan).
+        // LAYER 2 (Foto User): Render tiap foto di dalam slot koordinatnya dengan Clipping Path.
+        // LAYER 3 (Overlay Frame PNG): Gambar overlay di layer paling atas sebagai topeng penutup pinggiran foto.
+        await drawStandardOverlayFrame(ctx, imgs, w, h, s, isExport, activeFilterCss);
 
-        if (isCustom) {
-          // Custom Admin Frame: Use standard layout slots + overlay PNG
-          await drawStandardOverlayFrame(ctx, imgs, w, h, s, isExport, activeFilterCss);
-        } else {
-          switch (preset) {
-            case 'birthdayCatPink':
-              await drawBirthdayCatPink(ctx, imgs, w, h, s, isExport, activeFilterCss);
-              break;
-            case 'retroTerracotta':
-              await drawRetroTerracotta(ctx, imgs, w, h, s, isExport, activeFilterCss);
-              break;
-            case 'film35mm':
-              await drawFilm(ctx, imgs, w, h, s, isExport, activeFilterCss);
-              break;
-            case 'birthday':
-            default:
-              await drawCinemaTicketBirthday(ctx, imgs, w, h, s, isExport, activeFilterCss);
-              break;
-          }
-        }
-
+        // Composite placed stickers (if any)
         if (isExport || liveOpts) {
           await compositePlacedStickers(ctx, w, h);
+        }
 
-          // ── PRD v2 Phase 5: Multi-Layer Independent Draggable Text & Rotation Engine ──
-          const activeTextConfig = getPresetTextConfig(preset);
-          if (activeTextConfig.hasCustomText) {
-            const mainText = (customTextRef.current || '').trim();
-            const subRaw = (subTextRef.current || '').trim();
-            const subTextToDraw = formatSubText(subRaw);
+        // ── LAYER 4 (Teks Kustom):
+        // CEK KONDISI: Render teks HANYA JIKA activeFrame.enable_text === true.
+        // Jika activeFrame.enable_text === false: JANGAN render teks apapun
+        // (tanggal, watermark generator, atau caption bawaan kode) agar tidak menimpa grafis bawaan PNG frame.
+        if (activeTh?.enable_text === true && (isExport || liveOpts)) {
+          const defaultText = activeTh.default_text ?? '';
+          const mainText = (customTextRef.current ?? defaultText).trim();
+          const subRaw = (subTextRef.current || '').trim();
+          const subTextToDraw = formatSubText(subRaw);
 
-            if (mainText || subTextToDraw) {
-              const activeFont = customFontRef.current || activeTextConfig.fontFamily;
-              const activeColor = customColorRef.current || activeTextConfig.color;
-              const fontObj = getCuratedFont(activeFont);
+          if (mainText || subTextToDraw) {
+            const activeColor = customColorRef.current || activeTh.text_color || '#000000';
+            const activeFont = customFontRef.current || activeTh.textConfig?.fontFamily || 'Caveat';
+            const fontObj = getCuratedFont(activeFont);
 
-              // Pre-flight font glyph rasterization to prevent font flash or coordinate shifting
-              await ensureFontLoaded(fontObj.googleFontFamily);
+            // Pre-flight font glyph rasterization to prevent font flash or coordinate shifting
+            await ensureFontLoaded(fontObj.googleFontFamily);
 
-              const isHeavy = fontObj.category === 'bubble' || fontObj.category === 'chunky';
-              const isWhiteText = activeColor.toUpperCase() === '#FFFFFF';
-              const strokeColor = isWhiteText ? 'rgba(0, 0, 0, 0.4)' : '#FFFFFF';
+            const isHeavy = fontObj.category === 'bubble' || fontObj.category === 'chunky';
+            const isWhiteText = activeColor.toUpperCase() === '#FFFFFF';
+            const strokeColor = isWhiteText ? 'rgba(0, 0, 0, 0.4)' : '#FFFFFF';
 
-              // 1. Render Main Caption Layer (Independent Position & Rotation)
-              if (mainText) {
-                ctx.save();
-                const mainX = (textXPctRef.current / 100) * w;
-                const mainY = (textYPctRef.current / 100) * h;
-                const mainScale = fontScaleRef.current || 1.0;
-                const mainFontSize = Math.max(10, Math.round(activeTextConfig.fontSizeRatio * h * mainScale));
-                const mainStrokeWidth = Math.max(2, mainFontSize * 0.14);
-                const mainAngleRad = ((mainRotationRef.current || 0) * Math.PI) / 180;
+            const baseXPct = activeTh.textConfig?.xPercent ?? 50;
+            const baseYPct = activeTh.textConfig?.yPercent ?? 92;
+            const baseRatio = activeTh.textConfig?.fontSizeRatio ?? 0.035;
 
-                ctx.translate(mainX, mainY);
-                if (mainAngleRad !== 0) {
-                  ctx.rotate(mainAngleRad);
-                }
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.lineJoin = 'round';
-                ctx.miterLimit = 2;
+            // 1. Render Main Caption Layer (Independent Position & Rotation)
+            if (mainText) {
+              ctx.save();
+              const mainX = ((textXPctRef.current ?? baseXPct) / 100) * w;
+              const mainY = ((textYPctRef.current ?? baseYPct) / 100) * h;
+              const mainScale = fontScaleRef.current || 1.0;
+              const mainFontSize = Math.max(10, Math.round(baseRatio * h * mainScale));
+              const mainStrokeWidth = Math.max(2, mainFontSize * 0.14);
+              const mainAngleRad = ((mainRotationRef.current || 0) * Math.PI) / 180;
 
-                ctx.font = `${isHeavy ? '900' : '700'} ${mainFontSize}px ${fontObj.fontFamily}`;
-                ctx.strokeStyle = strokeColor;
-                ctx.lineWidth = mainStrokeWidth;
-                ctx.strokeText(mainText, 0, 0);
-
-                ctx.fillStyle = activeColor;
-                ctx.fillText(mainText, 0, 0);
-                ctx.restore();
+              ctx.translate(mainX, mainY);
+              if (mainAngleRad !== 0) {
+                ctx.rotate(mainAngleRad);
               }
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.lineJoin = 'round';
+              ctx.miterLimit = 2;
 
-              // 2. Render Sub-text / Age Layer (Independent Position & Rotation)
-              if (subTextToDraw) {
-                ctx.save();
-                const subX = (subTextXPctRef.current / 100) * w;
-                const subY = (subTextYPctRef.current / 100) * h;
-                const subScale = subFontScaleRef.current || 1.0;
-                const baseSubRatio = activeTextConfig.fontSizeRatio * 0.65;
-                const subFontSize = Math.max(10, Math.round(baseSubRatio * h * subScale));
-                const subStrokeWidth = Math.max(1.5, subFontSize * 0.12);
-                const subAngleRad = ((subRotationRef.current || 0) * Math.PI) / 180;
+              ctx.font = `${isHeavy ? '900' : '700'} ${mainFontSize}px ${fontObj.fontFamily}`;
+              ctx.strokeStyle = strokeColor;
+              ctx.lineWidth = mainStrokeWidth;
+              ctx.strokeText(mainText, 0, 0);
 
-                ctx.translate(subX, subY);
-                if (subAngleRad !== 0) {
-                  ctx.rotate(subAngleRad);
-                }
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.lineJoin = 'round';
-                ctx.miterLimit = 2;
+              ctx.fillStyle = activeColor;
+              ctx.fillText(mainText, 0, 0);
+              ctx.restore();
+            }
 
-                ctx.font = `${isHeavy ? '900' : '700'} ${subFontSize}px ${fontObj.fontFamily}`;
-                ctx.strokeStyle = strokeColor;
-                ctx.lineWidth = subStrokeWidth;
-                ctx.strokeText(subTextToDraw, 0, 0);
+            // 2. Render Sub-text / Age Layer (Independent Position & Rotation)
+            if (subTextToDraw) {
+              ctx.save();
+              const subX = ((subTextXPctRef.current ?? baseXPct) / 100) * w;
+              const subY = ((subTextYPctRef.current ?? 95) / 100) * h;
+              const subScale = subFontScaleRef.current || 1.0;
+              const baseSubRatio = baseRatio * 0.65;
+              const subFontSize = Math.max(10, Math.round(baseSubRatio * h * subScale));
+              const subStrokeWidth = Math.max(1.5, subFontSize * 0.12);
+              const subAngleRad = ((subRotationRef.current || 0) * Math.PI) / 180;
 
-                ctx.fillStyle = activeColor;
-                ctx.fillText(subTextToDraw, 0, 0);
-                ctx.restore();
+              ctx.translate(subX, subY);
+              if (subAngleRad !== 0) {
+                ctx.rotate(subAngleRad);
               }
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.lineJoin = 'round';
+              ctx.miterLimit = 2;
+
+              ctx.font = `${isHeavy ? '900' : '700'} ${subFontSize}px ${fontObj.fontFamily}`;
+              ctx.strokeStyle = strokeColor;
+              ctx.lineWidth = subStrokeWidth;
+              ctx.strokeText(subTextToDraw, 0, 0);
+
+              ctx.fillStyle = activeColor;
+              ctx.fillText(subTextToDraw, 0, 0);
+              ctx.restore();
             }
           }
         }
@@ -2129,6 +2387,7 @@ export default function CanvasEditor({
       drawFilm,
       drawStandardOverlayFrame,
       compositePlacedStickers,
+      layout,
     ]
   );
 
@@ -2175,7 +2434,7 @@ export default function CanvasEditor({
     if (frames.length > 0) {
       triggerRender(false);
     }
-  }, [frames, preset, layout, birthdayPalette, triggerRender]);
+  }, [frames, preset, layout, birthdayPalette, selectedThemeId, activeTheme, triggerRender]);
 
   // Quiet caption & text layer refresh: keep the existing preview on screen while we redraw
   useEffect(() => {
@@ -2346,19 +2605,32 @@ export default function CanvasEditor({
 
   const handleThemeSelect = (newTheme: FrameTheme) => {
     setSelectedThemeId(newTheme.id);
+    activeThemeRef.current = newTheme;
+    const resolvedLayout = getThemeLayoutType(newTheme, propLayoutType);
+    activeLayoutTypeRef.current = resolvedLayout;
     handlePresetSelect(newTheme.preset);
-    if (newTheme.textConfig) {
-      if (newTheme.textConfig.defaultText) {
-        setCustomTextInput(newTheme.textConfig.defaultText);
-        setCustomText(newTheme.textConfig.defaultText);
-      }
-      if (newTheme.textConfig.fontFamily) {
-        setCustomFont(newTheme.textConfig.fontFamily);
-      }
-      if (newTheme.ink) {
+
+    if (newTheme.enable_text) {
+      const defText = newTheme.default_text ?? newTheme.textConfig?.defaultText ?? '';
+      setCustomTextInput(defText);
+      setCustomText(defText);
+      if (newTheme.text_color) {
+        setCustomColor(newTheme.text_color);
+      } else if (newTheme.textConfig?.color) {
+        setCustomColor(newTheme.textConfig.color);
+      } else if (newTheme.ink) {
         setCustomColor(newTheme.ink);
       }
+      if (newTheme.textConfig?.fontFamily) {
+        setCustomFont(newTheme.textConfig.fontFamily);
+      }
+    } else {
+      setCustomTextInput('');
+      setCustomText('');
     }
+
+    setActiveSlotIndex(0);
+    void triggerRenderRef.current?.(false);
   };
 
   // ─── Phase 0 Fix: Decoupled Local Download Handler ───────────────────────
@@ -3057,9 +3329,14 @@ export default function CanvasEditor({
               </span>
             </div>
 
-            <div className="grid grid-cols-5 gap-1.5 sm:gap-2">
-              {PHOTO_FILTER_PRESETS.map((f) => {
-                const isSelected = photoFilter === f.id;
+            <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
+              {PHOTO_FILTER_PRESETS.slice(0, 8).map((f) => {
+                const isSelected =
+                  photoFilter === f.id ||
+                  (photoFilter === 'normal' && f.id === 'none') ||
+                  (photoFilter === 'bw' && f.id === 'mono') ||
+                  (photoFilter === 'warm' && f.id === 'peach') ||
+                  (photoFilter === 'vintage' && f.id === 'automat');
                 return (
                   <button
                     key={f.id}
@@ -3245,7 +3522,7 @@ export default function CanvasEditor({
           </div>
 
           {/* ── PRD v2 Phase 5: Percentage-Based Text Config & Curated Font Layer ── */}
-          {activeTextConfig.hasCustomText && (
+          {Boolean(activeFrame?.enable_text) && (
             <form
               onSubmit={(e) => e.preventDefault()}
               className="p-4 bg-gradient-to-br from-amber-50/70 via-white to-pink-50/70 rounded-xl border border-amber-200/90 shadow-sm flex flex-col gap-3.5"
@@ -3264,20 +3541,22 @@ export default function CanvasEditor({
                   <button
                     type="button"
                     onClick={() => {
-                      const defaultSubY =
-                        activeTextConfig.subYPercent ?? Math.min(97, Number((activeTextConfig.yPercent + 3.2).toFixed(1)));
-                      setCustomTextInput(activeTextConfig.defaultText);
-                      setCustomText(activeTextConfig.defaultText);
-                      setSubTextInput(activeTextConfig.defaultSubText ?? '');
-                      setSubText(activeTextConfig.defaultSubText ?? '');
-                      setCustomFont(activeTextConfig.fontFamily);
-                      setCustomColor(activeTextConfig.color);
-                      setTextXPct(activeTextConfig.xPercent);
-                      setTextYPct(activeTextConfig.yPercent);
+                      const defSubY =
+                        activeFrame?.textConfig?.subYPercent ?? Math.min(97, Number(((activeFrame?.textConfig?.yPercent ?? 92) + 3.2).toFixed(1)));
+                      const defText = activeFrame?.default_text ?? activeFrame?.textConfig?.defaultText ?? '';
+                      const defColor = activeFrame?.text_color ?? activeFrame?.textConfig?.color ?? '#000000';
+                      setCustomTextInput(defText);
+                      setCustomText(defText);
+                      setSubTextInput('');
+                      setSubText('');
+                      setCustomFont(activeFrame?.textConfig?.fontFamily ?? 'Caveat');
+                      setCustomColor(defColor);
+                      setTextXPct(activeFrame?.textConfig?.xPercent ?? 50);
+                      setTextYPct(activeFrame?.textConfig?.yPercent ?? 92);
                       setFontScale(1.0);
                       setMainRotation(0);
-                      setSubTextXPct(activeTextConfig.xPercent);
-                      setSubTextYPct(defaultSubY);
+                      setSubTextXPct(activeFrame?.textConfig?.xPercent ?? 50);
+                      setSubTextYPct(defSubY);
                       setSubFontScale(1.0);
                       setSubRotation(0);
                       setIsTextActive(null);
@@ -4156,7 +4435,11 @@ export default function CanvasEditor({
       {previewUrl && (
         <div className="flex flex-col gap-3 items-center w-full">
           {/* Quick Toolbar Bar with Stickers Button */}
-          <div className="flex items-center justify-between w-full max-w-[340px] sm:max-w-[400px] px-1">
+          <div className={`flex items-center justify-between w-full ${
+            effectiveLayoutType === 'grid-2x3' || effectiveLayoutType === 'grid-2x2'
+              ? 'max-w-[440px] sm:max-w-[500px]'
+              : 'max-w-[340px] sm:max-w-[400px]'
+          } px-1`}>
             <div className="flex items-center gap-1.5">
               <span className="text-[11px] font-bold text-zinc-400 uppercase tracking-widest font-mono">
                 Strip Canvas
@@ -4182,7 +4465,11 @@ export default function CanvasEditor({
 
           <div
             ref={previewWrapRef}
-            className="relative w-full max-w-[340px] sm:max-w-[400px] border border-zinc-300/80 rounded-lg shadow-xl overflow-hidden bg-white select-none transition-shadow hover:shadow-2xl touch-none"
+            className={`relative w-full ${
+              effectiveLayoutType === 'grid-2x3' || effectiveLayoutType === 'grid-2x2'
+                ? 'max-w-[440px] sm:max-w-[500px]'
+                : 'max-w-[340px] sm:max-w-[400px]'
+            } border border-zinc-300/80 rounded-lg shadow-xl overflow-hidden bg-white select-none transition-shadow hover:shadow-2xl touch-none`}
             style={{ touchAction: 'none' }}
             onClick={() => {
               setActiveStickerID(null);
@@ -4325,19 +4612,20 @@ export default function CanvasEditor({
             })}
 
             {/* 1. Draggable & Rotatable Main Caption Layer */}
-            {activeTextConfig.hasCustomText &&
+            {Boolean(activeFrame?.enable_text) &&
               (customTextInput.trim() || customText.trim()) && (() => {
                 const textStr = customTextInput.trim() || customText.trim();
-                const curFont = getCuratedFont(customFont || activeTextConfig.fontFamily);
+                const curFont = getCuratedFont(customFont || activeFrame?.textConfig?.fontFamily || 'Caveat');
                 const isHeavy = curFont.category === 'bubble' || curFont.category === 'chunky';
                 const activeScale = fontScale || 1.0;
                 const baseH = previewHeight > 0 ? previewHeight : layout === 'grid2x2' ? 380 : 850;
+                const baseRatio = activeFrame?.textConfig?.fontSizeRatio ?? 0.035;
                 const previewFontSize = Math.max(
                   10,
-                  Math.round(baseH * activeTextConfig.fontSizeRatio * activeScale)
+                  Math.round(baseH * baseRatio * activeScale)
                 );
-                const isWhite =
-                  (customColor || activeTextConfig.color).toUpperCase() === '#FFFFFF';
+                const activeColor = customColor || activeFrame?.text_color || '#000000';
+                const isWhite = activeColor.toUpperCase() === '#FFFFFF';
                 const strokeColor = isWhite ? 'rgba(0, 0, 0, 0.45)' : '#FFFFFF';
                 const strokeWidth = Math.max(1.5, Math.round(previewFontSize * 0.12));
                 const isSelected = isTextActive === 'main';
@@ -4372,7 +4660,7 @@ export default function CanvasEditor({
                       style={{
                         fontFamily: curFont.fontFamily,
                         fontWeight: isHeavy ? 900 : 700,
-                        color: customColor || activeTextConfig.color,
+                        color: activeColor,
                         fontSize: `${previewFontSize}px`,
                         lineHeight: 1.15,
                         WebkitTextStroke: `${strokeWidth}px ${strokeColor}`,
@@ -4387,21 +4675,21 @@ export default function CanvasEditor({
               })()}
 
             {/* 2. Draggable & Rotatable Sub-text / Age Layer */}
-            {activeTextConfig.hasCustomText &&
+            {Boolean(activeFrame?.enable_text) &&
               (subTextInput.trim() || subText.trim()) && (() => {
                 const subRaw = subTextInput.trim() || subText.trim();
                 const subStr = formatSubText(subRaw);
-                const curFont = getCuratedFont(customFont || activeTextConfig.fontFamily);
+                const curFont = getCuratedFont(customFont || activeFrame?.textConfig?.fontFamily || 'Caveat');
                 const isHeavy = curFont.category === 'bubble' || curFont.category === 'chunky';
                 const activeScale = subFontScale || 1.0;
                 const baseH = previewHeight > 0 ? previewHeight : layout === 'grid2x2' ? 380 : 850;
-                const baseSubRatio = activeTextConfig.fontSizeRatio * 0.65;
+                const baseSubRatio = (activeFrame?.textConfig?.fontSizeRatio ?? 0.035) * 0.65;
                 const previewFontSize = Math.max(
                   10,
                   Math.round(baseH * baseSubRatio * activeScale)
                 );
-                const isWhite =
-                  (customColor || activeTextConfig.color).toUpperCase() === '#FFFFFF';
+                const activeColor = customColor || activeFrame?.text_color || '#000000';
+                const isWhite = activeColor.toUpperCase() === '#FFFFFF';
                 const strokeColor = isWhite ? 'rgba(0, 0, 0, 0.45)' : '#FFFFFF';
                 const strokeWidth = Math.max(1.2, Math.round(previewFontSize * 0.12));
                 const isSelected = isTextActive === 'sub';
@@ -4436,7 +4724,7 @@ export default function CanvasEditor({
                       style={{
                         fontFamily: curFont.fontFamily,
                         fontWeight: isHeavy ? 900 : 700,
-                        color: customColor || activeTextConfig.color,
+                        color: activeColor,
                         fontSize: `${previewFontSize}px`,
                         lineHeight: 1.15,
                         WebkitTextStroke: `${strokeWidth}px ${strokeColor}`,

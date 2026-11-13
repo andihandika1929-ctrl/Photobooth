@@ -66,6 +66,13 @@ const STANDARD_LAYOUT_OPTIONS: {
     shots: 4,
     icon: <Grid className="w-5 h-5 text-zinc-700" />,
   },
+  {
+    id: 'grid-2x3',
+    label: 'grid-2x3',
+    sublabel: '6 foto (3 kiri & 3 kanan - Birthday Pink / Collage)',
+    shots: 6,
+    icon: <Grid className="w-5 h-5 text-zinc-700" />,
+  },
 ];
 
 const CATEGORIES = ['Standard', 'Birthday', 'Seasonal', 'Wedding'];
@@ -97,6 +104,9 @@ export function FrameFormModal({
   const [bgColor, setBgColor] = React.useState('#FDFBF7');
   const [overlayImageUrl, setOverlayImageUrl] = React.useState('');
   const [isActive, setIsActive] = React.useState(true);
+  const [enableText, setEnableText] = React.useState(false);
+  const [defaultText, setDefaultText] = React.useState('');
+  const [textColor, setTextColor] = React.useState('#000000');
 
   const [isUploading, setIsUploading] = React.useState(false);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
@@ -113,6 +123,9 @@ export function FrameFormModal({
       setBgColor(initialFrame.bg_color || initialFrame.paper || '#FDFBF7');
       setOverlayImageUrl(initialFrame.overlay_image_url || initialFrame.frame_image_url || '');
       setIsActive(initialFrame.is_active !== false);
+      setEnableText(Boolean(initialFrame.enable_text));
+      setDefaultText(initialFrame.default_text ?? initialFrame.textConfig?.defaultText ?? '');
+      setTextColor(initialFrame.text_color ?? initialFrame.textConfig?.color ?? '#000000');
     } else {
       setName('');
       setCategory('Seasonal');
@@ -120,6 +133,9 @@ export function FrameFormModal({
       setBgColor('#FDFBF7');
       setOverlayImageUrl('');
       setIsActive(true);
+      setEnableText(false);
+      setDefaultText('');
+      setTextColor('#000000');
     }
     setErrorMsg('');
   }, [initialFrame, isOpen]);
@@ -160,11 +176,7 @@ export function FrameFormModal({
 
     const id = isEdit && initialFrame
       ? initialFrame.id
-      : name
-          .toLowerCase()
-          .trim()
-          .replace(/[^a-z0-9]+/g, '-')
-          .replace(/^-|-$/g, '') || `frame-${Date.now()}`;
+      : (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `frame-${Date.now()}`);
 
     const newTheme: FrameTheme = {
       id,
@@ -177,6 +189,9 @@ export function FrameFormModal({
       bg_color: bgColor,
       paper: bgColor,
       is_active: isActive,
+      enable_text: enableText,
+      default_text: enableText ? defaultText.trim() : '',
+      text_color: enableText ? (textColor || '#000000') : '#000000',
       preset: layoutType === 'grid-2x2' ? 'retroTerracotta' : layoutType === 'strip-1x3' ? 'film35mm' : 'birthday',
       tagline: name.trim(),
       description: `${name.trim()} customized photobooth frame layout.`,
@@ -432,7 +447,64 @@ export function FrameFormModal({
             </div>
           </div>
 
-          {/* ── 5. Active Status ── */}
+          {/* ── 5. Text Controls (enable_text, default_text, text_color) ── */}
+          <div className="space-y-4 pt-2 border-t border-zinc-100">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold text-zinc-800">Aktifkan Teks di Kanvas</p>
+                <p className="text-[11px] text-zinc-500">
+                  Tampilkan teks kustom/default pada hasil kanvas photobooth
+                </p>
+              </div>
+
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={enableText}
+                  onChange={(e) => setEnableText(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-zinc-200 peer-focus:outline-hidden rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-zinc-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-zinc-900"></div>
+              </label>
+            </div>
+
+            {enableText && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 p-3.5 bg-zinc-50/80 rounded-xl border border-zinc-200 animate-in fade-in duration-150">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-zinc-700">
+                    Default Text
+                  </label>
+                  <Input
+                    placeholder="HAPPY BIRTHDAY"
+                    value={defaultText}
+                    onChange={(e) => setDefaultText(e.target.value)}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-zinc-700">
+                    Warna Teks
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={textColor}
+                      onChange={(e) => setTextColor(e.target.value)}
+                      className="w-9 h-9 p-0.5 rounded-lg border border-zinc-300 cursor-pointer shrink-0"
+                    />
+                    <Input
+                      value={textColor}
+                      onChange={(e) => setTextColor(e.target.value)}
+                      placeholder="#000000"
+                      className="font-mono uppercase text-xs"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── 6. Active Status ── */}
           <div className="pt-2 border-t border-zinc-100 flex items-center justify-between">
             <div>
               <p className="text-xs font-semibold text-zinc-800">Active in Booth</p>
@@ -462,7 +534,7 @@ export function FrameFormModal({
               Cancel
             </Button>
             <Button type="submit" disabled={isSubmitting || isUploading}>
-              {isSubmitting ? 'Saving Frame...' : isEdit ? 'Update Frame' : 'Save Frame'}
+              {isSubmitting ? 'Saving Frame...' : isEdit ? 'Update Frame' : 'Create Frame'}
             </Button>
           </DialogFooter>
         </form>

@@ -6,13 +6,15 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "tunnel": "cloudflared tunnel --url http://localhost:3000"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.45.0",
     "canvas-confetti": "^1.9.4",
     "lucide-react": "^0.400.0",
+    "mp4-muxer": "^5.2.2",
     "next": "14.2.35",
     "qrcode": "^1.5.3",
     "react": "^18",
@@ -27,6 +29,7 @@
     "@types/react-dom": "^18",
     "@types/uuid": "^10.0.0",
     "autoprefixer": "^10.0.1",
+    "cloudflared": "^0.7.3",
     "eslint": "^8",
     "eslint-config-next": "14.2.35",
     "postcss": "^8",

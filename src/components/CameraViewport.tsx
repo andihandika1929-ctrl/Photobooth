@@ -93,12 +93,12 @@ export function getFilterCss(filterId?: FilterName): string {
 }
 
 export const POSE_GUIDES = [
-  'Pose 1: Sweet Smile 😊',
-  'Pose 2: Cheek Peace Sign ✌️',
-  'Pose 3: Cheek Heart 🫶',
-  'Pose 4: Candid Laugh 😂',
-  'Pose 5: Wink & Point 😉👉',
-  'Pose 6: Free Pose / Silly Face 🤪',
+  'Pose 1: Sweet Smile',
+  'Pose 2: Cheek Peace Sign',
+  'Pose 3: Cheek Heart',
+  'Pose 4: Candid Laugh',
+  'Pose 5: Wink & Point',
+  'Pose 6: Free Pose / Fun Face',
 ];
 
 export function getOptimalVideoMimeType(): string {
@@ -504,8 +504,8 @@ export default function CameraViewport({
                 </div>
                 {countdown === 1 && (
                   <span className="mt-3 px-3 py-1 rounded-full bg-white/95 text-zinc-900 font-bold text-[11px] uppercase tracking-widest shadow-xl flex items-center gap-1.5 animate-bounce border border-amber-300">
-                    <span>📸</span>
-                    <span>SMILE ♡</span>
+                    <Camera size={13} className="text-zinc-800" />
+                    <span>SMILE</span>
                   </span>
                 )}
               </div>
@@ -613,7 +613,7 @@ export default function CameraViewport({
       {poseState === 'idle' && isCapturing && countdown === null && (
         <div className="flex items-center justify-between px-3.5 py-2.5 bg-white/10 border border-white/15 rounded-xl backdrop-blur-sm">
           <div className="flex items-center gap-2">
-            <span className="text-sm">✨</span>
+            <Sparkles size={14} className="text-amber-300" />
             <div>
               <p className="text-[10px] font-mono font-bold uppercase tracking-wider text-amber-300">
                 Pose Idea ({capturedCount + 1}/{totalFrames})
@@ -665,7 +665,7 @@ export default function CameraViewport({
         <div className="w-full flex flex-col gap-2.5 p-3.5 bg-zinc-900/90 rounded-2xl border border-amber-500/30 backdrop-blur-md shadow-xl">
           <div className="flex items-center justify-between">
             <p className="text-white/90 text-xs font-bold uppercase tracking-widest flex items-center gap-1.5">
-              <span>📸</span>
+              <Camera size={14} className="text-amber-400" />
               <span>Photo {capturedCount}/{totalFrames} Captured!</span>
             </p>
             <span className="text-[10px] font-mono text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded-full border border-amber-400/20">

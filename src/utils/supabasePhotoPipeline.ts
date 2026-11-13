@@ -136,7 +136,12 @@ export async function savePhotoToSupabase(
         console.warn('[HaloLuna] photos update warning:', updateErr.message);
         throw updateErr;
       }
-      if (updated) recordId = (updated as { id: string }).id;
+      if (updated) {
+        recordId = (updated as { id: string }).id;
+      } else {
+        // RLS prevents anon update, force fallback to /api/upload with service role
+        throw new Error('Client-side update returned null (RLS restricted)');
+      }
     } else {
       const { data: inserted, error: insertErr } = await supabase
         .from('photos')

@@ -1,5 +1,22 @@
 import type { FramePreset, LayoutType } from '@/components/CanvasEditor';
 export type { FramePreset, LayoutType };
+import { v5 as uuidv5, validate as validateUuid } from 'uuid';
+
+export const UUID_NAMESPACE = '6ba7b810-9dad-11d1-80b4-00c04fd430c8';
+
+export function toValidUuid(id: string): string {
+  if (validateUuid(id)) return id;
+  return uuidv5(id, UUID_NAMESPACE);
+}
+
+export const LEGACY_SLUG_BY_UUID: Record<string, string> = {
+  '3b309e61-9f62-5ec6-a5af-67b549a55bd8': 'retro-terracotta',
+  '0ddf1377-236a-5690-8c68-9493ea9e3cc0': 'birthday',
+  '411845a3-919e-58be-89c0-a62c597fbda7': 'film-35mm',
+  'a66a8aa5-0b8e-57e3-89b7-a9a3ee8ff3a8': 'minimal-warm',
+  'ffb80226-fc38-512c-a70b-f2398132a385': 'summer',
+  '1a453d42-0d28-5357-a86b-ccf9ecd74cb9': 'alo',
+};
 
 /**
  * Relative percentage-based text configuration according to PRD v2 Phase 5 (Task 5.1).
@@ -79,7 +96,7 @@ export function getPresetTextConfig(preset: FramePreset): TextConfig {
   );
 }
 
-export type StandardLayoutType = 'strip-1x3' | 'strip-1x4' | 'grid-2x2';
+export type StandardLayoutType = 'strip-1x3' | 'strip-1x4' | 'grid-2x2' | 'grid-2x3';
 
 export interface SlotCoord {
   xPct: number; // 0..1 relative to canvas width
@@ -102,19 +119,39 @@ export interface StandardLayoutDefinition {
 }
 
 export const STANDARD_LAYOUT_DEFINITIONS: Record<StandardLayoutType, StandardLayoutDefinition> = {
+  'grid-2x3': {
+    id: 'grid-2x3',
+    name: '2x3 Grid',
+    description: '6 photos (3 left, 3 right) birthday & collage format',
+    shots: 6,
+    exportWidth: 1181,
+    exportHeight: 1772,
+    previewWidth: 590,
+    previewHeight: 886,
+    slots: [
+      // 3 slots left column
+      { xPct: 0.024, yPct: 0.021, wPct: 0.455, hPct: 0.260, radiusPct: 0.01 },
+      { xPct: 0.024, yPct: 0.298, wPct: 0.455, hPct: 0.260, radiusPct: 0.01 },
+      { xPct: 0.024, yPct: 0.580, wPct: 0.455, hPct: 0.260, radiusPct: 0.01 },
+      // 3 slots right column
+      { xPct: 0.530, yPct: 0.163, wPct: 0.450, hPct: 0.260, radiusPct: 0.01 },
+      { xPct: 0.530, yPct: 0.439, wPct: 0.450, hPct: 0.260, radiusPct: 0.01 },
+      { xPct: 0.530, yPct: 0.718, wPct: 0.450, hPct: 0.260, radiusPct: 0.01 },
+    ],
+  },
   'strip-1x3': {
     id: 'strip-1x3',
     name: '1x3 Strip',
     description: '3 vertical photos classic photostrip format',
     shots: 3,
-    exportWidth: 1200,
-    exportHeight: 2800,
-    previewWidth: 390,
-    previewHeight: 910,
+    exportWidth: 600,
+    exportHeight: 1800,
+    previewWidth: 600,
+    previewHeight: 1800,
     slots: [
-      { xPct: 0.08, yPct: 0.05, wPct: 0.84, hPct: 0.24, radiusPct: 0.01 },
-      { xPct: 0.08, yPct: 0.315, wPct: 0.84, hPct: 0.24, radiusPct: 0.01 },
-      { xPct: 0.08, yPct: 0.58, wPct: 0.84, hPct: 0.24, radiusPct: 0.01 },
+      { xPct: 0.08, yPct: 0.085, wPct: 0.84, hPct: 0.230, radiusPct: 0.01 },
+      { xPct: 0.08, yPct: 0.350, wPct: 0.84, hPct: 0.230, radiusPct: 0.01 },
+      { xPct: 0.08, yPct: 0.615, wPct: 0.84, hPct: 0.230, radiusPct: 0.01 },
     ],
   },
   'strip-1x4': {
@@ -122,15 +159,15 @@ export const STANDARD_LAYOUT_DEFINITIONS: Record<StandardLayoutType, StandardLay
     name: '1x4 Strip',
     description: '4 vertical photos Korean aesthetic photostrip',
     shots: 4,
-    exportWidth: 1200,
-    exportHeight: 3600,
-    previewWidth: 390,
-    previewHeight: 1170,
+    exportWidth: 600,
+    exportHeight: 1800,
+    previewWidth: 600,
+    previewHeight: 1800,
     slots: [
-      { xPct: 0.08, yPct: 0.045, wPct: 0.84, hPct: 0.186, radiusPct: 0.01 },
-      { xPct: 0.08, yPct: 0.251, wPct: 0.84, hPct: 0.186, radiusPct: 0.01 },
-      { xPct: 0.08, yPct: 0.457, wPct: 0.84, hPct: 0.186, radiusPct: 0.01 },
-      { xPct: 0.08, yPct: 0.663, wPct: 0.84, hPct: 0.186, radiusPct: 0.01 },
+      { xPct: 0.07, yPct: 0.045, wPct: 0.86, hPct: 0.180, radiusPct: 0.01 },
+      { xPct: 0.07, yPct: 0.240, wPct: 0.86, hPct: 0.180, radiusPct: 0.01 },
+      { xPct: 0.07, yPct: 0.440, wPct: 0.86, hPct: 0.180, radiusPct: 0.01 },
+      { xPct: 0.07, yPct: 0.640, wPct: 0.86, hPct: 0.180, radiusPct: 0.01 },
     ],
   },
   'grid-2x2': {
@@ -140,13 +177,13 @@ export const STANDARD_LAYOUT_DEFINITIONS: Record<StandardLayoutType, StandardLay
     shots: 4,
     exportWidth: 1200,
     exportHeight: 1200,
-    previewWidth: 400,
-    previewHeight: 400,
+    previewWidth: 1200,
+    previewHeight: 1200,
     slots: [
-      { xPct: 0.065, yPct: 0.06, wPct: 0.42, hPct: 0.385, radiusPct: 0.01 },
-      { xPct: 0.515, yPct: 0.06, wPct: 0.42, hPct: 0.385, radiusPct: 0.01 },
-      { xPct: 0.065, yPct: 0.475, wPct: 0.42, hPct: 0.385, radiusPct: 0.01 },
-      { xPct: 0.515, yPct: 0.475, wPct: 0.42, hPct: 0.385, radiusPct: 0.01 },
+      { xPct: 0.06, yPct: 0.06, wPct: 0.42, hPct: 0.42, radiusPct: 0.01 },
+      { xPct: 0.52, yPct: 0.06, wPct: 0.42, hPct: 0.42, radiusPct: 0.01 },
+      { xPct: 0.06, yPct: 0.52, wPct: 0.42, hPct: 0.42, radiusPct: 0.01 },
+      { xPct: 0.52, yPct: 0.52, wPct: 0.42, hPct: 0.42, radiusPct: 0.01 },
     ],
   },
 };
@@ -154,6 +191,7 @@ export const STANDARD_LAYOUT_DEFINITIONS: Record<StandardLayoutType, StandardLay
 /** Normalize any incoming layout string to standard layout type */
 export function normalizeLayoutType(raw?: string | null): StandardLayoutType {
   if (!raw) return 'strip-1x4';
+  if (raw === 'grid-2x3' || raw === 'grid2x3' || raw === '2x3' || raw === '6shot') return 'grid-2x3';
   if (raw === 'strip-1x3' || raw === 'strip3' || raw === '1x3') return 'strip-1x3';
   if (raw === 'grid-2x2' || raw === 'grid2x2' || raw === '2x2') return 'grid-2x2';
   return 'strip-1x4';
@@ -162,6 +200,7 @@ export function normalizeLayoutType(raw?: string | null): StandardLayoutType {
 /** Convert standard layout type to internal legacy layout type */
 export function toLegacyLayout(standard?: string | null): LayoutType {
   const norm = normalizeLayoutType(standard);
+  if (norm === 'grid-2x3') return 'grid2x3';
   if (norm === 'strip-1x3') return 'strip3';
   if (norm === 'grid-2x2') return 'grid2x2';
   return 'strip4';
@@ -194,6 +233,9 @@ export interface FrameTheme {
   overlay_image_url?: string;
   bg_color?: string;
   is_active?: boolean;
+  enable_text?: boolean;
+  default_text?: string;
+  text_color?: string;
   // Legacy & extended compatibility fields:
   tagline?: string;
   description?: string;
@@ -207,6 +249,9 @@ export interface FrameTheme {
   wash: string;
   textConfig?: TextConfig;
   frame_image_url?: string;
+  noFooter?: boolean;
+  fg?: string;
+  sub?: string;
   created_at?: string;
 }
 
@@ -220,6 +265,11 @@ export const BUILTIN_THEME_IDS = new Set<string>([
   'birthdayCatPink',
   'retroTerracotta',
   'film35mm',
+  // UUID equivalents:
+  '3b309e61-9f62-5ec6-a5af-67b549a55bd8', // retro-terracotta
+  '0ddf1377-236a-5690-8c68-9493ea9e3cc0', // birthday
+  '411845a3-919e-58be-89c0-a62c597fbda7', // film-35mm
+  'a66a8aa5-0b8e-57e3-89b7-a9a3ee8ff3a8', // minimal-warm
 ]);
 
 export function isBuiltinTheme(themeOrId?: FrameTheme | string | null): boolean {
@@ -236,6 +286,7 @@ export const INITIAL_FRAME_THEMES: FrameTheme[] = [
     description: 'Four cutouts on warm terracotta paper, paperclips and a handwritten caption band.',
     badge: 'Popular',
     category: 'Standard',
+    layout_type: 'grid-2x2',
     layout: 'grid2x2',
     preset: 'retroTerracotta',
     paper: '#C74913',
@@ -246,6 +297,9 @@ export const INITIAL_FRAME_THEMES: FrameTheme[] = [
     overlay_image_url: '/frames/retro-orange-4shot.png',
     frame_image_url: '/frames/retro-orange-4shot.png',
     is_active: true,
+    enable_text: true,
+    default_text: 'Smile came from inside',
+    text_color: '#FFFFFF',
     textConfig: PRESET_DEFAULT_TEXT_CONFIGS.retroTerracotta,
   },
   {
@@ -255,6 +309,7 @@ export const INITIAL_FRAME_THEMES: FrameTheme[] = [
     description: 'A playful six-shot grid wrapped in a pink birthday frame made for group chaos.',
     badge: '6 shots',
     category: 'Birthday',
+    layout_type: 'grid-2x3',
     layout: 'grid2x3',
     preset: 'birthdayCatPink',
     paper: '#FDEEF3',
@@ -265,6 +320,9 @@ export const INITIAL_FRAME_THEMES: FrameTheme[] = [
     overlay_image_url: '/frames/birthday-cat-pink.png',
     frame_image_url: '/frames/birthday-cat-pink.png',
     is_active: true,
+    enable_text: true,
+    default_text: 'Happy Birthday',
+    text_color: '#FF69B4',
     textConfig: PRESET_DEFAULT_TEXT_CONFIGS.birthdayCatPink,
   },
   {
@@ -274,6 +332,7 @@ export const INITIAL_FRAME_THEMES: FrameTheme[] = [
     description: 'Three wide frames on analogue film stock, complete with sprocket holes.',
     badge: 'Analogue',
     category: 'Seasonal',
+    layout_type: 'strip-1x3',
     layout: 'strip3',
     preset: 'film35mm',
     paper: '#EFEAE0',
@@ -282,6 +341,9 @@ export const INITIAL_FRAME_THEMES: FrameTheme[] = [
     accent: '#A8A08C',
     wash: '#EDE8DC',
     is_active: true,
+    enable_text: false,
+    default_text: '',
+    text_color: '#000000',
     textConfig: PRESET_DEFAULT_TEXT_CONFIGS.film35mm,
   },
   {
@@ -291,6 +353,7 @@ export const INITIAL_FRAME_THEMES: FrameTheme[] = [
     description: 'Classic 4-photo vertical photostrip with warm paper borders.',
     badge: 'Classic',
     category: 'Standard',
+    layout_type: 'strip-1x4',
     layout: 'strip4',
     preset: 'birthday',
     paper: '#FDFBF7',
@@ -299,6 +362,9 @@ export const INITIAL_FRAME_THEMES: FrameTheme[] = [
     accent: '#E8DFCE',
     wash: '#FAF7F0',
     is_active: true,
+    enable_text: false,
+    default_text: '',
+    text_color: '#000000',
     textConfig: PRESET_DEFAULT_TEXT_CONFIGS.birthday,
   },
 ];
@@ -312,7 +378,7 @@ export const FRAMES_UPDATED_EVENT = 'haloluna:frames-updated';
 /** Photos that end up on the finished strip for a given layout. */
 export function slotsForLayout(layout: LayoutType | StandardLayoutType | string): number {
   if (layout === 'strip3' || layout === 'strip-1x3') return 3;
-  if (layout === 'grid2x3') return 6;
+  if (layout === 'grid2x3' || layout === 'grid-2x3') return 6;
   return 4;
 }
 
@@ -394,7 +460,9 @@ export function getFrameTheme(id?: string | null): FrameTheme {
   const allFrames = getStoredFrames();
 
   if (id) {
-    const matched = allFrames.find((t) => t.id === id);
+    const matched = allFrames.find(
+      (t) => t.id === id || LEGACY_SLUG_BY_UUID[t.id] === id || toValidUuid(id) === t.id
+    );
     if (matched) {
       // If the matched frame is active, return it. If inactive, fall back to first active
       if (matched.is_active !== false) return matched;

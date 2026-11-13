@@ -88,6 +88,9 @@ CREATE TABLE IF NOT EXISTS public.frame_presets (
   overlay_image_url TEXT,
   bg_color          TEXT NOT NULL DEFAULT '#FDFBF7',
   is_active         BOOLEAN NOT NULL DEFAULT true,
+  enable_text       BOOLEAN NOT NULL DEFAULT false,
+  default_text      TEXT DEFAULT '',
+  text_color        TEXT DEFAULT '#000000',
   -- Compatibility & procedural accent columns:
   layout            TEXT NOT NULL DEFAULT 'strip4',
   preset            TEXT NOT NULL DEFAULT 'birthday',
@@ -102,6 +105,11 @@ CREATE TABLE IF NOT EXISTS public.frame_presets (
   text_config       JSONB,
   created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Ensure text columns exist if table was already created
+ALTER TABLE public.frame_presets ADD COLUMN IF NOT EXISTS enable_text BOOLEAN DEFAULT false;
+ALTER TABLE public.frame_presets ADD COLUMN IF NOT EXISTS default_text TEXT DEFAULT '';
+ALTER TABLE public.frame_presets ADD COLUMN IF NOT EXISTS text_color TEXT DEFAULT '#000000';
 
 ALTER TABLE public.frame_presets ENABLE ROW LEVEL SECURITY;
 

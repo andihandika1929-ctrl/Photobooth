@@ -203,7 +203,7 @@ export default function FramePresetsPage() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredFrames.map((theme) => {
-            const slots = slotsForLayout(theme.layout);
+            const slots = slotsForLayout(theme.layout_type || theme.layout);
             const isActive = theme.is_active !== false;
 
             return (
@@ -224,7 +224,7 @@ export default function FramePresetsPage() {
                       </Badge>
                       <span className="text-[10px] font-mono text-zinc-500 font-semibold flex items-center gap-1">
                         <Grid className="h-3 w-3" />
-                        <span>{formatLayoutLabel(theme.layout)}</span>
+                        <span>{formatLayoutLabel(theme.layout_type || theme.layout)}</span>
                       </span>
                     </div>
 
@@ -343,18 +343,27 @@ export default function FramePresetsPage() {
                     </div>
                   </div>
 
-                  {/* Typography Spec */}
-                  {theme.textConfig && (
-                    <div className="flex items-center justify-between text-[11px] font-mono text-zinc-500 border-t border-zinc-100 pt-2.5">
-                      <span className="flex items-center gap-1">
-                        <Type className="h-3 w-3 text-zinc-400" />
-                        <span>{theme.textConfig.fontFamily}</span>
-                      </span>
-                      <span className="truncate max-w-[120px] text-zinc-700">
-                        &ldquo;{theme.textConfig.defaultText}&rdquo;
-                      </span>
-                    </div>
-                  )}
+                  {/* Typography / Canvas Text Spec */}
+                  <div className="flex items-center justify-between text-[11px] font-mono text-zinc-500 border-t border-zinc-100 pt-2.5">
+                    <span className="flex items-center gap-1">
+                      <Type className="h-3 w-3 text-zinc-400" />
+                      <span>Teks di Kanvas:</span>
+                    </span>
+                    {theme.enable_text ? (
+                      <div className="flex items-center gap-1.5 truncate max-w-[150px]">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full border border-zinc-300 shrink-0"
+                          style={{ backgroundColor: theme.text_color || '#000000' }}
+                          title={`Warna: ${theme.text_color || '#000000'}`}
+                        />
+                        <span className="truncate text-zinc-800 font-semibold" title={theme.default_text || '(Default teks kosong)'}>
+                          {theme.default_text ? `"${theme.default_text}"` : 'Aktif (Kosong)'}
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-zinc-400 font-medium">Nonaktif</span>
+                    )}
+                  </div>
                 </CardContent>
 
                 {/* Footer Controls: Edit, Delete, Test in Booth */}
