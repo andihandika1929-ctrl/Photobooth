@@ -10,6 +10,7 @@ import {
   VolumeX,
   Users,
   Upload,
+  SwitchCamera,
 } from 'lucide-react';
 import { playCountdownBeep, playFlashSound, initAudio } from './AudioEngine';
 import { isCanvasFilterSupported } from '@/utils/canvasColorGrading';
@@ -59,6 +60,8 @@ interface CameraViewportDuoProps {
   capturedThumbnails?: string[];
   onRetakeLast?: () => void;
   layout?: string;
+  facingMode?: 'user' | 'environment';
+  onToggleFacingMode?: () => void;
 
   // Duo / Multiplayer Props
   isDuoMode?: boolean;
@@ -95,6 +98,8 @@ export default function CameraViewportDuo({
   partner = null,
   role = 'host',
   layout = 'strip4',
+  facingMode = 'user',
+  onToggleFacingMode,
   localStream,
   remoteStream,
   onSendSyncAction,
@@ -131,6 +136,15 @@ export default function CameraViewportDuo({
   const [isSnapActive, setIsSnapActive] = useState(false);
   const [selectedFilter, setSelectedFilter] = useState<FilterName>('natural');
   const [isMirrored, setIsMirrored] = useState(true);
+
+  // Auto un-mirror for back camera ('environment'), auto-mirror for selfie camera ('user')
+  useEffect(() => {
+    if (facingMode === 'environment') {
+      setIsMirrored(false);
+    } else {
+      setIsMirrored(true);
+    }
+  }, [facingMode]);
   const [localCountdown, setLocalCountdown] = useState<number | null>(null);
   const [isRemoteAudioMuted, setIsRemoteAudioMuted] = useState(true);
   const [remoteVideoActive, setRemoteVideoActive] = useState(false);
@@ -813,6 +827,21 @@ export default function CameraViewportDuo({
           </div>
         )}
 
+        {/* Floating Camera Flip / Switch Button */}
+        {onToggleFacingMode && !isShooting && (
+          <button
+            type="button"
+            onClick={onToggleFacingMode}
+            className="absolute top-3 right-3 z-25 rounded-full bg-black/60 hover:bg-black/80 backdrop-blur-md px-3 py-1.5 text-white shadow-md active:scale-95 transition-all cursor-pointer flex items-center gap-1.5 border border-white/20"
+            title={facingMode === 'environment' ? 'Ganti ke kamera depan' : 'Ganti ke kamera belakang (hasil lebih tajam)'}
+          >
+            <SwitchCamera size={14} className="text-pink-400" />
+            <span className="text-[11px] font-medium hidden xs:inline">
+              {facingMode === 'environment' ? 'Kamera Belakang' : 'Kamera Depan'}
+            </span>
+          </button>
+        )}
+
         {/* Feeds Rendering */}
         {isDuoMode ? (
           /* DUO MODE: Split 50:50 Screen */
@@ -1211,18 +1240,32 @@ export default function CameraViewportDuo({
         })}
       </div>
 
-      {/* ── Bottom Controls (Mirror & Manual Trigger if not shooting) ── */}
+      {/* ── Bottom Controls (Mirror, Switch Camera, & Manual Trigger if not shooting) ── */}
       {!isShooting && (
-        <div className="w-full max-w-md mt-4 flex items-center justify-between gap-3 px-3 py-2 rounded-xl bg-white/70 border border-neutral-200/80 shadow-xs">
-          <button
-            type="button"
-            onClick={() => setIsMirrored((prev) => !prev)}
-            className="flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-2.5 py-1 text-xs font-medium text-neutral-700 shadow-2xs hover:bg-neutral-50 active:scale-95 cursor-pointer"
-            title="Mirror preview"
-          >
-            <FlipHorizontal size={13} />
-            <span>Mirror</span>
-          </button>
+        <div className="w-full max-w-md mt-4 flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-white/70 border border-neutral-200/80 shadow-xs flex-wrap">
+          <div className="flex items-center gap-2">
+            {onToggleFacingMode && (
+              <button
+                type="button"
+                onClick={onToggleFacingMode}
+                className="flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-2.5 py-1 text-xs font-medium text-neutral-700 shadow-2xs hover:bg-neutral-50 active:scale-95 cursor-pointer"
+                title={facingMode === 'environment' ? 'Ganti ke Kamera Depan' : 'Ganti ke Kamera Belakang (hasil lebih jernih)'}
+              >
+                <SwitchCamera size={13} className="text-pink-500" />
+                <span>{facingMode === 'environment' ? 'Kamera Belakang (HD)' : 'Kamera Belakang'}</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setIsMirrored((prev) => !prev)}
+              className="flex items-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-2.5 py-1 text-xs font-medium text-neutral-700 shadow-2xs hover:bg-neutral-50 active:scale-95 cursor-pointer"
+              title="Mirror preview"
+            >
+              <FlipHorizontal size={13} />
+              <span>Mirror</span>
+            </button>
+          </div>
 
           {capturedThumbnails.length > 0 && onRetakeLast && (
             <button

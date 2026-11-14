@@ -360,8 +360,10 @@ function CaptureRoom() {
     centerY: number;
   } | null>(null);
 
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+
   // Initialize Local Media Stream (Camera first, then mic)
-  const startCamera = useCallback(async () => {
+  const startCamera = useCallback(async (preferredFacing?: 'user' | 'environment') => {
     setCameraError(null);
 
     if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
@@ -369,17 +371,37 @@ function CaptureRoom() {
       return;
     }
 
+    const mode = preferredFacing || facingMode;
+
     try {
-      // 1. Request video stream in Full HD (1080p ideal) for pristine snapshot capture
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 1920, min: 1280 },
-          height: { ideal: 1080, min: 720 },
-          facingMode: 'user',
-          frameRate: { ideal: 30, max: 60 },
-        },
-        audio: false,
-      });
+      // Stop old video tracks before switching cameras
+      if (localStreamRef.current) {
+        localStreamRef.current.getVideoTracks().forEach((t) => t.stop());
+      }
+
+      // 1. Request video stream in Full HD with preferred facingMode ('user' or 'environment')
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 1920, min: 1280 },
+            height: { ideal: 1080, min: 720 },
+            facingMode: { ideal: mode },
+            frameRate: { ideal: 30, max: 60 },
+          },
+          audio: false,
+        });
+      } catch (errFacing) {
+        // Fallback for laptops/devices without specific facingMode support
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 1280, min: 640 },
+            height: { ideal: 720, min: 480 },
+            frameRate: { ideal: 30 },
+          },
+          audio: false,
+        });
+      }
 
       setLocalStream(stream);
 
@@ -400,19 +422,25 @@ function CaptureRoom() {
       console.error('Camera access error:', error);
       if (error.name === 'NotAllowedError') {
         setCameraError(
-          'Izin kamera diblokir oleh Windows atau Chrome. Silakan izinkan akses kamera di Windows Settings > Privacy & security > Camera, lalu aktifkan toggle Chrome dan refresh halaman.'
+          'Izin kamera diblokir oleh browser atau perangkat. Silakan izinkan akses kamera di pengaturan browser/perangkat Anda, lalu coba lagi.'
         );
       } else if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
-        setCameraError('Perangkat webcam/kamera tidak terdeteksi pada komputer Anda.');
+        setCameraError('Perangkat webcam/kamera tidak terdeteksi.');
       } else if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
         setCameraError(
-          'Kamera sedang digunakan oleh aplikasi lain (Zoom, Teams, atau tab browser lain). Silakan tutup aplikasi tersebut dan coba lagi.'
+          'Kamera sedang digunakan oleh aplikasi lain. Silakan tutup aplikasi tersebut dan coba lagi.'
         );
       } else {
         setCameraError(`Gagal mengakses kamera: ${error.message || 'Unknown error'}`);
       }
     }
-  }, []);
+  }, [facingMode]);
+
+  const toggleFacingMode = useCallback(async () => {
+    const nextMode: 'user' | 'environment' = facingMode === 'user' ? 'environment' : 'user';
+    setFacingMode(nextMode);
+    await startCamera(nextMode);
+  }, [facingMode, startCamera]);
 
   useEffect(() => {
     localStreamRef.current = localStream;
@@ -2943,6 +2971,8 @@ function CaptureRoom() {
                 isShooting={isShooting}
                 externalCountdown={shootCountdown}
                 triggerSnap={triggerSnap}
+                facingMode={facingMode}
+                onToggleFacingMode={toggleFacingMode}
               />
             </div>
 
