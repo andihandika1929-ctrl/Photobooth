@@ -31,11 +31,6 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
     icon: LayoutDashboard,
   },
   {
-    label: 'Frame Presets & Canvas',
-    href: '/admin/frames',
-    icon: ImageIcon,
-  },
-  {
     label: 'Foto Mentahan (Raw)',
     href: '/admin/raw-photos',
     icon: Camera,
@@ -45,11 +40,6 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
     label: 'Analytics & Session Stats',
     href: '/admin/analytics',
     icon: BarChart3,
-  },
-  {
-    label: 'Studio & Theme Settings',
-    href: '/admin/settings',
-    icon: Settings,
   },
 ];
 

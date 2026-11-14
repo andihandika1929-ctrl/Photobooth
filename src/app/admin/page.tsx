@@ -19,7 +19,6 @@ import {
   Sliders,
 } from 'lucide-react';
 import { useAdminPhotos } from '@/lib/admin/useAdminPhotos';
-import { useStudioTheme } from '@/lib/admin/StudioThemeContext';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
@@ -27,7 +26,6 @@ import { formatBytes, formatDate } from '@/lib/utils';
 
 export default function AdminOverviewPage() {
   const { photos, loading, fetchPhotos, stats } = useAdminPhotos();
-  const { tokens, activePresetId } = useStudioTheme();
 
   const recentPhotos = React.useMemo(() => {
     return photos.slice(0, 4);
@@ -151,32 +149,7 @@ export default function AdminOverviewPage() {
       </div>
 
       {/* ── Quick Navigation & Module Gateways ── */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-        {/* Frame Presets Gateway */}
-        <Card className="hover:border-zinc-300 transition-all group">
-          <CardHeader>
-            <div className="flex items-center justify-between mb-1">
-              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-900 text-white">
-                <ImageIcon className="h-4 w-4" />
-              </div>
-              <Badge variant="outline" className="text-[10px]">Canvas Engine</Badge>
-            </div>
-            <CardTitle className="text-base text-zinc-900">Frame Presets &amp; Canvas</CardTitle>
-            <CardDescription>
-              Configure strip dimensions, scrapbook cutouts, typography tokens, and photo slots.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Link href="/admin/frames">
-              <Button variant="outline" size="sm" className="w-full justify-between text-xs group-hover:bg-zinc-900 group-hover:text-white transition-colors">
-                <span>Manage Presets</span>
-                <ArrowRight className="h-3.5 w-3.5" />
-              </Button>
-            </Link>
-          </CardContent>
-        </Card>
-
-        {/* Media Logs Gateway */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
         {/* Foto Mentahan & Media Storage Gateway */}
         <Card className="hover:border-zinc-300 transition-all group">
           <CardHeader>
@@ -184,11 +157,11 @@ export default function AdminOverviewPage() {
               <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-900 text-white">
                 <Camera className="h-4 w-4" />
               </div>
-              <Badge variant="outline" className="text-[10px]">{photos.length} Sesi</Badge>
+              <Badge variant="outline" className="text-[10px]">{photos.length} Sesi Tersimpan</Badge>
             </div>
             <CardTitle className="text-base text-zinc-900">Foto Mentahan &amp; Media</CardTitle>
             <CardDescription>
-              Akses photostrip dan arsip foto mentahan tanpa frame resolusi penuh, download batch, atau kelola storage.
+              Akses photostrip, unduh foto mentahan tanpa frame resolusi asli kamera, dan hapus foto gagal untuk menghemat Supabase.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -201,26 +174,26 @@ export default function AdminOverviewPage() {
           </CardContent>
         </Card>
 
-        {/* Studio Theme Gateway */}
+        {/* Analytics & Stats Gateway */}
         <Card className="hover:border-zinc-300 transition-all group">
           <CardHeader>
             <div className="flex items-center justify-between mb-1">
               <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-900 text-white">
-                <Sliders className="h-4 w-4" />
+                <BarChart3 className="h-4 w-4" />
               </div>
-              <Badge variant="secondary" className="text-[10px] capitalize font-mono">
-                {tokens.name}
+              <Badge variant="secondary" className="text-[10px] font-mono">
+                Real-time
               </Badge>
             </div>
-            <CardTitle className="text-base text-zinc-900">Studio &amp; Theme Settings</CardTitle>
+            <CardTitle className="text-base text-zinc-900">Analytics &amp; Session Stats</CardTitle>
             <CardDescription>
-              Customize background presets (Minimal Dark, Modern Studio, Classic Warm, Monolith) and color variables.
+              Pantau total sesi hari ini, jam sibuk photobooth, status integrasi hardware, dan analitik penggunaan studio.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Link href="/admin/settings">
+            <Link href="/admin/analytics">
               <Button variant="outline" size="sm" className="w-full justify-between text-xs group-hover:bg-zinc-900 group-hover:text-white transition-colors">
-                <span>Configure Visual Tokens</span>
+                <span>Buka Analytics &amp; Stats</span>
                 <ArrowRight className="h-3.5 w-3.5" />
               </Button>
             </Link>
@@ -277,10 +250,10 @@ export default function AdminOverviewPage() {
             <div className="flex items-center justify-between pt-1">
               <div className="flex items-center gap-2 text-xs">
                 <Sliders className="h-3.5 w-3.5 text-zinc-500" />
-                <span className="font-medium text-zinc-800">Active Theme Preset</span>
+                <span className="font-medium text-zinc-800">Default Strip Layout</span>
               </div>
               <span className="text-[11px] font-mono text-zinc-600 uppercase font-semibold">
-                {activePresetId}
+                Korean 4-Cut
               </span>
             </div>
           </CardContent>
