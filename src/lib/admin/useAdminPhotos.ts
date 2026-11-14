@@ -59,36 +59,22 @@ export function useAdminPhotos() {
     }
   }, [session, fetchPhotos]);
 
-  // Delete single photo
+  // Delete single photo (removes strip and all raw unframed photos)
   const deletePhoto = useCallback(
     async (photo: PhotoRecord): Promise<boolean> => {
       setDeletingId(photo.id);
       try {
-        if (photo.storage_path) {
-          const { error: storageErr } = await supabase.storage
-            .from('photos')
-            .remove([photo.storage_path]);
-          if (storageErr) {
-            console.error('Supabase storage delete error:', storageErr);
-          }
-        }
+        const res = await fetch('/api/admin/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ids: [photo.id],
+            storagePaths: photo.storage_path ? [photo.storage_path] : [],
+          }),
+        });
 
-        const { error: dbErr } = await supabase
-          .from('photos')
-          .delete()
-          .eq('id', photo.id);
-
-        if (dbErr) {
-          console.error('Supabase DB delete error, trying admin API:', dbErr);
-          const res = await fetch('/api/admin/delete', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              ids: [photo.id],
-              storagePaths: photo.storage_path ? [photo.storage_path] : [],
-            }),
-          });
-          if (!res.ok) throw new Error('Delete failed');
+        if (!res.ok) {
+          throw new Error('Delete failed via admin API');
         }
 
         setPhotos((prev) => prev.filter((p) => p.id !== photo.id));
@@ -105,10 +91,10 @@ export function useAdminPhotos() {
         setDeletingId(null);
       }
     },
-    [supabase]
+    []
   );
 
-  // Bulk delete selected photos
+  // Bulk delete selected photos (removes strips and all raw unframed photos)
   const bulkDeletePhotos = useCallback(async (): Promise<boolean> => {
     if (selectedIds.size === 0) return false;
     setIsBulkDeleting(true);
@@ -119,26 +105,14 @@ export function useAdminPhotos() {
         .map((p) => p.storage_path)
         .filter((sp): sp is string => Boolean(sp));
 
-      if (storagePaths.length > 0) {
-        const { error: storageErr } = await supabase.storage
-          .from('photos')
-          .remove(storagePaths);
-        if (storageErr) console.warn('Bulk storage delete warning:', storageErr);
-      }
+      const res = await fetch('/api/admin/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids, storagePaths }),
+      });
 
-      const { error: dbErr } = await supabase
-        .from('photos')
-        .delete()
-        .in('id', ids);
-
-      if (dbErr) {
-        console.warn('Supabase DB delete failed, using /api/admin/delete:', dbErr);
-        const res = await fetch('/api/admin/delete', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ ids, storagePaths }),
-        });
-        if (!res.ok) throw new Error('Bulk delete failed');
+      if (!res.ok) {
+        throw new Error('Bulk delete failed via admin API');
       }
 
       setPhotos((prev) => prev.filter((p) => !selectedIds.has(p.id)));
@@ -150,7 +124,7 @@ export function useAdminPhotos() {
     } finally {
       setIsBulkDeleting(false);
     }
-  }, [photos, selectedIds, supabase]);
+  }, [photos, selectedIds]);
 
   // Selection handlers
   const toggleSelectOne = useCallback((id: string) => {

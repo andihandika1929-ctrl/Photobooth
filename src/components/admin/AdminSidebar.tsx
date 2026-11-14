@@ -36,11 +36,6 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
     icon: ImageIcon,
   },
   {
-    label: 'Media Logs & Storage',
-    href: '/admin/media',
-    icon: HardDrive,
-  },
-  {
     label: 'Foto Mentahan (Raw)',
     href: '/admin/raw-photos',
     icon: Camera,

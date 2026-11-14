@@ -177,23 +177,24 @@ export default function AdminOverviewPage() {
         </Card>
 
         {/* Media Logs Gateway */}
+        {/* Foto Mentahan & Media Storage Gateway */}
         <Card className="hover:border-zinc-300 transition-all group">
           <CardHeader>
             <div className="flex items-center justify-between mb-1">
               <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-zinc-900 text-white">
-                <HardDrive className="h-4 w-4" />
+                <Camera className="h-4 w-4" />
               </div>
-              <Badge variant="outline" className="text-[10px]">{photos.length} Strips</Badge>
+              <Badge variant="outline" className="text-[10px]">{photos.length} Sesi</Badge>
             </div>
-            <CardTitle className="text-base text-zinc-900">Media Logs &amp; Storage</CardTitle>
+            <CardTitle className="text-base text-zinc-900">Foto Mentahan &amp; Media</CardTitle>
             <CardDescription>
-              Inspect high-res guest strips, export print files, search by location, or bulk prune cloud files.
+              Akses photostrip dan arsip foto mentahan tanpa frame resolusi penuh, download batch, atau kelola storage.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Link href="/admin/media">
+            <Link href="/admin/raw-photos">
               <Button variant="outline" size="sm" className="w-full justify-between text-xs group-hover:bg-zinc-900 group-hover:text-white transition-colors">
-                <span>Browse Gallery</span>
+                <span>Buka Galeri Foto Mentahan</span>
                 <ArrowRight className="h-3.5 w-3.5" />
               </Button>
             </Link>
@@ -292,7 +293,7 @@ export default function AdminOverviewPage() {
               <CardTitle className="text-sm">Recent Guest Strips</CardTitle>
               <CardDescription>Latest photo strips generated in photobooth</CardDescription>
             </div>
-            <Link href="/admin/media">
+            <Link href="/admin/raw-photos">
               <Button variant="ghost" size="sm" className="text-xs gap-1">
                 <span>View All ({photos.length})</span>
                 <ArrowRight className="h-3 w-3" />
