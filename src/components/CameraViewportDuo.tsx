@@ -58,6 +58,7 @@ interface CameraViewportDuoProps {
   onCountdownDurationChange?: (duration: CountdownDuration) => void;
   capturedThumbnails?: string[];
   onRetakeLast?: () => void;
+  layout?: string;
 
   // Duo / Multiplayer Props
   isDuoMode?: boolean;
@@ -93,6 +94,7 @@ export default function CameraViewportDuo({
   isDuoMode = false,
   partner = null,
   role = 'host',
+  layout = 'strip4',
   localStream,
   remoteStream,
   onSendSyncAction,
@@ -789,7 +791,13 @@ export default function CameraViewportDuo({
   return (
     <div className="flex flex-col items-center w-full">
       {/* ── Main Viewport / Stage ── */}
-      <div className={`relative w-full ${isDuoMode ? 'aspect-[4/3]' : 'aspect-[3/4] max-w-sm sm:max-w-md'} mx-auto rounded-2xl overflow-hidden bg-neutral-950 shadow-md border border-neutral-200`}>
+      <div
+        className={`relative w-full ${
+          layout === 'polaroid'
+            ? 'aspect-square max-w-sm sm:max-w-md'
+            : 'aspect-[4/3] max-w-lg sm:max-w-xl'
+        } mx-auto rounded-2xl overflow-hidden bg-neutral-950 shadow-md border border-neutral-200`}
+      >
         {/* Flash Overlay */}
         <div
           ref={flashRef}
@@ -1174,9 +1182,9 @@ export default function CameraViewportDuo({
         </span>
       </div>
 
-      {/* ── 6-Slot Filmstrip Thumbnails (1:1 Angie REA) ── */}
-      <div className="grid grid-cols-6 gap-2 sm:gap-2.5 mt-3.5 w-full max-w-sm sm:max-w-md mx-auto">
-        {Array.from({ length: 6 }).map((_, i) => {
+      {/* ── Filmstrip Thumbnails (Dynamic count: 3 for Polaroid, 6 for Strip) ── */}
+      <div className={`grid ${totalFrames === 3 ? 'grid-cols-3 max-w-[200px] sm:max-w-xs' : 'grid-cols-6 max-w-sm sm:max-w-md'} gap-2 sm:gap-2.5 mt-3.5 w-full mx-auto`}>
+        {Array.from({ length: totalFrames }).map((_, i) => {
           const thumb = capturedThumbnails[i];
           return (
             <div

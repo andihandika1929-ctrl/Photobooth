@@ -65,19 +65,21 @@ function clamp(val: number): number {
  */
 export function applyPixelFilter(
   ctx: CanvasRenderingContext2D,
-  filterId: FilterName,
+  filterId: FilterName | string,
   width: number,
   height: number,
 ): void {
+  if (!filterId || filterId === 'none') return;
   const imageData = ctx.getImageData(0, 0, width, height);
   const data = imageData.data;
   const len = data.length;
 
   switch (filterId) {
+    case 'mono':
     case 'leica-noir':
     case 'bw': {
-      // Leica Noir: Grayscale luminosity (0.299*R + 0.587*G + 0.114*B) + contrast (1.22) + brightness (1.04)
-      const contrast = 1.22;
+      // Mono / Leica Noir: Grayscale luminosity + contrast + brightness
+      const contrast = 1.12;
       const brightness = 1.04;
       for (let i = 0; i < len; i += 4) {
         const lum = (0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]) * brightness;
@@ -89,33 +91,144 @@ export function applyPixelFilter(
       break;
     }
 
-    case 'haru-glow': {
-      // Haru Glow: Soft idol skin smoothing tone, lifted highlights, warm peachy glow
-      // brightness: 1.08, contrast: 0.95, saturate: 1.06, subtle peach warmth
-      const b = 1.08;
-      const c = 0.95;
-      const s = 1.06;
+    case 'retro': {
+      // Retro: Sepia (0.5) + contrast (1.05) + saturate (1.4)
+      const c = 1.05;
+      const s = 1.35;
       for (let i = 0; i < len; i += 4) {
-        let r = data[i];
-        let g = data[i + 1];
-        let bl = data[i + 2];
-
-        // Brightness & contrast
-        r = ((r * b - 128) * c) + 128;
-        g = ((g * b - 128) * c) + 128;
-        bl = ((bl * b - 128) * c) + 128;
-
-        // Saturation
+        let r = ((data[i] - 128) * c) + 128;
+        let g = ((data[i + 1] - 128) * c) + 128;
+        let bl = ((data[i + 2] - 128) * c) + 128;
         const lum = 0.299 * r + 0.587 * g + 0.114 * bl;
         r = lum + (r - lum) * s;
         g = lum + (g - lum) * s;
         bl = lum + (bl - lum) * s;
+        const sr = (r * 0.393) + (g * 0.769) + (bl * 0.189);
+        const sg = (r * 0.349) + (g * 0.686) + (bl * 0.168);
+        const sb = (r * 0.272) + (g * 0.534) + (bl * 0.131);
+        data[i] = clamp(r * 0.5 + sr * 0.5);
+        data[i + 1] = clamp(g * 0.5 + sg * 0.5);
+        data[i + 2] = clamp(bl * 0.5 + sb * 0.5);
+      }
+      break;
+    }
 
-        // Warm peachy idol skin tint (gentle red/peach boost, soften blue)
-        r = r * 1.03 + 5;
+    case 'film': {
+      // Film: Contrast (0.92) + saturate (0.85) + brightness (1.08) + sepia (0.18)
+      const b = 1.08;
+      const c = 0.92;
+      const s = 0.85;
+      for (let i = 0; i < len; i += 4) {
+        let r = data[i];
+        let g = data[i + 1];
+        let bl = data[i + 2];
+        if (r < 50) r += (50 - r) * 0.15;
+        if (g < 50) g += (50 - g) * 0.15;
+        if (bl < 50) bl += (50 - bl) * 0.15;
+        r = ((r * b - 128) * c) + 128;
+        g = ((g * b - 128) * c) + 128;
+        bl = ((bl * b - 128) * c) + 128;
+        const lum = 0.299 * r + 0.587 * g + 0.114 * bl;
+        r = lum + (r - lum) * s;
+        g = lum + (g - lum) * s;
+        bl = lum + (bl - lum) * s;
+        const sr = (r * 0.393) + (g * 0.769) + (bl * 0.189);
+        const sg = (r * 0.349) + (g * 0.686) + (bl * 0.168);
+        const sb = (r * 0.272) + (g * 0.534) + (bl * 0.131);
+        data[i] = clamp(r * 0.82 + sr * 0.18);
+        data[i + 1] = clamp(g * 0.82 + sg * 0.18);
+        data[i + 2] = clamp(bl * 0.82 + sb * 0.18);
+      }
+      break;
+    }
+
+    case 'cool': {
+      // Cool: Saturate (1.15) + contrast (1.05) + brightness (1.03) + cyan/cool tone
+      const b = 1.03;
+      const c = 1.05;
+      const s = 1.15;
+      for (let i = 0; i < len; i += 4) {
+        let r = ((data[i] * b - 128) * c) + 128;
+        let g = ((data[i + 1] * b - 128) * c) + 128;
+        let bl = ((data[i + 2] * b - 128) * c) + 128;
+        const lum = 0.299 * r + 0.587 * g + 0.114 * bl;
+        r = lum + (r - lum) * s;
+        g = lum + (g - lum) * s;
+        bl = lum + (bl - lum) * s;
+        r = r * 0.95;
+        g = g * 1.02 + 2;
+        bl = bl * 1.08 + 6;
+        data[i] = clamp(r);
+        data[i + 1] = clamp(g);
+        data[i + 2] = clamp(bl);
+      }
+      break;
+    }
+
+    case 'peach':
+    case 'haru-glow': {
+      // Peach / Haru Glow: Soft idol skin smoothing tone, warm peachy glow
+      const b = 1.07;
+      const c = 0.98;
+      const s = 1.20;
+      for (let i = 0; i < len; i += 4) {
+        let r = ((data[i] * b - 128) * c) + 128;
+        let g = ((data[i + 1] * b - 128) * c) + 128;
+        let bl = ((data[i + 2] * b - 128) * c) + 128;
+        const lum = 0.299 * r + 0.587 * g + 0.114 * bl;
+        r = lum + (r - lum) * s;
+        g = lum + (g - lum) * s;
+        bl = lum + (bl - lum) * s;
+        r = r * 1.05 + 7;
         g = g * 1.01 + 2;
-        bl = bl * 0.97 - 1;
+        bl = bl * 0.95 - 2;
+        data[i] = clamp(r);
+        data[i + 1] = clamp(g);
+        data[i + 2] = clamp(bl);
+      }
+      break;
+    }
 
+    case 'automat': {
+      // Automat: Grayscale (0.5) + sepia (0.45) + contrast (1.14) + brightness (1.02)
+      const b = 1.02;
+      const c = 1.14;
+      const s = 0.90;
+      for (let i = 0; i < len; i += 4) {
+        let r = ((data[i] * b - 128) * c) + 128;
+        let g = ((data[i + 1] * b - 128) * c) + 128;
+        let bl = ((data[i + 2] * b - 128) * c) + 128;
+        const lum = 0.299 * r + 0.587 * g + 0.114 * bl;
+        r = lum + (r - lum) * s;
+        g = lum + (g - lum) * s;
+        bl = lum + (bl - lum) * s;
+        const gray = lum;
+        const sr = (gray * 0.393) + (gray * 0.769) + (gray * 0.189);
+        const sg = (gray * 0.349) + (gray * 0.686) + (gray * 0.168);
+        const sb = (gray * 0.272) + (gray * 0.534) + (gray * 0.131);
+        data[i] = clamp(r * 0.5 + sr * 0.5);
+        data[i + 1] = clamp(g * 0.5 + sg * 0.5);
+        data[i + 2] = clamp(bl * 0.5 + sb * 0.5);
+      }
+      break;
+    }
+
+    case 'namsan': {
+      // Namsan Tower Glow: Warmth + contrast + subtle sepia glow
+      const b = 1.04;
+      const c = 1.04;
+      const s = 1.12;
+      for (let i = 0; i < len; i += 4) {
+        let r = ((data[i] * b - 128) * c) + 128;
+        let g = ((data[i + 1] * b - 128) * c) + 128;
+        let bl = ((data[i + 2] * b - 128) * c) + 128;
+        const lum = 0.299 * r + 0.587 * g + 0.114 * bl;
+        r = lum + (r - lum) * s;
+        g = lum + (g - lum) * s;
+        bl = lum + (bl - lum) * s;
+        r = r * 1.03 + 4;
+        g = g * 1.01 + 2;
+        bl = bl * 0.97 - 2;
         data[i] = clamp(r);
         data[i + 1] = clamp(g);
         data[i + 2] = clamp(bl);

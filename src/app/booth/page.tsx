@@ -22,6 +22,7 @@ import LoadingScreen from '@/components/LoadingScreen';
 import ShareModal from '@/components/ShareModal';
 import { initAudio, getMuted, toggleMuted, playCountdownBeep } from '@/components/AudioEngine';
 import { fireCelebrationConfetti } from '@/utils/confetti';
+import { isCanvasFilterSupported, applyPixelFilter } from '@/utils/canvasColorGrading';
 import {
   Camera,
   Grid,
@@ -218,7 +219,14 @@ function CaptureRoom() {
   const [step, setStep] = useState<AppStep>('capture');
   const [layout, setLayout] = useState<LayoutType>(() => {
     const paramLayout = searchParams.get('layout');
-    if (paramLayout === 'grid2x2' || paramLayout === 'strip4' || paramLayout === 'strip3' || paramLayout === 'grid2x3') {
+    if (
+      paramLayout === 'polaroid' ||
+      paramLayout === 'strip2' ||
+      paramLayout === 'strip3' ||
+      paramLayout === 'strip4' ||
+      paramLayout === 'grid2x2' ||
+      paramLayout === 'grid2x3'
+    ) {
       return paramLayout as LayoutType;
     }
     return getFrameTheme(searchParams.get('frame')).layout;
@@ -233,6 +241,7 @@ function CaptureRoom() {
       : layout === 'grid2x3'
       ? 6
       : 4;
+  const studioShotCount = layout === 'polaroid' ? 3 : STUDIO_SHOT_COUNT;
   const [countdownDuration, setCountdownDuration] = useState<CountdownDuration>(() => {
     const timerParam = searchParams.get('timer');
     if (timerParam === '5' || timerParam === '10' || timerParam === '15') {
@@ -575,9 +584,9 @@ function CaptureRoom() {
     }
   }, [isDuoActive, role, partner, frameTheme?.id, sendSync]);
 
-  // Synchronized automatic 6-shot shooting sequence with 1.8s post-shutter BTS buffer
+  // Synchronized automatic shooting sequence (3 shots for Polaroid, 6 for strips)
   const startAutomaticShoot = useCallback(async () => {
-    if (isShootingRef.current || hasCompletedShootRef.current || capturedFrames.length >= STUDIO_SHOT_COUNT) return;
+    if (isShootingRef.current || hasCompletedShootRef.current || capturedFrames.length >= studioShotCount) return;
     abortShootRef.current = false;
     isShootingRef.current = true;
     setIsShooting(true);
@@ -585,7 +594,7 @@ function CaptureRoom() {
     const stream = localStream;
     const optimalMime = getOptimalVideoMimeType();
 
-    for (let shot = 0; shot < STUDIO_SHOT_COUNT; shot++) {
+    for (let shot = 0; shot < studioShotCount; shot++) {
       if (abortShootRef.current) {
         setIsShooting(false);
         isShootingRef.current = false;
@@ -688,7 +697,7 @@ function CaptureRoom() {
       }
 
       // Interval before next shot's countdown
-      if (shot < STUDIO_SHOT_COUNT - 1) {
+      if (shot < studioShotCount - 1) {
         await new Promise((r) => setTimeout(r, 1000));
       }
     }
@@ -706,7 +715,7 @@ function CaptureRoom() {
     setStep('select');
     setIsShooting(false);
     isShootingRef.current = false;
-  }, [capturedFrames.length, localStream, targetCount, isDuoActive, sendSync]);
+  }, [capturedFrames.length, localStream, targetCount, studioShotCount, isDuoActive, sendSync]);
 
   const isBothReady = isDuoActive ? (isMyReady && isPartnerReady) : isMyReady;
 
@@ -715,12 +724,12 @@ function CaptureRoom() {
       isBothReady &&
       !isShooting &&
       !hasCompletedShootRef.current &&
-      capturedFrames.length < STUDIO_SHOT_COUNT &&
+      capturedFrames.length < studioShotCount &&
       step === 'capture'
     ) {
       startAutomaticShoot();
     }
-  }, [isBothReady, isShooting, step, capturedFrames.length, startAutomaticShoot]);
+  }, [isBothReady, isShooting, step, capturedFrames.length, studioShotCount, startAutomaticShoot]);
 
   // When partner joins AND local camera is ready:
   useEffect(() => {
@@ -790,7 +799,19 @@ function CaptureRoom() {
     }
     const currentTheme = getFrameTheme(fromUrl);
     setFrameTheme(currentTheme);
-    setLayout(currentTheme.layout);
+    const urlLayout = searchParams.get('layout');
+    if (
+      urlLayout === 'polaroid' ||
+      urlLayout === 'strip2' ||
+      urlLayout === 'strip3' ||
+      urlLayout === 'strip4' ||
+      urlLayout === 'grid2x2' ||
+      urlLayout === 'grid2x3'
+    ) {
+      setLayout(urlLayout as LayoutType);
+    } else {
+      setLayout(currentTheme.layout);
+    }
   }, [searchParams, router]);
 
   // Synchronize frames from API route & respond to Admin updates in real-time
@@ -805,7 +826,19 @@ function CaptureRoom() {
             saveStoredFrames(list);
             const current = getFrameTheme(searchParams.get('frame'));
             setFrameTheme(current);
-            setLayout(current.layout);
+            const urlLayout = searchParams.get('layout');
+            if (
+              urlLayout === 'polaroid' ||
+              urlLayout === 'strip2' ||
+              urlLayout === 'strip3' ||
+              urlLayout === 'strip4' ||
+              urlLayout === 'grid2x2' ||
+              urlLayout === 'grid2x3'
+            ) {
+              setLayout(urlLayout as LayoutType);
+            } else {
+              setLayout(current.layout);
+            }
           }
         }
       } catch (err) {
@@ -818,7 +851,19 @@ function CaptureRoom() {
     const handleFramesUpdate = () => {
       const current = getFrameTheme(searchParams.get('frame'));
       setFrameTheme(current);
-      setLayout(current.layout);
+      const urlLayout = searchParams.get('layout');
+      if (
+        urlLayout === 'polaroid' ||
+        urlLayout === 'strip2' ||
+        urlLayout === 'strip3' ||
+        urlLayout === 'strip4' ||
+        urlLayout === 'grid2x2' ||
+        urlLayout === 'grid2x3'
+      ) {
+        setLayout(urlLayout as LayoutType);
+      } else {
+        setLayout(current.layout);
+      }
     };
 
     window.addEventListener(FRAMES_UPDATED_EVENT, handleFramesUpdate);
@@ -889,9 +934,9 @@ function CaptureRoom() {
     (dataUrl: string, filter: FilterName, clip?: ShotClip) => {
       initAudio();
       setCapturedFrames((prev) => {
-        if (prev.length >= STUDIO_SHOT_COUNT) return prev;
+        if (prev.length >= studioShotCount) return prev;
         const next = [...prev, { dataUrl, filter, clip }];
-        if (next.length >= STUDIO_SHOT_COUNT) {
+        if (next.length >= studioShotCount) {
           hasCompletedShootRef.current = true;
           fireCelebrationConfetti();
           const initialSlots = Array.from({ length: targetCount }, (_, i) => i);
@@ -906,7 +951,7 @@ function CaptureRoom() {
         return next;
       });
     },
-    [targetCount, isDuoActive, sendSync]
+    [targetCount, studioShotCount, isDuoActive, sendSync]
   );
 
   // Desktop Drag-to-Slide & Horizontal Scroll Controls for Photo Pool (1:1 Angie REA)
@@ -1175,16 +1220,14 @@ function CaptureRoom() {
           }
         } else {
           const errMsg = result.error || 'Upload returned unsuccessful';
-          console.error("ADMIN UPLOAD ERROR:", errMsg);
-          setUploadError('Cloud sync issue. Your local export is complete.');
+          console.warn("[HaloLuna] Cloud auto-sync notice:", errMsg);
           if (!sessionPhotoIdRef.current) {
             hasUploadedRef.current = false;
             lastUploadedTemplateRef.current = null;
           }
         }
       } catch (err) {
-        console.error("ADMIN UPLOAD ERROR:", err);
-        setUploadError('Cloud sync issue. Your local export is complete.');
+        console.warn("[HaloLuna] Cloud auto-sync notice:", err);
         if (!sessionPhotoIdRef.current) {
           hasUploadedRef.current = false;
           lastUploadedTemplateRef.current = null;
@@ -1723,6 +1766,13 @@ function CaptureRoom() {
           rh = (h - padY * 2 - gap) / 2;
           rx = padX + col * (rw + gap);
           ry = padY + row * (rh + gap);
+        } else if (pbLayout === 'polaroid') {
+          const padX = Math.round(w * 0.06);
+          const padTop = Math.round(h * 0.05);
+          rw = w - padX * 2;
+          rh = rw; // Classic square photo on Polaroid
+          rx = padX;
+          ry = padTop;
         } else {
           const padX = w * 0.05;
           const padTop = h * 0.04;
@@ -1745,10 +1795,6 @@ function CaptureRoom() {
           }
           ctx.clip();
 
-          if (activeStyleLook.css && activeStyleLook.css !== 'none') {
-            ctx.filter = activeStyleLook.css;
-          }
-
           const srcW = photoImg.naturalWidth;
           const srcH = photoImg.naturalHeight;
           const srcRatio = srcW / srcH;
@@ -1760,10 +1806,34 @@ function CaptureRoom() {
             sx = (srcW - sw) / 2;
           } else {
             sh = srcW / targetRatio;
-            sy = (srcH - sh) * 0.2;
+            // For images taller than the slot (e.g. portrait photos), anchor slightly towards the top (0.25)
+            // so heads, foreheads, and faces are never chopped off.
+            const topWeight = srcRatio < 1.0 ? 0.25 : 0.4;
+            sy = Math.max(0, Math.min(srcH - sh, Math.round((srcH - sh) * topWeight)));
           }
 
-          ctx.drawImage(photoImg, sx, sy, sw, sh, rx, ry, rw, rh);
+          const hasFilter = Boolean(activeStyleLook.css && activeStyleLook.css !== 'none');
+          const filterWorks = isCanvasFilterSupported();
+
+          if (hasFilter && !filterWorks) {
+            // Mobile Safari / iOS WebKit pixel manipulation fallback
+            const slotCanvas = document.createElement('canvas');
+            slotCanvas.width = rw;
+            slotCanvas.height = rh;
+            const slotCtx = slotCanvas.getContext('2d');
+            if (slotCtx) {
+              slotCtx.drawImage(photoImg, sx, sy, sw, sh, 0, 0, rw, rh);
+              applyPixelFilter(slotCtx, activeStyleLook.id, rw, rh);
+              ctx.drawImage(slotCanvas, rx, ry);
+            } else {
+              ctx.drawImage(photoImg, sx, sy, sw, sh, rx, ry, rw, rh);
+            }
+          } else {
+            if (hasFilter) {
+              ctx.filter = activeStyleLook.css;
+            }
+            ctx.drawImage(photoImg, sx, sy, sw, sh, rx, ry, rw, rh);
+          }
           ctx.restore();
         } catch (e) {
           console.warn('Failed to draw photo slot:', slotIdx, e);
@@ -1922,11 +1992,14 @@ function CaptureRoom() {
       const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
       if (!blob) throw new Error('Failed to create PNG blob');
 
+      const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
+      link.href = url;
       link.download = `haloluna-hd-${currentThemeObj?.id || 'strip'}-${Date.now()}.png`;
+      document.body.appendChild(link);
       link.click();
-      URL.revokeObjectURL(link.href);
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
 
       fireCelebrationConfetti();
       setUploadToast('HD Photostrip (300 DPI) downloaded!');
@@ -1951,11 +2024,14 @@ function CaptureRoom() {
       const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
       if (!blob) throw new Error('Failed to create PNG blob');
 
+      const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = URL.createObjectURL(blob);
+      link.href = url;
       link.download = `haloluna-standard-${currentThemeObj?.id || 'strip'}-${Date.now()}.png`;
+      document.body.appendChild(link);
       link.click();
-      URL.revokeObjectURL(link.href);
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
 
       setUploadToast('Standard quality photostrip saved!');
       setTimeout(() => setUploadToast(null), 3500);
@@ -2187,7 +2263,7 @@ function CaptureRoom() {
               sh = Math.round(vw / cRatio);
               sw = vw;
               sx = 0;
-              sy = Math.max(0, Math.round((vh - sh) * 0.20)); // Anchor 20% from top so head/hair isn't clipped
+              sy = Math.max(0, Math.round((vh - sh) / 2)); // Centered vertical framing
             }
 
             // Balanced vertical framing: -7% lift removes excessive ceiling and lifts user face to natural eye level
@@ -2229,7 +2305,7 @@ function CaptureRoom() {
               dh = Math.round(sw / cRatio);
               dw = sw;
               sx = 0;
-              sy = Math.max(0, Math.round((sh - dh) * 0.20));
+              sy = Math.max(0, Math.round((sh - dh) / 2));
             }
 
             const yLift = Math.round(ch * 0.07);
@@ -2437,7 +2513,7 @@ function CaptureRoom() {
               vx = Math.round((vw - vCropW) / 2);
             } else {
               vCropH = Math.round(vw / sRatio);
-              vy = Math.max(0, Math.round((vh - vCropH) * 0.20));
+              vy = Math.max(0, Math.round((vh - vCropH) / 2));
             }
 
             vCtx.save();
@@ -2463,7 +2539,7 @@ function CaptureRoom() {
               ix = Math.round((imgW - iCropW) / 2);
             } else {
               iCropH = Math.round(imgW / sRatio);
-              iy = Math.max(0, Math.round((imgH - iCropH) * 0.20));
+              iy = Math.max(0, Math.round((imgH - iCropH) / 2));
             }
             vCtx.drawImage(slotItem.still, ix, iy, iCropW, iCropH, sx, sy, sw, sh);
           }
@@ -2538,10 +2614,13 @@ function CaptureRoom() {
 
       // Always download with .mp4 extension for iPhone Camera Roll and Android gallery
       const link = document.createElement('a');
-      link.href = URL.createObjectURL(finalVideoBlob);
+      const url = URL.createObjectURL(finalVideoBlob);
+      link.href = url;
       link.download = `haloluna-bts-${Date.now()}.mp4`;
+      document.body.appendChild(link);
       link.click();
-      setTimeout(() => URL.revokeObjectURL(link.href), 15000);
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
 
       fireCelebrationConfetti();
       setUploadToast('BTS Photobooth video (.mp4) downloaded!');
@@ -2672,7 +2751,7 @@ function CaptureRoom() {
 
   return (
     <div
-      className="min-h-screen w-full flex flex-col items-center justify-between text-zinc-900 relative transition-colors"
+      className="min-h-[100dvh] w-full flex flex-col items-center justify-between text-zinc-900 relative transition-colors"
       style={{
         backgroundColor: '#FDFBF7',
         backgroundImage:
@@ -2791,13 +2870,13 @@ function CaptureRoom() {
       </header>
 
       {/* ── Main Container ── */}
-      <main className="w-full max-w-5xl mx-auto px-4 py-4 sm:py-6 relative z-10 flex-1 flex flex-col">
+      <main className="w-full max-w-5xl mx-auto px-4 py-4 sm:py-6 relative z-10 flex-1 flex flex-col pb-[max(4rem,env(safe-area-inset-bottom))] sm:pb-8">
         {/* Title & Subtitle */}
         <div className="text-center mb-4 sm:mb-6">
           <h1 className="text-3xl sm:text-4xl font-extrabold text-neutral-900 tracking-tight">
             {step === 'capture'
               ? isShooting
-                ? `Shot ${Math.min(currentShotIndex, STUDIO_SHOT_COUNT)} of ${STUDIO_SHOT_COUNT}`
+                ? `Shot ${Math.min(currentShotIndex, studioShotCount)} of ${studioShotCount}`
                 : 'Get ready'
               : step === 'select'
               ? (targetCount === 1 ? 'Pick your photo' : `Pick your ${targetCount}`)
@@ -2838,10 +2917,11 @@ function CaptureRoom() {
             {/* Left Column: Live Camera Viewport (Duo / Solo) */}
             <div className="flex flex-col items-center w-full">
               <CameraViewportDuo
+                layout={layout}
                 onCapture={handleCapture}
-                isCapturing={capturedFrames.length < STUDIO_SHOT_COUNT}
+                isCapturing={capturedFrames.length < studioShotCount}
                 capturedCount={capturedFrames.length}
-                totalFrames={STUDIO_SHOT_COUNT}
+                totalFrames={studioShotCount}
                 countdownDuration={countdownDuration}
                 onCountdownDurationChange={setCountdownDuration}
                 capturedThumbnails={capturedFrames.map((f) => f.dataUrl)}
@@ -3290,11 +3370,26 @@ function CaptureRoom() {
                 <div
                   className={`relative overflow-hidden transition-all rounded-xs z-1 ${
                     isVintage ? 'animate-vin-feed' : ''
-                  } ${isFrame && holes ? 'p-0' : 'p-3'}`}
+                  } ${isFrame && holes ? 'p-0' : pbLayout === 'polaroid' ? 'p-2.5 sm:p-3 pb-8 sm:pb-9' : 'p-3'}`}
                   style={{
                     backgroundColor: currentThemeObj?.bg || '#FFFFFF',
-                    width: pbLayout === 'grid' ? 'min(92vw, 380px)' : 'min(84vw, 184px)',
-                    aspectRatio: pbLayout === 'grid' ? '3 / 2' : '1 / 3',
+                    width:
+                      pbLayout === 'grid'
+                        ? 'min(92vw, 380px)'
+                        : pbLayout === 'polaroid'
+                        ? 'min(84vw, 240px)'
+                        : pbLayout === 'duo'
+                        ? 'min(84vw, 220px)'
+                        : 'min(75vw, 184px, calc((100dvh - 380px) / 3))',
+                    maxHeight: 'min(48dvh, 520px)',
+                    aspectRatio:
+                      pbLayout === 'grid'
+                        ? '3 / 2'
+                        : pbLayout === 'polaroid'
+                        ? '0.82'
+                        : pbLayout === 'duo'
+                        ? '2 / 3'
+                        : '1 / 3',
                     boxShadow: isVintage
                       ? 'inset 0 0 0 1px rgba(46, 34, 20, 0.25), 0 14px 34px rgba(0, 0, 0, 0.5)'
                       : 'inset 0 0 0 1px rgba(23, 24, 28, 0.08), 0 16px 36px -4px rgba(0, 0, 0, 0.16)',
@@ -3376,10 +3471,14 @@ function CaptureRoom() {
                       )}
                     </>
                   ) : (
-                    /* Non-Frame Theme (Simple/Pattern Grid or Vertical) */
+                    /* Non-Frame Theme (Simple/Pattern Grid, Polaroid, or Vertical) */
                     <div
-                      className={`w-full h-full grid gap-2 ${
-                        pbLayout === 'grid' ? 'grid-cols-2' : 'grid-cols-1'
+                      className={`w-full h-full ${
+                        pbLayout === 'grid'
+                          ? 'grid grid-cols-2 gap-2'
+                          : pbLayout === 'polaroid'
+                          ? 'flex flex-col items-center p-0'
+                          : 'grid grid-cols-1 gap-2'
                       }`}
                     >
                       {Array.from({ length: targetCount }).map((_, slotIdx) => {
@@ -3391,7 +3490,13 @@ function CaptureRoom() {
                             onClick={() => clearStripSlot(slotIdx)}
                             aria-label={`Slot ${slotIdx + 1}`}
                             title={shot != null ? `Tap to remove photo from slot ${slotIdx + 1}` : undefined}
-                            className={`relative w-full aspect-[3/2] rounded-xs overflow-hidden transition-all flex items-center justify-center border-0 p-0 ${
+                            className={`relative w-full ${
+                              pbLayout === 'polaroid'
+                                ? 'aspect-square rounded-sm'
+                                : pbLayout === 'duo'
+                                ? 'aspect-[4/3] rounded-xs'
+                                : 'aspect-[3/2] rounded-xs'
+                            } overflow-hidden transition-all flex items-center justify-center border-0 p-0 ${
                               shot == null
                                 ? 'bg-[rgba(127,127,127,0.14)] hover:bg-[rgba(127,127,127,0.22)]'
                                 : 'cursor-pointer group'
@@ -3497,7 +3602,7 @@ function CaptureRoom() {
                 <div
                   className={`filter-strip relative overflow-hidden transition-all rounded-xs z-1 ${
                     activeStyleLook.grain > 0 ? 'has-grain' : ''
-                  } ${isFrame && holes ? 'p-0' : 'p-3'}`}
+                  } ${isFrame && holes ? 'p-0' : pbLayout === 'polaroid' ? 'p-2.5 sm:p-3 pb-8 sm:pb-9' : 'p-3'}`}
                   style={{
                     backgroundColor: currentThemeObj?.bg || '#FFFFFF',
                     width:
@@ -3507,7 +3612,8 @@ function CaptureRoom() {
                         ? 'min(84vw, 240px)'
                         : pbLayout === 'duo'
                         ? 'min(84vw, 220px)'
-                        : 'min(84vw, 184px)',
+                        : 'min(75vw, 184px, calc((100dvh - 420px) / 3))',
+                    maxHeight: 'min(45dvh, 500px)',
                     aspectRatio:
                       pbLayout === 'grid'
                         ? '3 / 2'
@@ -3586,8 +3692,12 @@ function CaptureRoom() {
                   ) : (
                     /* Non-Frame Theme (Simple/Pattern) */
                     <div
-                      className={`w-full h-full grid gap-2 ${
-                        pbLayout === 'grid' ? 'grid-cols-2' : 'grid-cols-1'
+                      className={`w-full h-full ${
+                        pbLayout === 'polaroid'
+                          ? 'flex flex-col items-center p-0'
+                          : pbLayout === 'grid'
+                          ? 'grid grid-cols-2 gap-2'
+                          : 'grid grid-cols-1 gap-2'
                       }`}
                     >
                       {Array.from({ length: targetCount }).map((_, slotIdx) => {
@@ -3595,7 +3705,13 @@ function CaptureRoom() {
                         return (
                           <div
                             key={slotIdx}
-                            className="relative w-full aspect-[3/2] rounded-xs overflow-hidden flex items-center justify-center border-0 p-0"
+                            className={`relative w-full ${
+                              pbLayout === 'polaroid'
+                                ? 'aspect-square rounded-sm'
+                                : pbLayout === 'duo'
+                                ? 'aspect-[4/3] rounded-xs'
+                                : 'aspect-[3/2] rounded-xs'
+                            } overflow-hidden flex items-center justify-center border-0 p-0`}
                           >
                             {shot != null && capturedFrames[shot] ? (
                               <img
@@ -3630,7 +3746,7 @@ function CaptureRoom() {
                         className="text-[9px] font-mono tracking-widest"
                         style={{ color: currentThemeObj?.sub || 'rgba(26, 34, 52, 0.65)' }}
                       >
-                        getangie.com
+                        gethaloluna.com
                       </span>
                     </div>
                   )}
@@ -3782,7 +3898,8 @@ function CaptureRoom() {
                         ? 'min(84vw, 240px)'
                         : pbLayout === 'duo'
                         ? 'min(84vw, 220px)'
-                        : 'min(84vw, 184px)',
+                        : 'min(75vw, 184px, calc((100dvh - 420px) / 3))',
+                    maxHeight: 'min(45dvh, 500px)',
                     aspectRatio:
                       pbLayout === 'grid'
                         ? '3 / 2'
@@ -3809,7 +3926,7 @@ function CaptureRoom() {
                   {/* ── LAYER 1: BASE PHOTOS & FRAME ARTWORK (strictly z-[1], clipped to strip boundary) ── */}
                   <div
                     className={`absolute inset-0 w-full h-full rounded-xs overflow-hidden z-[1] pointer-events-none ${
-                      isFrame && holes ? 'p-0' : 'p-3'
+                      isFrame && holes ? 'p-0' : pbLayout === 'polaroid' ? 'p-2.5 sm:p-3 pb-8 sm:pb-9' : 'p-3'
                     }`}
                   >
                     {isFrame && holes ? (
@@ -3875,8 +3992,12 @@ function CaptureRoom() {
                     ) : (
                       /* Non-Frame Theme (Simple/Pattern) */
                       <div
-                        className={`w-full h-full grid gap-2 ${
-                          pbLayout === 'grid' ? 'grid-cols-2' : 'grid-cols-1'
+                        className={`w-full h-full ${
+                          pbLayout === 'polaroid'
+                            ? 'flex flex-col items-center p-0'
+                            : pbLayout === 'grid'
+                            ? 'grid grid-cols-2 gap-2'
+                            : 'grid grid-cols-1 gap-2'
                         }`}
                       >
                         {Array.from({ length: targetCount }).map((_, slotIdx) => {
@@ -3892,7 +4013,13 @@ function CaptureRoom() {
                           return (
                             <div
                               key={slotIdx}
-                              className="relative w-full aspect-[3/2] rounded-xs overflow-hidden flex items-center justify-center border-0 p-0"
+                              className={`relative w-full ${
+                                pbLayout === 'polaroid'
+                                  ? 'aspect-square rounded-sm'
+                                  : pbLayout === 'duo'
+                                  ? 'aspect-[4/3] rounded-xs'
+                                  : 'aspect-[3/2] rounded-xs'
+                              } overflow-hidden flex items-center justify-center border-0 p-0`}
                             >
                               {shot != null && capturedFrames[shot] ? (
                                 <img
@@ -4421,7 +4548,8 @@ function CaptureRoom() {
                         ? 'min(84vw, 240px)'
                         : pbLayout === 'duo'
                         ? 'min(84vw, 220px)'
-                        : 'min(84vw, 184px)',
+                        : 'min(75vw, 184px, calc((100dvh - 420px) / 3))',
+                    maxHeight: 'min(45dvh, 500px)',
                     aspectRatio:
                       pbLayout === 'grid'
                         ? '3 / 2'
@@ -4448,7 +4576,7 @@ function CaptureRoom() {
                   {/* Layer 1: Base Photos & Frame Overlay */}
                   <div
                     className={`absolute inset-0 w-full h-full rounded-xs overflow-hidden z-[1] pointer-events-none ${
-                      isFrame && holes ? 'p-0' : 'p-3'
+                      isFrame && holes ? 'p-0' : pbLayout === 'polaroid' ? 'p-2.5 sm:p-3 pb-8 sm:pb-9' : 'p-3'
                     }`}
                   >
                     {isFrame && holes ? (
@@ -4514,8 +4642,12 @@ function CaptureRoom() {
                     ) : (
                       /* Non-Frame Theme (Simple/Pattern) */
                       <div
-                        className={`w-full h-full grid gap-2 ${
-                          pbLayout === 'grid' ? 'grid-cols-2' : 'grid-cols-1'
+                        className={`w-full h-full ${
+                          pbLayout === 'polaroid'
+                            ? 'flex flex-col items-center p-0'
+                            : pbLayout === 'grid'
+                            ? 'grid grid-cols-2 gap-2'
+                            : 'grid grid-cols-1 gap-2'
                         }`}
                       >
                         {Array.from({ length: targetCount }).map((_, slotIdx) => {
@@ -4531,7 +4663,13 @@ function CaptureRoom() {
                           return (
                             <div
                               key={slotIdx}
-                              className="relative w-full aspect-[3/2] rounded-xs overflow-hidden flex items-center justify-center border-0 p-0"
+                              className={`relative w-full ${
+                                pbLayout === 'polaroid'
+                                  ? 'aspect-square rounded-sm'
+                                  : pbLayout === 'duo'
+                                  ? 'aspect-[4/3] rounded-xs'
+                                  : 'aspect-[3/2] rounded-xs'
+                              } overflow-hidden flex items-center justify-center border-0 p-0`}
                             >
                               {shot != null && capturedFrames[shot] ? (
                                 <img
@@ -4644,7 +4782,7 @@ function CaptureRoom() {
               </div>
 
               {/* Right Column: Download & Action Buttons (1:1 GetAngie) */}
-              <div className="w-full max-w-[420px] flex flex-col gap-3 px-2">
+              <div className="w-full max-w-[420px] flex flex-col gap-3 px-2 pb-12 sm:pb-4">
                 {/* 1. Download HD Button (Black Primary, 100% Free) */}
                 <button
                   type="button"
@@ -4770,18 +4908,20 @@ function CaptureRoom() {
         />
       )}
 
-      {/* Visual Feedback Toasts for Cloud Sync */}
+      {/* Visual Feedback Toasts for Cloud Sync (Positioned at top on mobile so they never block action buttons) */}
       {uploadToast && (
-        <div className="fixed bottom-6 right-6 z-50 bg-zinc-900 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-2xl border border-white/20 flex items-center gap-2 animate-bounce">
+        <div className="fixed top-20 inset-x-4 sm:inset-x-auto sm:top-auto sm:bottom-6 sm:right-6 z-50 bg-zinc-900 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-2xl border border-white/20 flex items-center justify-center sm:justify-start gap-2 animate-bounce">
           <CheckCircle2 size={15} className="text-emerald-400 shrink-0" />
           <span>{uploadToast}</span>
         </div>
       )}
 
       {uploadError && (
-        <div className="fixed bottom-6 right-6 z-50 bg-red-900/90 backdrop-blur-md text-white text-xs px-4 py-3 rounded-xl shadow-2xl border border-red-500/30 flex items-center gap-2.5">
-          <AlertCircle size={15} className="text-red-300 shrink-0" />
-          <span>{uploadError}</span>
+        <div className="fixed top-20 inset-x-4 sm:inset-x-auto sm:top-auto sm:bottom-6 sm:right-6 z-50 bg-red-900/90 backdrop-blur-md text-white text-xs px-4 py-3 rounded-xl shadow-2xl border border-red-500/30 flex items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2">
+            <AlertCircle size={15} className="text-red-300 shrink-0" />
+            <span>{uploadError}</span>
+          </div>
           <button
             onClick={() => setUploadError(null)}
             className="text-white/60 hover:text-white p-0.5 ml-1 transition-colors"
