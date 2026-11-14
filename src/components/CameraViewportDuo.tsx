@@ -528,6 +528,64 @@ export default function CameraViewportDuo({
     return canvas.toDataURL('image/jpeg', 0.92);
   }, [isMirrored, selectedFilter, selectedBg, selectedFaceFilter, isDuoMode, role]);
 
+  // Capture Remote Partner Snapshot directly from active WebRTC remote video feed
+  const captureRemoteSnapshot = useCallback((): string | null => {
+    const video = remoteVideoRef.current;
+    if (!video || video.readyState < 2) return null;
+
+    const origWidth = video.videoWidth || 1280;
+    const origHeight = video.videoHeight || 720;
+    if (origWidth === 0 || origHeight === 0) return null;
+
+    const maxDim = 1920;
+    const scale = Math.min(1, maxDim / Math.max(origWidth, origHeight));
+    const width = Math.round(origWidth * scale);
+    const height = Math.round(origHeight * scale);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+
+    const hasBg = selectedBg && selectedBg !== 'none';
+    if (hasBg) {
+      const img = bgImage(selectedBg);
+      remoteSegmenterRef.current ||= createPersonSegmenter(video);
+      const cut = remoteSegmenterRef.current.capture() || remoteSegmenterRef.current.cutout();
+
+      if (img && cut) {
+        const isHost = role === 'host';
+        const partnerIsHost = !isHost;
+        const half = partnerIsHost ? 0 : 1;
+        const halves = 2;
+
+        const r = bgSourceRect(img.naturalWidth, img.naturalHeight, width, height, half, halves);
+        ctx.drawImage(img, r.sx, r.sy, r.sw, r.sh, 0, 0, width, height);
+        ctx.drawImage(cut, 0, 0, width, height);
+      } else {
+        ctx.drawImage(video, 0, 0, width, height);
+      }
+    } else {
+      ctx.drawImage(video, 0, 0, width, height);
+    }
+
+    const cssFilter = getFilterCss(selectedFilter);
+    if (cssFilter && isCanvasFilterSupported()) {
+      const filteredCanvas = document.createElement('canvas');
+      filteredCanvas.width = width;
+      filteredCanvas.height = height;
+      const fCtx = filteredCanvas.getContext('2d');
+      if (fCtx) {
+        fCtx.filter = cssFilter;
+        fCtx.drawImage(canvas, 0, 0);
+        return filteredCanvas.toDataURL('image/jpeg', 0.92);
+      }
+    }
+
+    return canvas.toDataURL('image/jpeg', 0.92);
+  }, [selectedFilter, selectedBg, role]);
+
   // Process Completed Shot (Merge if Duo, or pass directly if Solo)
   const resolveShot = useCallback(
     async (shotIndex: number, localPhoto: string, remotePhoto?: string) => {
@@ -557,9 +615,9 @@ export default function CameraViewportDuo({
     [isDuoMode, role, onCapture, selectedFilter]
   );
 
-  // Shutter execution
+  // Shutter execution with instant local WebRTC composite
   const executeShutter = useCallback(
-    (shotIndex: number) => {
+    async (shotIndex: number) => {
       triggerFlash();
       const localDataUrl = captureLocalSnapshot();
       if (!localDataUrl) return;
@@ -569,24 +627,16 @@ export default function CameraViewportDuo({
         return;
       }
 
-      // In Duo mode: store local shot and broadcast to partner
-      const pending = pendingPhotosRef.current.get(shotIndex) || {};
-      pending.local = localDataUrl;
-      pendingPhotosRef.current.set(shotIndex, pending);
-
-      onSendSyncAction?.({
-        type: 'PHOTO_FRAME',
-        shotIndex,
-        senderId: role,
-        dataUrl: localDataUrl,
-      });
-
-      // If partner's photo already arrived, merge immediately
-      if (pending.remote) {
-        resolveShot(shotIndex, localDataUrl, pending.remote);
+      // In Duo mode: capture remote partner snapshot directly from active WebRTC stream
+      const remoteDataUrl = captureRemoteSnapshot();
+      if (remoteDataUrl) {
+        await resolveShot(shotIndex, localDataUrl, remoteDataUrl);
+      } else {
+        // Fallback if remote video not yet ready
+        onCapture(localDataUrl, selectedFilter);
       }
     },
-    [triggerFlash, captureLocalSnapshot, isDuoMode, onCapture, selectedFilter, onSendSyncAction, role, resolveShot]
+    [triggerFlash, captureLocalSnapshot, captureRemoteSnapshot, isDuoMode, onCapture, selectedFilter, resolveShot]
   );
 
   // Trigger snap from parent
@@ -687,7 +737,7 @@ export default function CameraViewportDuo({
   return (
     <div className="flex flex-col items-center w-full">
       {/* ── Main Viewport / Stage ── */}
-      <div className="relative w-full aspect-[4/3] rounded-2xl overflow-hidden bg-neutral-950 shadow-md border border-neutral-200">
+      <div className={`relative w-full ${isDuoMode ? 'aspect-[4/3]' : 'aspect-[3/4] max-w-sm sm:max-w-md'} mx-auto rounded-2xl overflow-hidden bg-neutral-950 shadow-md border border-neutral-200`}>
         {/* Flash Overlay */}
         <div
           ref={flashRef}
@@ -767,6 +817,23 @@ export default function CameraViewportDuo({
                       <div className="absolute bottom-3 left-3 z-20 flex items-center rounded-md bg-[#f43f5e] px-2.5 py-1 text-xs font-bold text-white shadow-xs">
                         <span>{isHost ? userName : (partner?.name || partnerName || 'Host')}</span>
                       </div>
+
+                      {/* Remote Audio Toggle for Guest viewing Host on Left */}
+                      {!isLeftLocal && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (remoteVideoRef.current) {
+                              remoteVideoRef.current.muted = !remoteVideoRef.current.muted;
+                              setIsRemoteAudioMuted(remoteVideoRef.current.muted);
+                            }
+                          }}
+                          className="absolute bottom-3 right-3 z-20 rounded-full bg-black/60 p-2 text-white hover:bg-black/80 backdrop-blur-md"
+                          title={isRemoteAudioMuted ? 'Unmute partner audio' : 'Mute partner audio'}
+                        >
+                          {isRemoteAudioMuted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+                        </button>
+                      )}
                     </>
                   ) : isLeftLocal && cameraError ? (
                     <div className="p-4 text-center text-neutral-300 flex flex-col items-center z-10">

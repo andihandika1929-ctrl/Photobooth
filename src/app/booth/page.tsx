@@ -493,6 +493,11 @@ function CaptureRoom() {
       setIncomingSyncAction(action);
       if (action.type === 'LAYOUT_SELECT') {
         setLayout(action.layout as LayoutType);
+      } else if (action.type === 'THEME_SELECT') {
+        const theme = getFrameTheme(action.frameId);
+        setFrameTheme(theme);
+        setLayout(theme.layout);
+        persistFrameTheme(action.frameId);
       } else if (action.type === 'SCENE_CHANGE') {
         if (action.scene === 'EDIT') setStep('select');
         if (action.scene === 'FILTER') setStep('style');
@@ -560,6 +565,13 @@ function CaptureRoom() {
       }
     });
   }, [setOnSyncReceived, targetCount]);
+
+  // When partner joins room, host automatically syncs the selected frame theme
+  useEffect(() => {
+    if (isDuoActive && role === 'host' && partner && frameTheme?.id) {
+      sendSync({ type: 'THEME_SELECT', frameId: frameTheme.id });
+    }
+  }, [isDuoActive, role, partner, frameTheme?.id, sendSync]);
 
   // Synchronized automatic 6-shot shooting sequence with 1.8s post-shutter BTS buffer
   const startAutomaticShoot = useCallback(async () => {
@@ -747,7 +759,7 @@ function CaptureRoom() {
 
   // Restore a remembered frame if the URL is missing one (after a refresh)
   useEffect(() => {
-    const fromUrl = searchParams.get('frame');
+    const fromUrl = searchParams.get('frame') || searchParams.get('theme');
     if (!fromUrl) {
       const saved = readPersistedFrameId();
       if (saved) {
@@ -4785,6 +4797,7 @@ function CaptureRoom() {
         onClose={() => setShowLobbyModal(false)}
         initialTab={modalInitialTab}
         roomCode={roomCode}
+        frameId={frameTheme?.id}
         onSelectSolo={() => {
           setIsDuoActive(false);
           setShowLobbyModal(false);
@@ -4795,14 +4808,17 @@ function CaptureRoom() {
           setRole('host');
           setUserName(name);
           setIsDuoActive(true);
-          router.replace(`/booth?room=${code}`);
+          const currentFrame = frameTheme?.id || 'classic';
+          router.replace(`/booth?room=${code}&frame=${encodeURIComponent(currentFrame)}`);
         }}
         onJoinRoom={(code, name) => {
+          const currentFrame = searchParams.get('frame') || searchParams.get('theme') || frameTheme?.id;
+          const frameParam = currentFrame ? `&frame=${encodeURIComponent(currentFrame)}` : '';
           setRoomCode(code);
           setRole('guest');
           setUserName(name);
           setIsDuoActive(true);
-          router.replace(`/booth?room=${code}`);
+          router.replace(`/booth?room=${code}${frameParam}`);
         }}
         participants={participants}
         partner={partner}

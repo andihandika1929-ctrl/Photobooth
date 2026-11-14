@@ -31,6 +31,7 @@ interface RoomLobbyModalProps {
   isCameraReady: boolean;
   onStartSession: () => void;
   initialTab?: 'create' | 'join';
+  frameId?: string;
 }
 
 export default function RoomLobbyModal({
@@ -48,6 +49,7 @@ export default function RoomLobbyModal({
   isCameraReady,
   onStartSession,
   initialTab = 'create',
+  frameId,
 }: RoomLobbyModalProps) {
   const [tab, setTab] = useState<'create' | 'join'>(initialTab);
   const [joinCodeInput, setJoinCodeInput] = useState('');
@@ -61,7 +63,8 @@ export default function RoomLobbyModal({
 
   const handleCopyLink = () => {
     if (!roomCode || typeof window === 'undefined') return;
-    const url = `${window.location.origin}/booth?room=${roomCode}&role=guest`;
+    const frameParam = frameId ? `&frame=${encodeURIComponent(frameId)}` : '';
+    const url = `${window.location.origin}/booth?room=${roomCode}&role=guest${frameParam}`;
     navigator.clipboard.writeText(url);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
