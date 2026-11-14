@@ -464,7 +464,10 @@ export default function CameraViewportDuo({
       sx = Math.round((origWidth - sw) / 2);
     } else if (videoAspect < targetAspect) {
       sh = Math.round(origWidth / targetAspect);
-      sy = Math.round((origHeight - sh) / 2);
+      // For vertical camera feeds (portrait mobile) placed in a wider container,
+      // anchor crop towards upper-third (0.22) so heads/foreheads are never cut off.
+      const topWeight = videoAspect < 1.0 ? 0.22 : 0.4;
+      sy = Math.max(0, Math.min(origHeight - sh, Math.round((origHeight - sh) * topWeight)));
     }
 
     const maxDim = 1920;
@@ -602,7 +605,10 @@ export default function CameraViewportDuo({
       sx = Math.round((origWidth - sw) / 2);
     } else if (videoAspect < targetAspect) {
       sh = Math.round(origWidth / targetAspect);
-      sy = Math.round((origHeight - sh) / 2);
+      // For vertical camera feeds (portrait mobile) placed in a wider container,
+      // anchor crop towards upper-third (0.22) so heads/foreheads are never cut off.
+      const topWeight = videoAspect < 1.0 ? 0.22 : 0.4;
+      sy = Math.max(0, Math.min(origHeight - sh, Math.round((origHeight - sh) * topWeight)));
     }
 
     const maxDim = 1920;
@@ -889,7 +895,7 @@ export default function CameraViewportDuo({
                         autoPlay
                         playsInline
                         muted={isLeftLocal ? isMirrored : true}
-                        className={`w-full h-full object-cover relative z-[1] ${
+                        className={`w-full h-full object-cover object-[center_28%] relative z-[1] ${
                           isLeftLocal && isSnapFilterActive ? 'hidden' : 'block'
                         } ${isLeftLocal && isMirrored ? 'scale-x-[-1]' : ''}`}
                         style={{ filter: getFilterCss(selectedFilter) }}
@@ -1017,7 +1023,7 @@ export default function CameraViewportDuo({
                         autoPlay
                         playsInline
                         muted={isRightLocal ? isMirrored : true}
-                        className={`w-full h-full object-cover relative z-[1] ${
+                        className={`w-full h-full object-cover object-[center_28%] relative z-[1] ${
                           isRightLocal && isSnapFilterActive ? 'hidden' : 'block'
                         } ${isRightLocal && isMirrored ? 'scale-x-[-1]' : ''}`}
                         style={{ filter: getFilterCss(selectedFilter) }}
@@ -1128,7 +1134,7 @@ export default function CameraViewportDuo({
                   autoPlay
                   playsInline
                   muted
-                  className={`w-full h-full object-cover relative z-[1] ${
+                  className={`w-full h-full object-cover object-[center_28%] relative z-[1] ${
                     isSnapFilterActive ? 'hidden' : 'block'
                   } ${isMirrored ? 'scale-x-[-1]' : ''}`}
                   style={{ filter: getFilterCss(selectedFilter) }}
@@ -1242,7 +1248,7 @@ export default function CameraViewportDuo({
 
       {/* ── Bottom Controls (Mirror, Switch Camera, & Manual Trigger if not shooting) ── */}
       {!isShooting && (
-        <div className="w-full max-w-md mt-4 flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-white/70 border border-neutral-200/80 shadow-xs flex-wrap">
+        <div className="w-full max-w-md mt-3 sm:mt-4 flex items-center justify-center sm:justify-between gap-2 px-2.5 sm:px-3 py-2 rounded-xl bg-white/80 backdrop-blur-xs border border-neutral-200/80 shadow-xs flex-wrap">
           <div className="flex items-center gap-2">
             {onToggleFacingMode && (
               <button

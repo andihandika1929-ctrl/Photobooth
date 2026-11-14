@@ -379,24 +379,32 @@ function CaptureRoom() {
         localStreamRef.current.getVideoTracks().forEach((t) => t.stop());
       }
 
-      // 1. Request video stream in Full HD with preferred facingMode ('user' or 'environment')
+      // 1. Request camera stream without restrictive 'min' constraints.
+      // Restrictive 'min: 1280' forces Android Camera2 HAL on front cameras to digitally crop 2.5x into the sensor.
+      // Using ideal dimensions and native 4:3 ensures full uncropped wide-angle sensor FOV on all mobile and desktop devices.
       let stream: MediaStream;
+      const isMobileDevice =
+        typeof window !== 'undefined' &&
+        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           video: {
-            width: { ideal: 1920, min: 1280 },
-            height: { ideal: 1080, min: 720 },
-            facingMode: { ideal: mode },
+            facingMode: mode ? { ideal: mode } : { ideal: 'user' },
+            width: { ideal: 1920 },
+            height: { ideal: isMobileDevice ? 1440 : 1080 },
+            aspectRatio: { ideal: 4 / 3 },
             frameRate: { ideal: 30, max: 60 },
           },
           audio: false,
         });
       } catch (errFacing) {
-        // Fallback for laptops/devices without specific facingMode support
+        // Fallback for devices without specific facingMode or high-res support
         stream = await navigator.mediaDevices.getUserMedia({
           video: {
-            width: { ideal: 1280, min: 640 },
-            height: { ideal: 720, min: 480 },
+            facingMode: mode ? { ideal: mode } : { ideal: 'user' },
+            width: { ideal: 1280 },
+            height: { ideal: 960 },
             frameRate: { ideal: 30 },
           },
           audio: false,
@@ -2779,20 +2787,24 @@ function CaptureRoom() {
 
   return (
     <div
-      className="min-h-[100dvh] w-full flex flex-col items-center justify-between text-zinc-900 relative transition-colors"
+      className="min-h-[100dvh] w-full max-w-full flex flex-col items-center justify-between text-zinc-900 relative transition-colors overflow-x-hidden"
       style={{
         backgroundColor: '#FDFBF7',
-        backgroundImage:
-          boothStyle === 'birthday'
-            ? 'url("/client/rooms/birthday/wall.webp")'
-            : boothStyle === 'vintage'
-            ? 'url("/assets/rooms/wall.webp")'
-            : undefined,
-        backgroundPosition: 'center top',
-        backgroundSize: 'cover',
-        backgroundAttachment: 'fixed',
       }}
     >
+      {/* Room Theme Wallpaper (Fixed full viewport, resilient across iOS & Android) */}
+      {(boothStyle === 'birthday' || boothStyle === 'vintage') && (
+        <div
+          className="fixed inset-0 pointer-events-none z-0 bg-cover bg-top"
+          style={{
+            backgroundImage:
+              boothStyle === 'birthday'
+                ? 'url("/client/rooms/birthday/wall.webp")'
+                : 'url("/assets/rooms/wall.webp")',
+          }}
+        />
+      )}
+
       {/* Subtle Dot-Matrix Texture */}
       <div
         className="fixed inset-0 pointer-events-none opacity-[0.14] z-0"
@@ -2803,26 +2815,26 @@ function CaptureRoom() {
       />
 
       {/* ── Angie Photobooth Stepper Header (1:1 REA) ── */}
-      <header className="w-full border-b border-[#E8DFCE] bg-[#FAF9F5]/90 backdrop-blur-md sticky top-0 z-30">
-        <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between">
+      <header className="w-full border-b border-[#E8DFCE] bg-[#FAF9F5]/90 backdrop-blur-md sticky top-0 z-30 overflow-x-hidden">
+        <div className="max-w-5xl mx-auto px-3 sm:px-4 py-2 sm:py-3 flex items-center justify-between gap-1 sm:gap-2">
           <button
             type="button"
             onClick={handleBack}
-            className="inline-flex items-center gap-1.5 text-sm font-semibold text-[#f43f5e] hover:text-rose-600 transition-colors group cursor-pointer"
+            className="inline-flex items-center gap-1 sm:gap-1.5 text-xs sm:text-sm font-semibold text-[#f43f5e] hover:text-rose-600 transition-colors group cursor-pointer shrink-0"
           >
-            <ChevronLeft size={18} className="transition-transform group-hover:-translate-x-0.5" />
-            <span>Back</span>
+            <ChevronLeft size={16} className="transition-transform group-hover:-translate-x-0.5 sm:w-[18px] sm:h-[18px]" />
+            <span className="hidden xs:inline">Back</span>
           </button>
 
           {/* Stepper with session countdown timer pill */}
-          <div className="flex flex-col items-center">
-            <div className="flex items-center gap-1.5 px-3 py-0.5 bg-white border border-neutral-200/80 rounded-full text-xs font-semibold text-neutral-700 shadow-2xs mb-1.5">
-              <Clock size={12} className="text-neutral-500" />
+          <div className="flex flex-col items-center shrink-0">
+            <div className="flex items-center gap-1.5 px-2.5 sm:px-3 py-0.5 bg-white border border-neutral-200/80 rounded-full text-[11px] sm:text-xs font-semibold text-neutral-700 shadow-2xs mb-1">
+              <Clock size={11} className="text-neutral-500 sm:w-3 sm:h-3" />
               <span>{formatSessionTime(sessionSeconds)}</span>
             </div>
 
             {/* 5-Step Stepper: Frame -> Shoot -> Pick -> Style -> Done */}
-            <div className="flex items-center gap-2 sm:gap-4">
+            <div className="flex items-center gap-1.5 sm:gap-3 md:gap-4">
               {[
                 { id: 'frame', label: 'Frame' },
                 { id: 'shoot', label: 'Shoot' },
@@ -2842,10 +2854,10 @@ function CaptureRoom() {
                   (s.id === 'done' && (step === 'done' || step === 'edit'));
 
                 return (
-                  <div key={s.id} className="flex items-center gap-2 sm:gap-4">
-                    <div className="flex flex-col items-center gap-1">
+                  <div key={s.id} className="flex items-center gap-1.5 sm:gap-3 md:gap-4">
+                    <div className="flex flex-col items-center gap-0.5 sm:gap-1">
                       <div
-                        className={`w-5 h-5 rounded-full flex items-center justify-center transition-all ${
+                        className={`w-4 h-4 sm:w-5 sm:h-5 rounded-full flex items-center justify-center transition-all ${
                           isCompleted
                             ? 'bg-pink-500 text-white'
                             : isActive
@@ -2854,22 +2866,26 @@ function CaptureRoom() {
                         }`}
                       >
                         {isCompleted ? (
-                          <Check size={11} strokeWidth={3} className="text-white" />
+                          <Check size={10} strokeWidth={3} className="text-white sm:w-[11px] sm:h-[11px]" />
                         ) : isActive ? (
-                          <span className="w-2 h-2 rounded-full bg-pink-500" />
+                          <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-pink-500" />
                         ) : null}
                       </div>
                       <span
-                        className={`text-[10px] sm:text-xs font-bold uppercase tracking-wider ${
-                          isActive || isCompleted ? 'text-neutral-900' : 'text-neutral-400'
+                        className={`text-[9px] sm:text-xs font-bold uppercase tracking-wider ${
+                          isActive
+                            ? 'text-neutral-900 inline'
+                            : isCompleted
+                            ? 'text-neutral-700 hidden sm:inline'
+                            : 'text-neutral-400 hidden sm:inline'
                         }`}
                       >
                         {s.label}
                       </span>
                     </div>
                     {idx < arr.length - 1 && (
-                      <div className="flex items-center text-neutral-300 -mt-3.5 text-[10px] tracking-widest select-none">
-                        ····
+                      <div className="flex items-center text-neutral-300 -mt-2.5 sm:-mt-3.5 text-[8px] sm:text-[10px] tracking-widest select-none">
+                        ···
                       </div>
                     )}
                   </div>
@@ -2878,27 +2894,27 @@ function CaptureRoom() {
             </div>
           </div>
 
-          <div className="w-12 flex justify-end">
+          <div className="w-8 sm:w-12 flex justify-end shrink-0">
             <button
               type="button"
               onClick={() => setSoundMuted(toggleMuted())}
               aria-pressed={soundMuted}
               aria-label={soundMuted ? 'Unmute booth sounds' : 'Mute booth sounds'}
               title={soundMuted ? 'Sound off' : 'Sound on'}
-              className={`w-8 h-8 rounded-full border flex items-center justify-center transition-all active:scale-95 ${
+              className={`w-7 h-7 sm:w-8 sm:h-8 rounded-full border flex items-center justify-center transition-all active:scale-95 ${
                 soundMuted
                   ? 'bg-neutral-100 border-neutral-200 text-neutral-400'
                   : 'bg-white border-neutral-200 text-neutral-700 hover:border-neutral-400 shadow-2xs'
               }`}
             >
-              {soundMuted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+              {soundMuted ? <VolumeX size={13} className="sm:w-3.5 sm:h-3.5" /> : <Volume2 size={13} className="sm:w-3.5 sm:h-3.5" />}
             </button>
           </div>
         </div>
       </header>
 
       {/* ── Main Container ── */}
-      <main className="w-full max-w-5xl mx-auto px-4 py-4 sm:py-6 relative z-10 flex-1 flex flex-col pb-[max(4rem,env(safe-area-inset-bottom))] sm:pb-8">
+      <main className="w-full max-w-5xl mx-auto px-3 sm:px-4 py-3 sm:py-6 relative z-10 flex-1 flex flex-col pb-[max(4rem,env(safe-area-inset-bottom))] sm:pb-8 overflow-x-hidden">
         {/* Title & Subtitle */}
         <div className="text-center mb-4 sm:mb-6">
           <h1 className="text-3xl sm:text-4xl font-extrabold text-neutral-900 tracking-tight">
@@ -2974,11 +2990,52 @@ function CaptureRoom() {
                 facingMode={facingMode}
                 onToggleFacingMode={toggleFacingMode}
               />
+
+              {/* MOBILE ONLY: Prominent "I'm Ready" Action Button right under Camera Controls */}
+              {!isShooting && (
+                <div className="w-full max-w-md mt-3 px-1 lg:hidden">
+                  <button
+                    type="button"
+                    disabled={isMyReady}
+                    onClick={() => {
+                      setIsMyReady(true);
+                      if (isDuoActive) {
+                        sendSync({ type: 'BOOTH_READY', senderId: role });
+                      }
+                    }}
+                    className={`w-full py-3.5 px-6 rounded-xl font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 active:scale-[0.98] ${
+                      isMyReady
+                        ? 'bg-neutral-800 text-white opacity-90 cursor-default'
+                        : 'bg-[#18181B] hover:bg-neutral-800 text-white cursor-pointer ring-2 ring-pink-500/20'
+                    }`}
+                  >
+                    {isMyReady ? (
+                      <>
+                        <Check size={16} strokeWidth={2.5} className="text-emerald-400" />
+                        <span>Ready</span>
+                      </>
+                    ) : (
+                      <span>I&apos;m ready</span>
+                    )}
+                  </button>
+                  {isDuoActive && (
+                    <p className="text-[11px] text-center text-neutral-500 mt-2 font-medium">
+                      {isMyReady && partner?.isReady
+                        ? 'Both ready! Starting photo shoot...'
+                        : isMyReady
+                        ? `You are ready! Waiting for ${partner?.name || 'partner'}...`
+                        : partner?.isReady
+                        ? `${partner?.name || 'Partner'} is ready! Tap to start.`
+                        : 'Tap when you are ready to shoot.'}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Right Column: .pb-booth-side Controls (Backgrounds & Face Filters) */}
             {!isShooting && (
-              <div className="flex flex-col w-full max-w-sm mx-auto lg:max-w-none">
+              <div className="flex flex-col w-full max-w-md mx-auto lg:max-w-none">
                 {/* Segmented Tabs: Background / Face Filter */}
                 <div className="grid grid-cols-2 p-1 bg-neutral-100 rounded-2xl mb-3">
                   <button
@@ -3030,7 +3087,7 @@ function CaptureRoom() {
                 </div>
 
                 {/* Tray Content Card (Scrollable 4-column circles) */}
-                <div className="bg-white rounded-2xl border border-neutral-200/80 p-4 max-h-[460px] overflow-y-auto shadow-xs">
+                <div className="bg-white rounded-2xl border border-neutral-200/80 p-3 sm:p-4 max-h-[300px] sm:max-h-[460px] overflow-y-auto shadow-xs">
                   {activeTrayTab === 'background' || !IS_FACE_FILTER_ENABLED ? (
                     <div className="flex flex-col gap-4">
                       {/* Scenes Group */}
@@ -3223,8 +3280,8 @@ function CaptureRoom() {
                   )}
                 </div>
 
-                {/* Ready Button & Status */}
-                <div className="mt-3.5 flex flex-col gap-2">
+                {/* Ready Button & Status (Desktop Layout) */}
+                <div className="mt-3.5 hidden lg:flex flex-col gap-2">
                   <button
                     type="button"
                     disabled={isMyReady}
