@@ -3,21 +3,14 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { RTCSignal } from './roomTypes';
 
+// Google public STUN servers for WebRTC peer-to-peer connection
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:stun.cloudflare.com:3478' },
-    {
-      urls: [
-        'turn:openrelay.metered.ca:80',
-        'turn:openrelay.metered.ca:443',
-        'turn:openrelay.metered.ca:443?transport=tcp',
-      ],
-      username: 'openrelayproject',
-      credential: 'openrelayproject',
-    },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
   ],
   iceCandidatePoolSize: 10,
 };
@@ -44,6 +37,32 @@ export function useWebRTC({
 
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const iceCandidatesQueue = useRef<RTCIceCandidateInit[]>([]);
+  const isMakingOfferRef = useRef(false);
+
+  // Apply 480p 30fps constraints to transmitted video stream
+  const applyVideoSenderConstraints = useCallback(async (sender: RTCRtpSender, track: MediaStreamTrack) => {
+    if (track.kind !== 'video') return;
+    try {
+      const settings = track.getSettings();
+      const height = settings.height || 720;
+      // Downscale so transmitted preview stream is 480p (ideal for mobile & PC smooth 30-60fps)
+      const scaleFactor = height > 480 ? Math.max(1, height / 480) : 1;
+
+      const params = sender.getParameters();
+      if (!params.encodings || params.encodings.length === 0) {
+        params.encodings = [{}];
+      }
+      params.encodings[0].scaleResolutionDownBy = scaleFactor;
+      params.encodings[0].maxBitrate = 900_000; // 900 kbps (lightweight 480p)
+      params.encodings[0].maxFramerate = 30; // 30 FPS preview target
+      (params as any).degradationPreference = 'maintain-framerate'; // Prioritize fluid framerate over resolution
+
+      await sender.setParameters(params);
+      console.log(`[WebRTC] Video stream constrained to 480p@30fps (scale: ${scaleFactor.toFixed(2)})`);
+    } catch (err) {
+      console.warn('[WebRTC] setParameters error (ignorable):', err);
+    }
+  }, []);
 
   // Initialize or clean up RTCPeerConnection
   const cleanupPC = useCallback(() => {
@@ -51,9 +70,12 @@ export function useWebRTC({
       pcRef.current.onicecandidate = null;
       pcRef.current.ontrack = null;
       pcRef.current.onconnectionstatechange = null;
+      pcRef.current.oniceconnectionstatechange = null;
       pcRef.current.close();
       pcRef.current = null;
     }
+    iceCandidatesQueue.current = [];
+    isMakingOfferRef.current = false;
     setRemoteStream(null);
     setConnectionState('closed');
   }, []);
@@ -67,8 +89,18 @@ export function useWebRTC({
     pcRef.current = pc;
 
     pc.onconnectionstatechange = () => {
-      console.log('[WebRTC] Connection state changed:', pc.connectionState);
+      console.log('[WebRTC] Connection state:', pc.connectionState);
       setConnectionState(pc.connectionState);
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      console.log('[WebRTC] ICE connection state:', pc.iceConnectionState);
+      if (pc.iceConnectionState === 'failed') {
+        if (typeof (pc as any).restartIce === 'function') {
+          console.log('[WebRTC] Attempting ICE restart...');
+          (pc as any).restartIce();
+        }
+      }
     };
 
     pc.onicecandidate = (event) => {
@@ -98,11 +130,14 @@ export function useWebRTC({
       }
     };
 
-    // Add local tracks if available
+    // Add local tracks if available and apply 480p preview constraints
     if (localStream) {
       localStream.getTracks().forEach((track) => {
         try {
-          pc.addTrack(track, localStream);
+          const sender = pc.addTrack(track, localStream);
+          if (track.kind === 'video') {
+            applyVideoSenderConstraints(sender, track);
+          }
         } catch (e) {
           console.warn('[WebRTC] addTrack error:', e);
         }
@@ -110,7 +145,7 @@ export function useWebRTC({
     }
 
     return pc;
-  }, [enabled, cleanupPC, localStream, onSendSignal, senderId]);
+  }, [enabled, cleanupPC, localStream, onSendSignal, senderId, applyVideoSenderConstraints]);
 
   // Initiate call if this client is initiator
   const startCall = useCallback(async () => {
@@ -120,24 +155,37 @@ export function useWebRTC({
     }
     if (!pc) return;
 
+    if (pc.signalingState !== 'stable') {
+      console.log('[WebRTC] Cannot startCall, signalingState is not stable:', pc.signalingState);
+      return;
+    }
+
     // Attach latest local tracks
     if (localStream) {
       const senders = pc.getSenders();
       localStream.getTracks().forEach((track) => {
-        if (!senders.some((s) => s.track === track)) {
+        const existing = senders.find((s) => s.track?.kind === track.kind);
+        if (!existing) {
           try {
-            pc.addTrack(track, localStream);
+            const sender = pc!.addTrack(track, localStream);
+            if (track.kind === 'video') {
+              applyVideoSenderConstraints(sender, track);
+            }
           } catch (e) {}
         }
       });
     }
 
     try {
+      isMakingOfferRef.current = true;
       console.log('[WebRTC] Creating offer...');
       const offer = await pc.createOffer({
         offerToReceiveAudio: true,
         offerToReceiveVideo: true,
       });
+
+      if (pc.signalingState !== 'stable') return;
+
       await pc.setLocalDescription(offer);
       onSendSignal({
         type: 'offer',
@@ -146,8 +194,10 @@ export function useWebRTC({
       });
     } catch (err) {
       console.error('[WebRTC] Failed to create offer:', err);
+    } finally {
+      isMakingOfferRef.current = false;
     }
-  }, [createPeerConnection, localStream, onSendSignal, senderId]);
+  }, [createPeerConnection, localStream, onSendSignal, senderId, applyVideoSenderConstraints]);
 
   // Request offer from host (used by guest when guest camera becomes ready)
   const requestOffer = useCallback(() => {
@@ -175,13 +225,27 @@ export function useWebRTC({
           }
         } else if (signal.type === 'offer') {
           console.log('[WebRTC] Received offer, applying remote description');
+
+          // Handle collision/glare
+          if (pc.signalingState !== 'stable') {
+            if (!isInitiator) {
+              await pc.setLocalDescription({ type: 'rollback' });
+            } else {
+              return;
+            }
+          }
+
           // Add local tracks before creating answer
           if (localStream) {
             const senders = pc.getSenders();
             localStream.getTracks().forEach((track) => {
-              if (!senders.some((s) => s.track === track)) {
+              const existing = senders.find((s) => s.track?.kind === track.kind);
+              if (!existing) {
                 try {
-                  pc.addTrack(track, localStream);
+                  const sender = pc!.addTrack(track, localStream);
+                  if (track.kind === 'video') {
+                    applyVideoSenderConstraints(sender, track);
+                  }
                 } catch (e) {}
               }
             });
@@ -192,7 +256,7 @@ export function useWebRTC({
           // Drain queued ICE candidates
           while (iceCandidatesQueue.current.length > 0) {
             const candidate = iceCandidatesQueue.current.shift();
-            if (candidate) {
+            if (candidate && candidate.candidate) {
               try {
                 await pc.addIceCandidate(new RTCIceCandidate(candidate));
               } catch (e) {
@@ -211,38 +275,42 @@ export function useWebRTC({
           });
         } else if (signal.type === 'answer') {
           console.log('[WebRTC] Received answer, applying remote description');
-          await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
+          if (pc.signalingState === 'have-local-offer') {
+            await pc.setRemoteDescription(new RTCSessionDescription(signal.sdp));
 
-          // Drain queued ICE candidates
-          while (iceCandidatesQueue.current.length > 0) {
-            const candidate = iceCandidatesQueue.current.shift();
-            if (candidate) {
-              try {
-                await pc.addIceCandidate(new RTCIceCandidate(candidate));
-              } catch (e) {
-                console.warn('[WebRTC] Draining candidate error:', e);
+            // Drain queued ICE candidates
+            while (iceCandidatesQueue.current.length > 0) {
+              const candidate = iceCandidatesQueue.current.shift();
+              if (candidate && candidate.candidate) {
+                try {
+                  await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                } catch (e) {
+                  console.warn('[WebRTC] Draining candidate error:', e);
+                }
               }
             }
           }
         } else if (signal.type === 'candidate') {
-          if (pc.remoteDescription && pc.remoteDescription.type) {
-            try {
-              await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
-            } catch (e) {
-              console.warn('[WebRTC] addIceCandidate error:', e);
+          if (signal.candidate && signal.candidate.candidate) {
+            if (pc.remoteDescription && pc.remoteDescription.type) {
+              try {
+                await pc.addIceCandidate(new RTCIceCandidate(signal.candidate));
+              } catch (e) {
+                console.warn('[WebRTC] addIceCandidate error:', e);
+              }
+            } else {
+              iceCandidatesQueue.current.push(signal.candidate);
             }
-          } else {
-            iceCandidatesQueue.current.push(signal.candidate);
           }
         }
       } catch (err) {
         console.error('[WebRTC] Error handling signal:', err);
       }
     },
-    [createPeerConnection, isInitiator, localStream, onSendSignal, senderId, startCall]
+    [createPeerConnection, isInitiator, localStream, onSendSignal, senderId, startCall, applyVideoSenderConstraints]
   );
 
-  // Sync track replacements when localStream changes
+  // Sync track replacements when localStream changes (without re-triggering startCall renegotiation loop)
   useEffect(() => {
     const pc = pcRef.current;
     if (!pc || !localStream) return;
@@ -251,19 +319,21 @@ export function useWebRTC({
     localStream.getTracks().forEach((track) => {
       const sender = senders.find((s) => s.track?.kind === track.kind);
       if (sender) {
-        sender.replaceTrack(track).catch(console.error);
+        sender.replaceTrack(track).then(() => {
+          if (track.kind === 'video') {
+            applyVideoSenderConstraints(sender, track);
+          }
+        }).catch(console.error);
       } else {
         try {
-          pc.addTrack(track, localStream);
+          const newSender = pc.addTrack(track, localStream);
+          if (track.kind === 'video') {
+            applyVideoSenderConstraints(newSender, track);
+          }
         } catch (e) {}
       }
     });
-
-    // If initiator and connection is stable, update call
-    if (isInitiator && pc.remoteDescription && pc.signalingState === 'stable') {
-      startCall();
-    }
-  }, [localStream, isInitiator, startCall]);
+  }, [localStream, applyVideoSenderConstraints]);
 
   // Audio / Video toggles
   const toggleAudio = useCallback(() => {

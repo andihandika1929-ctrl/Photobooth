@@ -10,6 +10,7 @@
     "tunnel": "cloudflared tunnel --url http://localhost:3000"
   },
   "dependencies": {
+    "@snap/camera-kit": "^1.23.1",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.45.0",
     "canvas-confetti": "^1.9.4",

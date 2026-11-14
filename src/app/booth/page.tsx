@@ -70,7 +70,19 @@ import {
   FACE_FILTERS,
   getPoseForShot,
 } from '@/lib/photobooth-shoot-data';
+import { loadSnapLenses, type Lens } from '@/lib/media/snapCameraKit';
 import { savePhotoToSupabase } from '@/utils/supabasePhotoPipeline';
+
+// ==========================================
+// Snap Camera Kit Lens Configuration
+// - IS_FACE_FILTER_ENABLED: Set ke false selama menunggu persetujuan watermark dari tim Snap.
+// - ALLOWED_LENS_NAMES: Jika diisi, HANYA lensa dengan nama ini yang akan ditampilkan.
+//   Jika kosong, akan menampilkan maksimal 12 lensa yang lolos saringan kata kunci non-game.
+// - EXCLUDED_LENS_NAMES: Daftar nama lensa yang ingin disembunyikan secara manual.
+// ==========================================
+const IS_FACE_FILTER_ENABLED = false;
+const ALLOWED_LENS_NAMES: string[] = [];
+const EXCLUDED_LENS_NAMES: string[] = [];
 import {
   getFrameTheme,
   persistFrameTheme,
@@ -285,12 +297,17 @@ function CaptureRoom() {
   );
   const [userName, setUserName] = useState<string>(() => searchParams.get('name') || 'You');
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [incomingSyncAction, setIncomingSyncAction] = useState<RoomSyncAction | null>(null);
 
   // Angie REA Shoot & Get Ready States
   const [selectedBg, setSelectedBg] = useState<string>('none');
   const [selectedFaceFilter, setSelectedFaceFilter] = useState<string>('none');
+  const [snapLenses, setSnapLenses] = useState<Lens[]>([]);
+  const [isLoadingLenses, setIsLoadingLenses] = useState(false);
+  const [lensError, setLensError] = useState<string | null>(null);
+  const isBootstrappingRef = useRef(false);
   const [activeTrayTab, setActiveTrayTab] = useState<'background' | 'filter'>('background');
   const [isMyReady, setIsMyReady] = useState(false);
   const [isPartnerReady, setIsPartnerReady] = useState(false);
@@ -298,6 +315,8 @@ function CaptureRoom() {
   const [currentShotIndex, setCurrentShotIndex] = useState(1);
   const isShootingRef = useRef(false);
   const hasCompletedShootRef = useRef(false);
+  const abortShootRef = useRef(false);
+  const callInitiatedPartnerIdRef = useRef<string | null>(null);
   const [shootCountdown, setShootCountdown] = useState<number | null>(null);
   const [triggerSnap, setTriggerSnap] = useState(0);
 
@@ -342,9 +361,14 @@ function CaptureRoom() {
     }
 
     try {
-      // 1. Request video stream first (audio: false to avoid compound permission failure)
+      // 1. Request video stream in Full HD (1080p ideal) for pristine snapshot capture
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+        video: {
+          width: { ideal: 1920, min: 1280 },
+          height: { ideal: 1080, min: 720 },
+          facingMode: 'user',
+          frameRate: { ideal: 30, max: 60 },
+        },
         audio: false,
       });
 
@@ -380,11 +404,49 @@ function CaptureRoom() {
   }, []);
 
   useEffect(() => {
+    localStreamRef.current = localStream;
+  }, [localStream]);
+
+  useEffect(() => {
     startCamera();
     return () => {
-      localStream?.getTracks().forEach((t) => t.stop());
+      localStreamRef.current?.getTracks().forEach((t) => t.stop());
     };
   }, [startCamera]);
+
+  // Load Snap Camera Kit Lenses with StrictMode guard & try-catch-finally
+  const fetchSnapLenses = useCallback(async (force = false) => {
+    if (isBootstrappingRef.current && !force) return;
+    isBootstrappingRef.current = true;
+
+    setIsLoadingLenses(true);
+    setLensError(null);
+    try {
+      const lenses = await loadSnapLenses(ALLOWED_LENS_NAMES, EXCLUDED_LENS_NAMES);
+      setSnapLenses(lenses);
+      if (lenses.length === 0) {
+        setLensError('Tidak ada filter yang ditemukan di grup ini.');
+      }
+    } catch (err: unknown) {
+      const error = err as Error;
+      const msg = error?.message || 'Gagal memuat Snap Camera Kit filter.';
+      console.error('[Snap Camera Kit] Error saat memuat lenses:', error);
+      setLensError(msg);
+    } finally {
+      setIsLoadingLenses(false);
+      isBootstrappingRef.current = false;
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchSnapLenses();
+  }, [fetchSnapLenses]);
+
+  useEffect(() => {
+    if (activeTrayTab === 'filter' && snapLenses.length === 0 && !isLoadingLenses && !lensError) {
+      fetchSnapLenses();
+    }
+  }, [activeTrayTab, snapLenses.length, isLoadingLenses, lensError, fetchSnapLenses]);
 
   // Supabase Realtime Channel
   const {
@@ -502,6 +564,7 @@ function CaptureRoom() {
   // Synchronized automatic 6-shot shooting sequence with 1.8s post-shutter BTS buffer
   const startAutomaticShoot = useCallback(async () => {
     if (isShootingRef.current || hasCompletedShootRef.current || capturedFrames.length >= STUDIO_SHOT_COUNT) return;
+    abortShootRef.current = false;
     isShootingRef.current = true;
     setIsShooting(true);
 
@@ -509,6 +572,13 @@ function CaptureRoom() {
     const optimalMime = getOptimalVideoMimeType();
 
     for (let shot = 0; shot < STUDIO_SHOT_COUNT; shot++) {
+      if (abortShootRef.current) {
+        setIsShooting(false);
+        isShootingRef.current = false;
+        setShootCountdown(null);
+        return;
+      }
+
       setCurrentShotIndex(shot + 1);
       let recorder: MediaRecorder | null = null;
       const chunks: Blob[] = [];
@@ -531,6 +601,13 @@ function CaptureRoom() {
 
       // 2. 3-second countdown with beeps
       for (let sec = 3; sec >= 1; sec--) {
+        if (abortShootRef.current) {
+          try { if (recorder && recorder.state === 'recording') recorder.stop(); } catch (e) {}
+          setIsShooting(false);
+          isShootingRef.current = false;
+          setShootCountdown(null);
+          return;
+        }
         setShootCountdown(sec);
         try {
           playCountdownBeep(sec);
@@ -539,12 +616,26 @@ function CaptureRoom() {
       }
       setShootCountdown(null);
 
+      if (abortShootRef.current) {
+        try { if (recorder && recorder.state === 'recording') recorder.stop(); } catch (e) {}
+        setIsShooting(false);
+        isShootingRef.current = false;
+        return;
+      }
+
       // 3. Trigger shutter snapshot
       setTriggerSnap((n) => n + 1);
 
       // 4. CRITICAL TOLERANCE BUFFER: Wait 1.8s AFTER shutter snapshot!
       // Captures post-snap user motion/smiles and ensures camera stream buffer writes completely.
       await new Promise((r) => setTimeout(r, 1800));
+
+      if (abortShootRef.current) {
+        try { if (recorder && recorder.state === 'recording') recorder.stop(); } catch (e) {}
+        setIsShooting(false);
+        isShootingRef.current = false;
+        return;
+      }
 
       // 5. Cleanly stop recorder and collect full video blob
       if (recorder && recorder.state === 'recording') {
@@ -619,18 +710,21 @@ function CaptureRoom() {
 
   // When partner joins AND local camera is ready:
   useEffect(() => {
-    if (!isDuoActive || !partner) return;
+    if (!isDuoActive || !partner || !localStream) {
+      if (!partner) callInitiatedPartnerIdRef.current = null;
+      return;
+    }
+
+    // Only initiate once per partner connection session
+    if (callInitiatedPartnerIdRef.current === partner.id) return;
+    callInitiatedPartnerIdRef.current = partner.id;
 
     if (role === 'host') {
-      if (localStream) {
-        console.log('[HaloLuna Duo] Host calling partner:', partner.name);
-        startCall();
-      }
+      console.log('[HaloLuna Duo] Host initiating WebRTC call to partner:', partner.name);
+      startCall();
     } else {
-      if (localStream) {
-        console.log('[HaloLuna Duo] Guest requesting offer from host');
-        requestOffer();
-      }
+      console.log('[HaloLuna Duo] Guest requesting WebRTC offer from host');
+      requestOffer();
     }
   }, [role, partner, isDuoActive, localStream, startCall, requestOffer]);
 
@@ -976,19 +1070,38 @@ function CaptureRoom() {
   }, []);
 
   const handleReset = useCallback(() => {
+    // 1. Immediately abort and lock any auto-shoot sequence
+    abortShootRef.current = true;
+    hasCompletedShootRef.current = true;
+    isShootingRef.current = false;
+    setIsShooting(false);
+    setIsMyReady(false);
+    setIsPartnerReady(false);
+    setShootCountdown(null);
+
+    // 2. Clear upload and session references
     hasUploadedRef.current = false;
     lastUploadedTemplateRef.current = null;
     sessionPhotoIdRef.current = null;
     sessionStoragePathRef.current = null;
-    hasCompletedShootRef.current = false;
-    isShootingRef.current = false;
-    setIsShooting(false);
+
+    // 3. Clear captured photos
     setCurrentShotIndex(1);
     setCapturedFrames([]);
     setSelectedIndices([]);
-    setStep('capture');
     setShareUrl(null);
     setShowShareModal(false);
+
+    // 4. Stop hardware camera and mic streams completely
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track) => {
+        try {
+          track.stop();
+        } catch (e) {}
+      });
+      setLocalStream(null);
+    }
+
     if (isDuoActive) {
       sendSync({ type: 'SCENE_CHANGE', scene: 'BOOTH' });
     }
@@ -1639,14 +1752,16 @@ function CaptureRoom() {
       // 4. Date & Branding Footer
       if (!currentThemeObj?.noFooter) {
         ctx.save();
-        ctx.fillStyle = currentThemeObj?.fg || '#1A2234';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '.');
-        const brandStr = currentThemeObj?.sub || 'haloluna.com';
+        const brandStr = 'gethaloluna.com';
 
+        ctx.fillStyle = currentThemeObj?.fg || '#1A2234';
         ctx.font = `600 ${Math.round(11 * multiplier)}px monospace`;
         ctx.fillText(dateStr, w / 2, h - Math.round(28 * multiplier));
+
+        ctx.fillStyle = currentThemeObj?.sub || currentThemeObj?.fg || 'rgba(26, 34, 52, 0.65)';
         ctx.font = `500 ${Math.round(9 * multiplier)}px sans-serif`;
         ctx.fillText(brandStr, w / 2, h - Math.round(14 * multiplier));
         ctx.restore();
@@ -2741,26 +2856,41 @@ function CaptureRoom() {
                     )}
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={() => setActiveTrayTab('filter')}
-                    className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                      activeTrayTab === 'filter'
-                        ? 'bg-white text-neutral-900 shadow-xs'
-                        : 'text-neutral-500 hover:text-neutral-700'
-                    }`}
-                  >
-                    <Sparkles size={14} />
-                    <span>Face filter</span>
-                    {selectedFaceFilter !== 'none' && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-pink-500" />
-                    )}
-                  </button>
+                  {IS_FACE_FILTER_ENABLED ? (
+                    <button
+                      type="button"
+                      onClick={() => setActiveTrayTab('filter')}
+                      className={`flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        activeTrayTab === 'filter'
+                          ? 'bg-white text-neutral-900 shadow-xs'
+                          : 'text-neutral-500 hover:text-neutral-700'
+                      }`}
+                    >
+                      <Sparkles size={14} />
+                      <span>Face filter</span>
+                      {selectedFaceFilter !== 'none' && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-pink-500" />
+                      )}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled
+                      className="flex items-center justify-center gap-1.5 py-2 px-2 rounded-xl text-xs font-bold text-neutral-400 cursor-not-allowed select-none opacity-70 transition-all"
+                      title="Coming soon - Menunggu persetujuan pengajuan Snap Camera Kit"
+                    >
+                      <Sparkles size={14} className="text-neutral-400 shrink-0" />
+                      <span>Face filter</span>
+                      <span className="ml-1 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider bg-pink-50 text-pink-500 rounded-full border border-pink-200/80 shrink-0">
+                        Coming soon
+                      </span>
+                    </button>
+                  )}
                 </div>
 
                 {/* Tray Content Card (Scrollable 4-column circles) */}
                 <div className="bg-white rounded-2xl border border-neutral-200/80 p-4 max-h-[460px] overflow-y-auto shadow-xs">
-                  {activeTrayTab === 'background' ? (
+                  {activeTrayTab === 'background' || !IS_FACE_FILTER_ENABLED ? (
                     <div className="flex flex-col gap-4">
                       {/* Scenes Group */}
                       <div>
@@ -2836,40 +2966,118 @@ function CaptureRoom() {
                     </div>
                   ) : (
                     <div>
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-neutral-400 block mb-2.5">
-                        FACE FILTERS
-                      </span>
-                      <div className="grid grid-cols-4 gap-2.5">
-                        {FACE_FILTERS.map((f) => {
-                          const isActive = selectedFaceFilter === f.id;
-                          return (
+                      <div className="flex items-center justify-between mb-2.5">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-neutral-400 block">
+                          FACE FILTERS
+                        </span>
+                        {isLoadingLenses && (
+                          <span className="text-[10px] text-neutral-400 flex items-center gap-1">
+                            <Loader2 size={11} className="animate-spin text-pink-500" />
+                            <span>Memuat...</span>
+                          </span>
+                        )}
+                      </div>
+                      {/* Scrollable Grid Container */}
+                      <div className="max-h-56 overflow-y-auto pr-1">
+                        <div className="grid grid-cols-4 gap-2.5">
+                          {/* Slot 1: Matikan Filter (None) */}
+                          <div className="flex flex-col items-center gap-1">
                             <button
-                              key={f.id}
                               type="button"
                               onClick={() => {
-                                setSelectedFaceFilter(f.id);
-                                if (isDuoActive) sendSync({ type: 'FILTER_SELECT', filter: f.id });
+                                setSelectedFaceFilter('none');
+                                if (isDuoActive) sendSync({ type: 'FILTER_SELECT', filter: 'none' });
                               }}
-                              title={f.label}
+                              title="Matikan filter"
                               className={`aspect-square w-full rounded-full flex items-center justify-center overflow-hidden border-2 p-1.5 transition-all cursor-pointer ${
-                                isActive
+                                selectedFaceFilter === 'none'
                                   ? 'border-neutral-900 ring-2 ring-neutral-900 ring-offset-2 bg-neutral-50'
                                   : 'border-neutral-200 hover:border-neutral-400 bg-white'
                               }`}
                             >
-                              {f.id === 'none' ? (
-                                <X size={20} className="text-neutral-400" />
-                              ) : f.previewImg ? (
-                                <img
-                                  src={f.previewImg}
-                                  alt={f.label}
-                                  className="w-full h-full object-contain drop-shadow-2xs select-none"
-                                />
-                              ) : null}
+                              <X size={20} className="text-neutral-400" />
                             </button>
-                          );
-                        })}
+                            <span className="text-[10px] text-neutral-500 truncate w-full text-center font-medium">
+                              Off
+                            </span>
+                          </div>
+
+                          {/* Loading Skeletons while fetching */}
+                          {isLoadingLenses && snapLenses.length === 0 && (
+                            <>
+                              {Array.from({ length: 7 }).map((_, i) => (
+                                <div key={`skel-${i}`} className="flex flex-col items-center gap-1">
+                                  <div className="aspect-square w-full rounded-full border-2 border-dashed border-neutral-200 bg-neutral-100/70 animate-pulse flex items-center justify-center">
+                                    <Sparkles size={16} className="text-neutral-300" />
+                                  </div>
+                                  <div className="h-2 w-8 bg-neutral-200 rounded animate-pulse" />
+                                </div>
+                              ))}
+                            </>
+                          )}
+
+                          {/* Snap Camera Kit Lenses with Name below */}
+                          {snapLenses.map((lens) => {
+                            const isActive = selectedFaceFilter === lens.id;
+                            return (
+                              <div key={lens.id} className="flex flex-col items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedFaceFilter(lens.id);
+                                    if (isDuoActive) sendSync({ type: 'FILTER_SELECT', filter: lens.id });
+                                  }}
+                                  title={lens.name}
+                                  className={`aspect-square w-full rounded-full flex items-center justify-center overflow-hidden border-2 p-1.5 transition-all cursor-pointer ${
+                                    isActive
+                                      ? 'border-neutral-900 ring-2 ring-neutral-900 ring-offset-2 bg-neutral-50'
+                                      : 'border-neutral-200 hover:border-neutral-400 bg-white'
+                                  }`}
+                                >
+                                  {lens.iconUrl ? (
+                                    <img
+                                      src={lens.iconUrl}
+                                      alt={lens.name}
+                                      className="w-full h-full object-cover rounded-full select-none"
+                                      loading="lazy"
+                                    />
+                                  ) : (
+                                    <Sparkles size={20} className="text-neutral-400" />
+                                  )}
+                                </button>
+                                <span
+                                  className={`text-[10px] truncate w-full text-center ${
+                                    isActive ? 'font-bold text-neutral-900' : 'text-neutral-500'
+                                  }`}
+                                  title={lens.name}
+                                >
+                                  {lens.name}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
+
+                      {/* Error & Retry Button jika gagal memuat */}
+                      {!isLoadingLenses && snapLenses.length === 0 && (
+                        <div className="mt-3 p-3 rounded-xl bg-neutral-50 border border-neutral-200 text-center">
+                          <p className="text-[11px] text-neutral-600 font-medium mb-1">
+                            {lensError || 'Filter belum termuat'}
+                          </p>
+                          <p className="text-[10px] text-neutral-400 mb-2">
+                            Periksa koneksi internet Anda atau klik tombol di bawah untuk coba lagi.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => fetchSnapLenses(true)}
+                            className="px-3 py-1.5 rounded-lg bg-neutral-900 text-white text-xs font-bold hover:bg-neutral-800 cursor-pointer inline-flex items-center gap-1.5"
+                          >
+                            <RotateCcw size={12} />
+                            <span>Muat Ulang Filter</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -4318,13 +4526,18 @@ function CaptureRoom() {
                     {!currentThemeObj?.noFooter && (
                       <div
                         className="absolute bottom-2.5 inset-x-0 flex flex-col items-center pointer-events-none z-[3] select-none"
-                        style={{ color: currentThemeObj?.fg || '#1A2234' }}
                       >
-                        <span className="text-[10px] font-mono font-medium tracking-wider">
+                        <span
+                          className="text-[10px] font-mono font-medium tracking-wider"
+                          style={{ color: currentThemeObj?.fg || '#1A2234' }}
+                        >
                           {new Date().toISOString().slice(0, 10).replace(/-/g, '.')}
                         </span>
-                        <span className="text-[8px] font-medium tracking-tight opacity-75">
-                          {currentThemeObj?.sub || 'haloluna.com'}
+                        <span
+                          className="text-[8px] font-medium tracking-tight"
+                          style={{ color: currentThemeObj?.sub || currentThemeObj?.fg || 'rgba(26, 34, 52, 0.65)' }}
+                        >
+                          gethaloluna.com
                         </span>
                       </div>
                     )}
@@ -4484,7 +4697,7 @@ function CaptureRoom() {
                     type="button"
                     onClick={() => {
                       handleReset();
-                      router.push('/');
+                      window.location.href = '/';
                     }}
                     className="text-xs font-semibold text-neutral-400 hover:text-neutral-700 underline underline-offset-4 cursor-pointer transition-colors py-2"
                   >

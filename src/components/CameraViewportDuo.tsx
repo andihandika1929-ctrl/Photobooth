@@ -22,6 +22,7 @@ import {
   type ShotClip,
 } from './CameraViewport';
 import type { Participant, RoomRole, RoomSyncAction } from '@/lib/realtime/roomTypes';
+import { snapSessionManager } from '@/lib/media/snapCameraKit';
 import {
   FACE_FILTERS,
   FACE_FILTERS_MAP,
@@ -121,15 +122,18 @@ export default function CameraViewportDuo({
   const localOverlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const remoteOverlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const soloOverlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const snapContainerRef = useRef<HTMLDivElement | null>(null);
   const freshestLocalFaceRef = useRef<FaceSummary | null>(null);
 
+  const [isSnapActive, setIsSnapActive] = useState(false);
   const [selectedFilter, setSelectedFilter] = useState<FilterName>('natural');
   const [isMirrored, setIsMirrored] = useState(true);
   const [localCountdown, setLocalCountdown] = useState<number | null>(null);
   const [isRemoteAudioMuted, setIsRemoteAudioMuted] = useState(true);
-  const [remotePreviewFrame, setRemotePreviewFrame] = useState<string | null>(null);
   const [remoteVideoActive, setRemoteVideoActive] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const isSnapFilterActive = Boolean(selectedFaceFilter && selectedFaceFilter !== 'none');
 
   // Active countdown: prefer externalCountdown from parent sequence if provided
   const countdown = externalCountdown !== null ? externalCountdown : localCountdown;
@@ -161,6 +165,37 @@ export default function CameraViewportDuo({
       preloadFilter(selectedFaceFilter);
     }
   }, [selectedFaceFilter]);
+
+  // Connect Snap Camera Kit with localStream & mirror preference
+  useEffect(() => {
+    if (localStream) {
+      snapSessionManager.setSourceStream(localStream, isMirrored);
+    }
+  }, [localStream, isMirrored]);
+
+  // Apply or clear Snap Lens when selectedFaceFilter changes
+  useEffect(() => {
+    if (!selectedFaceFilter || selectedFaceFilter === 'none') {
+      snapSessionManager.clearLens();
+    } else {
+      snapSessionManager.applyLensById(selectedFaceFilter);
+    }
+  }, [selectedFaceFilter]);
+
+  // Subscribe to active lens status
+  useEffect(() => {
+    const unsub = snapSessionManager.subscribe((lens) => {
+      setIsSnapActive(Boolean(lens));
+    });
+    return unsub;
+  }, []);
+
+  // Attach Snap Camera Kit live canvas into the local viewport container
+  useEffect(() => {
+    if (!snapContainerRef.current) return;
+    const cleanup = snapSessionManager.attachLiveCanvas(snapContainerRef.current);
+    return cleanup;
+  }, [isSnapActive, isSnapFilterActive, isDuoMode, role]);
 
   // Real-time animation loop: Segment person and track face filters per frame
   useEffect(() => {
@@ -392,10 +427,10 @@ export default function CameraViewportDuo({
     const video = localVideoRef.current;
     if (!video || video.readyState < 2) return null;
 
-    const origWidth = video.videoWidth || 1280;
-    const origHeight = video.videoHeight || 720;
+    const origWidth = video.videoWidth || 1920;
+    const origHeight = video.videoHeight || 1080;
 
-    const maxDim = 1280;
+    const maxDim = 1920;
     const scale = Math.min(1, maxDim / Math.max(origWidth, origHeight));
     const width = Math.round(origWidth * scale);
     const height = Math.round(origHeight * scale);
@@ -408,9 +443,19 @@ export default function CameraViewportDuo({
 
     const hasBg = selectedBg && selectedBg !== 'none';
     const hasFilter = selectedFaceFilter && selectedFaceFilter !== 'none';
+    const snapCanvas = snapSessionManager.getLiveCanvas();
+    const hasSnapLens = Boolean(hasFilter && snapCanvas && snapCanvas.width > 0 && snapCanvas.height > 0);
 
-    // 1. Virtual Background + Person Cutout
-    if (hasBg) {
+    // 1. If Snap Camera Kit Lens is active, capture directly from Snap live canvas (with horizontal flip if isMirrored)
+    if (hasSnapLens && snapCanvas) {
+      ctx.save();
+      if (isMirrored) {
+        ctx.translate(width, 0);
+        ctx.scale(-1, 1);
+      }
+      ctx.drawImage(snapCanvas, 0, 0, width, height);
+      ctx.restore();
+    } else if (hasBg) {
       const img = bgImage(selectedBg);
       localSegmenterRef.current ||= createPersonSegmenter(video);
       const cut = localSegmenterRef.current.capture() || localSegmenterRef.current.cutout();
@@ -452,8 +497,8 @@ export default function CameraViewportDuo({
       ctx.restore();
     }
 
-    // 2. Face Filter Stickers pinned to tracked face
-    if (hasFilter) {
+    // 2. Legacy Face Filter Stickers pinned to tracked face (if not Snap Lens)
+    if (hasFilter && !hasSnapLens) {
       localTrackerRef.current ||= createFaceTracker(video);
       const face = localTrackerRef.current.detect() || freshestLocalFaceRef.current;
       if (face) {
@@ -476,11 +521,11 @@ export default function CameraViewportDuo({
       if (fCtx) {
         fCtx.filter = cssFilter;
         fCtx.drawImage(canvas, 0, 0);
-        return filteredCanvas.toDataURL('image/jpeg', 0.85);
+        return filteredCanvas.toDataURL('image/jpeg', 0.92);
       }
     }
 
-    return canvas.toDataURL('image/jpeg', 0.85);
+    return canvas.toDataURL('image/jpeg', 0.92);
   }, [isMirrored, selectedFilter, selectedBg, selectedFaceFilter, isDuoMode, role]);
 
   // Process Completed Shot (Merge if Duo, or pass directly if Solo)
@@ -586,44 +631,10 @@ export default function CameraViewportDuo({
       if (pending.local) {
         resolveShot(shotIndex, pending.local, incomingSyncAction.dataUrl);
       }
-    } else if (incomingSyncAction.type === 'LIVE_PREVIEW') {
-      setRemotePreviewFrame(incomingSyncAction.dataUrl);
     } else if (incomingSyncAction.type === 'FILTER_SELECT') {
       setSelectedFilter(incomingSyncAction.filter as FilterName);
     }
   }, [incomingSyncAction, executeShutter, resolveShot]);
-
-  // Continuous low-res live preview broadcast (fallback if WebRTC video stalls)
-  useEffect(() => {
-    if (!isDuoMode || !localStream || !onSendSyncAction) return;
-
-    const interval = setInterval(() => {
-      const video = localVideoRef.current;
-      if (!video || video.readyState < 2) return;
-
-      try {
-        const offscreen = document.createElement('canvas');
-        offscreen.width = 320;
-        offscreen.height = 240;
-        const ctx = offscreen.getContext('2d');
-        if (ctx) {
-          if (isMirrored) {
-            ctx.translate(320, 0);
-            ctx.scale(-1, 1);
-          }
-          ctx.drawImage(video, 0, 0, 320, 240);
-          const thumb = offscreen.toDataURL('image/jpeg', 0.5);
-          onSendSyncAction({
-            type: 'LIVE_PREVIEW',
-            senderId: role,
-            dataUrl: thumb,
-          });
-        }
-      } catch (e) {}
-    }, 1500);
-
-    return () => clearInterval(interval);
-  }, [isDuoMode, localStream, onSendSyncAction, isMirrored, role]);
 
   // Start Manual Countdown Sequence
   const handleStartCountdown = useCallback(() => {
@@ -706,15 +717,6 @@ export default function CameraViewportDuo({
               <div className="relative w-full h-full grid grid-cols-2 divide-x divide-white/20">
                 {/* Left Feed (Host) */}
                 <div className="relative w-full h-full bg-neutral-900 overflow-hidden flex items-center justify-center">
-                  {/* Fallback Preview Image */}
-                  {!isLeftLocal && remotePreviewFrame && !remoteVideoActive && (
-                    <img
-                      src={remotePreviewFrame}
-                      alt="Remote Preview"
-                      className="absolute inset-0 w-full h-full object-cover z-[1]"
-                    />
-                  )}
-
                   {leftStream ? (
                     <>
                       <video
@@ -724,9 +726,13 @@ export default function CameraViewportDuo({
                           if (el && leftStream && el.srcObject !== leftStream) {
                             el.srcObject = leftStream;
                             el.onloadedmetadata = () => {
-                              el.play().catch(() => {
+                              el.play().then(() => {
+                                if (!isLeftLocal) setRemoteVideoActive(true);
+                              }).catch(() => {
                                 el.muted = true;
-                                el.play().catch(console.error);
+                                el.play().then(() => {
+                                  if (!isLeftLocal) setRemoteVideoActive(true);
+                                }).catch(console.error);
                               });
                             };
                             el.play().catch(() => {});
@@ -736,8 +742,8 @@ export default function CameraViewportDuo({
                         playsInline
                         muted={isLeftLocal ? isMirrored : isRemoteAudioMuted}
                         className={`w-full h-full object-cover relative z-[1] ${
-                          isLeftLocal && isMirrored ? 'scale-x-[-1]' : ''
-                        }`}
+                          isLeftLocal && isSnapFilterActive ? 'hidden' : 'block'
+                        } ${isLeftLocal && isMirrored ? 'scale-x-[-1]' : ''}`}
                         style={{ filter: getFilterCss(selectedFilter) }}
                       />
                       {/* MediaPipe Segmentation & Face Filter Live Overlay */}
@@ -745,6 +751,17 @@ export default function CameraViewportDuo({
                         ref={localOverlayCanvasRef}
                         className="absolute inset-0 w-full h-full pointer-events-none z-10"
                       />
+
+                      {/* Snap Camera Kit Live Preview Overlay for Local Camera */}
+                      {isLeftLocal && (
+                        <div
+                          ref={snapContainerRef}
+                          className={`w-full h-full relative z-[1] overflow-hidden bg-transparent ${
+                            isSnapFilterActive ? 'block' : 'hidden'
+                          } ${isMirrored ? 'scale-x-[-1]' : ''}`}
+                          style={{ filter: getFilterCss(selectedFilter) }}
+                        />
+                      )}
 
                       {/* Name Badge */}
                       <div className="absolute bottom-3 left-3 z-20 flex items-center rounded-md bg-[#f43f5e] px-2.5 py-1 text-xs font-bold text-white shadow-xs">
@@ -784,15 +801,6 @@ export default function CameraViewportDuo({
 
                 {/* Right Feed (Guest) */}
                 <div className="relative w-full h-full bg-neutral-900 overflow-hidden flex items-center justify-center">
-                  {/* Fallback Preview Image */}
-                  {!isRightLocal && remotePreviewFrame && !remoteVideoActive && (
-                    <img
-                      src={remotePreviewFrame}
-                      alt="Remote Preview"
-                      className="absolute inset-0 w-full h-full object-cover z-[1]"
-                    />
-                  )}
-
                   {rightStream ? (
                     <>
                       <video
@@ -802,9 +810,13 @@ export default function CameraViewportDuo({
                           if (el && rightStream && el.srcObject !== rightStream) {
                             el.srcObject = rightStream;
                             el.onloadedmetadata = () => {
-                              el.play().catch(() => {
+                              el.play().then(() => {
+                                if (!isRightLocal) setRemoteVideoActive(true);
+                              }).catch(() => {
                                 el.muted = true;
-                                el.play().catch(console.error);
+                                el.play().then(() => {
+                                  if (!isRightLocal) setRemoteVideoActive(true);
+                                }).catch(console.error);
                               });
                             };
                             el.play().catch(() => {});
@@ -814,8 +826,8 @@ export default function CameraViewportDuo({
                         playsInline
                         muted={isRightLocal ? isMirrored : isRemoteAudioMuted}
                         className={`w-full h-full object-cover relative z-[1] ${
-                          isRightLocal && isMirrored ? 'scale-x-[-1]' : ''
-                        }`}
+                          isRightLocal && isSnapFilterActive ? 'hidden' : 'block'
+                        } ${isRightLocal && isMirrored ? 'scale-x-[-1]' : ''}`}
                         style={{ filter: getFilterCss(selectedFilter) }}
                       />
                       {/* MediaPipe Segmentation & Face Filter Live Overlay */}
@@ -823,6 +835,17 @@ export default function CameraViewportDuo({
                         ref={remoteOverlayCanvasRef}
                         className="absolute inset-0 w-full h-full pointer-events-none z-10"
                       />
+
+                      {/* Snap Camera Kit Live Preview Overlay for Local Camera */}
+                      {isRightLocal && (
+                        <div
+                          ref={snapContainerRef}
+                          className={`w-full h-full relative z-[1] overflow-hidden bg-transparent ${
+                            isSnapFilterActive ? 'block' : 'hidden'
+                          } ${isMirrored ? 'scale-x-[-1]' : ''}`}
+                          style={{ filter: getFilterCss(selectedFilter) }}
+                        />
+                      )}
 
                       {/* Name Badge */}
                       <div className="absolute bottom-3 left-3 z-20 flex items-center rounded-md bg-[#f43f5e] px-2.5 py-1 text-xs font-bold text-white shadow-xs">
@@ -896,14 +919,23 @@ export default function CameraViewportDuo({
                   playsInline
                   muted
                   className={`w-full h-full object-cover relative z-[1] ${
-                    isMirrored ? 'scale-x-[-1]' : ''
-                  }`}
+                    isSnapFilterActive ? 'hidden' : 'block'
+                  } ${isMirrored ? 'scale-x-[-1]' : ''}`}
                   style={{ filter: getFilterCss(selectedFilter) }}
                 />
                 {/* MediaPipe Segmentation & Face Filter Live Overlay */}
                 <canvas
                   ref={soloOverlayCanvasRef}
                   className="absolute inset-0 w-full h-full pointer-events-none z-10"
+                />
+
+                {/* Snap Camera Kit Live Preview Overlay for Local Camera */}
+                <div
+                  ref={snapContainerRef}
+                  className={`w-full h-full relative z-[1] overflow-hidden bg-transparent ${
+                    isSnapFilterActive ? 'block' : 'hidden'
+                  } ${isMirrored ? 'scale-x-[-1]' : ''}`}
+                  style={{ filter: getFilterCss(selectedFilter) }}
                 />
 
                 {/* Name Badge */}
