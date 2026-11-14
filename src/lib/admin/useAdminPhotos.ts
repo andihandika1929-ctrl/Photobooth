@@ -24,11 +24,18 @@ export function useAdminPhotos() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   // Fetch photos
-  const fetchPhotos = useCallback(async () => {
-    setLoading(true);
+  const fetchPhotos = useCallback(async (silentArg?: boolean | unknown) => {
+    const silent = typeof silentArg === 'boolean' ? silentArg : false;
+    if (!silent) setLoading(true);
     try {
-      // Primary: fetch via admin API to get both photo records and raw photo URLs
-      const res = await fetch('/api/admin/photos', { cache: 'no-store' });
+      // Primary: fetch via admin API with cache buster to get both photo records and raw photo URLs
+      const res = await fetch(`/api/admin/photos?t=${Date.now()}`, {
+        cache: 'no-store',
+        headers: {
+          'Pragma': 'no-cache',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+        },
+      });
       if (res.ok) {
         const apiData = await res.json();
         if (Array.isArray(apiData.photos)) {
@@ -49,15 +56,60 @@ export function useAdminPhotos() {
     } catch (err) {
       console.error('Failed to load photos:', err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [supabase]);
 
+  // Initial fetch and automatic real-time sync / polling
   useEffect(() => {
-    if (session) {
-      fetchPhotos();
+    if (!session) return;
+
+    // 1. Initial fetch
+    fetchPhotos();
+
+    // 2. Fetch on tab focus / visibility change
+    const handleFocus = () => fetchPhotos(true);
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        fetchPhotos(true);
+      }
+    };
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    // 3. Interval background polling (every 8 seconds)
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        fetchPhotos(true);
+      }
+    }, 8000);
+
+    // 4. Supabase Realtime channel subscription
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    try {
+      channel = supabase
+        .channel('admin_photos_realtime_' + Math.random().toString(36).substring(7))
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'photos' },
+          () => {
+            fetchPhotos(true);
+          }
+        )
+        .subscribe();
+    } catch (e) {
+      console.warn('Realtime subscription notice:', e);
     }
-  }, [session, fetchPhotos]);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibility);
+      clearInterval(interval);
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
+    };
+  }, [session, fetchPhotos, supabase]);
 
   // Delete single photo (removes strip and all raw unframed photos)
   const deletePhoto = useCallback(

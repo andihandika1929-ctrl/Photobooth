@@ -159,7 +159,7 @@ export default function RawPhotosPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={fetchPhotos}
+            onClick={() => fetchPhotos()}
             disabled={loading}
             className="gap-1.5 text-xs h-9"
           >
