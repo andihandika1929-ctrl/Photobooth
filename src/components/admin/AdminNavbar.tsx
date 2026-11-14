@@ -33,7 +33,8 @@ interface AdminNavbarProps {
 const BREADCRUMB_MAP: Record<string, string> = {
   '/admin': 'Overview',
   '/admin/frames': 'Frame Presets & Canvas',
-  '/admin/media': 'Media Logs & Storage',
+  '/admin/raw-photos': 'Foto Mentahan (Raw)',
+  '/admin/media': 'Foto Mentahan (Raw)',
   '/admin/analytics': 'Analytics & Session Stats',
   '/admin/settings': 'Studio & Theme Settings',
 };

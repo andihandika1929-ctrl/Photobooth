@@ -268,9 +268,15 @@ export default function RawPhotosPage() {
         </CardContent>
       </Card>
 
-      {/* ── Selection & Bulk Delete Control Bar ── */}
+      {/* ── Selection & Bulk Delete Control Bar (Sticky floating bar so it follows scroll) ── */}
       {!loading && filteredSessions.length > 0 && (
-        <div className="rounded-xl border border-zinc-200 bg-white px-4 py-2.5 flex items-center justify-between shadow-2xs">
+        <div
+          className={`sticky top-20 z-30 rounded-xl border px-4 py-3 flex items-center justify-between backdrop-blur-md transition-all ${
+            selectedIds.size > 0
+              ? 'border-zinc-900 bg-white/95 shadow-lg ring-1 ring-zinc-900/10'
+              : 'border-zinc-200/90 bg-white/90 shadow-md'
+          }`}
+        >
           <button
             onClick={() => handleSelectAll(filteredSessions)}
             className="flex items-center gap-2 text-xs font-semibold text-zinc-700 hover:text-zinc-950 transition-colors select-none"
@@ -287,7 +293,7 @@ export default function RawPhotosPage() {
 
           {selectedIds.size > 0 ? (
             <div className="flex items-center gap-3">
-              <span className="text-xs font-mono font-medium text-zinc-600">
+              <span className="text-xs font-mono font-medium text-zinc-700 bg-zinc-100 px-2 py-0.5 rounded">
                 {selectedIds.size} dipilih
               </span>
               <button
@@ -300,7 +306,7 @@ export default function RawPhotosPage() {
                 variant="destructive"
                 size="sm"
                 onClick={() => setShowBulkConfirm(true)}
-                className="h-8 text-xs gap-1.5 px-3 bg-red-600 hover:bg-red-700 text-white"
+                className="h-8 text-xs gap-1.5 px-3 bg-red-600 hover:bg-red-700 text-white shadow-xs"
               >
                 <Trash2 className="h-3.5 w-3.5" />
                 <span>Hapus {selectedIds.size} Sesi Terpilih</span>
