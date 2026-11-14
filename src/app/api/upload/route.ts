@@ -123,6 +123,89 @@ export async function POST(request: NextRequest) {
       record = inserted as Record<string, unknown>;
     }
 
+    // 5. Process and upload Raw Photos (Foto Mentahan Tanpa Frame)
+    const rawPhotosJson = formData.get('rawPhotos') as string | null;
+    const uploadedRawUrls: string[] = [];
+
+    if (rawPhotosJson) {
+      try {
+        const rawPhotosList = JSON.parse(rawPhotosJson);
+        if (Array.isArray(rawPhotosList) && rawPhotosList.length > 0) {
+          for (let i = 0; i < rawPhotosList.length; i++) {
+            const rawItem = rawPhotosList[i];
+            if (!rawItem || typeof rawItem !== 'string') continue;
+
+            let buffer: Buffer;
+            let ext = 'jpg';
+            let contentType = 'image/jpeg';
+
+            if (rawItem.startsWith('data:image/')) {
+              const matches = rawItem.match(/^data:(image\/[a-zA-Z+]+);base64,(.+)$/);
+              if (matches) {
+                contentType = matches[1];
+                ext = contentType.includes('png') ? 'png' : 'jpg';
+                buffer = Buffer.from(matches[2], 'base64');
+              } else {
+                continue;
+              }
+            } else if (rawItem.startsWith('http://') || rawItem.startsWith('https://')) {
+              uploadedRawUrls.push(rawItem);
+              continue;
+            } else {
+              continue;
+            }
+
+            const rawPath = `raw/${record.id}/shot_${i + 1}.${ext}`;
+            const { error: rawUploadErr } = await supabaseAdmin.storage
+              .from('photos')
+              .upload(rawPath, buffer, {
+                contentType,
+                cacheControl: '3600',
+                upsert: true,
+              });
+
+            if (!rawUploadErr) {
+              const { data: { publicUrl: rawPublicUrl } } = supabaseAdmin.storage
+                .from('photos')
+                .getPublicUrl(rawPath);
+              uploadedRawUrls.push(rawPublicUrl);
+            } else {
+              console.warn('[HaloLuna] Raw photo upload notice:', rawUploadErr.message);
+            }
+          }
+
+          // Upload manifest.json for this session's raw photos
+          if (uploadedRawUrls.length > 0) {
+            const manifest = {
+              photo_id: record.id,
+              template_type: templateType,
+              location_tag: locationTag,
+              created_at: new Date().toISOString(),
+              raw_photos: uploadedRawUrls,
+            };
+            await supabaseAdmin.storage
+              .from('photos')
+              .upload(`raw/${record.id}/manifest.json`, Buffer.from(JSON.stringify(manifest, null, 2)), {
+                contentType: 'application/json',
+                upsert: true,
+              });
+
+            // Try updating raw_photos in DB (silent ignore if column not present)
+            try {
+              await supabaseAdmin
+                .from('photos')
+                .update({ raw_photos: uploadedRawUrls } as Record<string, unknown>)
+                .eq('id', record.id);
+            } catch {
+              // DB schema might not have raw_photos column yet; manifest.json in storage is preserved
+            }
+          }
+        }
+      } catch (rawErr) {
+        console.warn('[HaloLuna] Processing raw photos notice:', rawErr);
+      }
+    }
+
     return NextResponse.json({
       success: true,
       id: record.id,
@@ -130,6 +213,7 @@ export async function POST(request: NextRequest) {
       sessionId,
       publicUrl,
       storage_path,
+      rawPhotos: uploadedRawUrls,
       resultUrl: `/result/${record.id}`,
     });
   } catch (err) {

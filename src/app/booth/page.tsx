@@ -1257,8 +1257,22 @@ function CaptureRoom() {
 
   // Automatic 2-way upload trigger: Initial save on render + Action save on download/wallpaper
   const handleAutoUpload = useCallback(
-    async (blob: Blob, templateType: string, isActionSave: boolean = false) => {
-      console.log("[HaloLuna] Starting upload for frame:", templateType, "isActionSave:", isActionSave, "size:", blob?.size);
+    async (
+      blob: Blob,
+      templateType: string,
+      isActionSave: boolean = false,
+      rawPhotosList?: string[]
+    ) => {
+      console.log(
+        "[HaloLuna] Starting upload for frame:",
+        templateType,
+        "isActionSave:",
+        isActionSave,
+        "rawPhotos:",
+        rawPhotosList?.length || 0,
+        "size:",
+        blob?.size
+      );
 
       // If initial save already succeeded for this template and this is not an action save, skip redundant re-upload
       if (!isActionSave && lastUploadedTemplateRef.current === templateType && hasUploadedRef.current) {
@@ -1274,10 +1288,13 @@ function CaptureRoom() {
       try {
         const result = await savePhotoToSupabase(
           blob,
-          templateType,
-          'HaloLuna Studio',
-          sessionPhotoIdRef.current || undefined,
-          sessionStoragePathRef.current || undefined
+          {
+            templateType,
+            locationTag: 'HaloLuna Studio',
+            existingPhotoId: sessionPhotoIdRef.current || undefined,
+            existingStoragePath: sessionStoragePathRef.current || undefined,
+            rawPhotos: rawPhotosList,
+          }
         );
         console.log("[HaloLuna] Upload result:", result);
         if (result.success && result.id) {
@@ -2109,22 +2126,22 @@ function CaptureRoom() {
     ]
   );
 
-  // Auto-sync photostrip to Supabase Cloud upon entering 'done' screen
+  // Auto-sync photostrip to Supabase Cloud upon entering 'done' screen.
+  // If uploaded early at 'select' stage, this updates the existing record with any final decorations.
   useEffect(() => {
     if (step !== 'done' && step !== 'edit') return;
-    if (hasUploadedRef.current) return;
 
     let isMounted = true;
     const runCloudSync = async () => {
       try {
         const canvas = await renderFullStripCanvas(2.2);
         const blob = await new Promise<Blob | null>((res) => canvas.toBlob(res, 'image/png'));
-        if (blob && isMounted && !hasUploadedRef.current) {
+        if (blob && isMounted) {
           const templateName = currentThemeObj?.id || activeThemeId || 'classic-strip';
-          await handleAutoUpload(blob, templateName, false);
+          await handleAutoUpload(blob, templateName, Boolean(sessionPhotoIdRef.current));
         }
       } catch (err) {
-        console.warn('[HaloLuna] Initial cloud auto-upload warning:', err);
+        console.warn('[HaloLuna] Final cloud auto-upload warning:', err);
       }
     };
 
@@ -3739,6 +3756,28 @@ function CaptureRoom() {
                           setStep('style');
                           if (isDuoActive) {
                             sendSync({ type: 'SCENE_CHANGE', scene: 'FILTER' });
+                          }
+
+                          // Early background auto-upload: photostrip + raw photos without frame
+                          try {
+                            const selectedRawShots = stripSlots
+                              .filter((s): s is number => s != null && !!capturedFrames[s])
+                              .map((s) => capturedFrames[s].dataUrl);
+
+                            const templateName = currentThemeObj?.id || activeThemeId || 'classic-strip';
+                            renderFullStripCanvas(2.0)
+                              .then((canvas) => {
+                                canvas.toBlob((blob) => {
+                                  if (blob) {
+                                    handleAutoUpload(blob, templateName, false, selectedRawShots).catch((e) =>
+                                      console.warn('[HaloLuna] Early cloud upload error:', e)
+                                    );
+                                  }
+                                }, 'image/png');
+                              })
+                              .catch((e) => console.warn('[HaloLuna] Render strip error at pick:', e));
+                          } catch (earlyErr) {
+                            console.warn('[HaloLuna] Early upload notice:', earlyErr);
                           }
                         }
                       }}

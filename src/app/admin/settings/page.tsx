@@ -38,6 +38,8 @@ export default function StudioSettingsPage() {
   const [countdownDuration, setCountdownDuration] = React.useState('3');
   const [soundEnabled, setSoundEnabled] = React.useState(true);
   const [mirrorCamera, setMirrorCamera] = React.useState(true);
+  const [autoSaveRawPhotos, setAutoSaveRawPhotos] = React.useState(true);
+  const [earlyUploadEnabled, setEarlyUploadEnabled] = React.useState(true);
 
   const handleCopyCSS = () => {
     const cssVars = `/* HaloLuna Studio Theme Tokens (${tokens.name}) */
@@ -641,6 +643,86 @@ export default function StudioSettingsPage() {
           <Button size="sm" onClick={handleSavePreferences} className="gap-1.5 text-xs">
             <Save className="h-3.5 w-3.5" />
             <span>Save Preferences</span>
+          </Button>
+        </CardFooter>
+      </Card>
+
+      {/* ── Section 4: Foto Mentahan (Raw Photo Storage Pipeline) ── */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div className="space-y-1">
+              <CardTitle className="text-base font-semibold text-zinc-900 flex items-center gap-2">
+                <Camera className="h-4 w-4 text-zinc-700" />
+                <span>Penyimpanan Foto Mentahan (Raw Captures Without Frame)</span>
+              </CardTitle>
+              <CardDescription className="text-xs font-mono">
+                Pengaturan penyimpanan foto asli kamera resolusi penuh tanpa frame/border ke Supabase Storage
+              </CardDescription>
+            </div>
+            <Link href="/admin/raw-photos">
+              <Button variant="outline" size="sm" className="gap-1.5 text-xs">
+                <span>Buka Galeri Mentahan</span>
+                <ExternalLink className="h-3 w-3" />
+              </Button>
+            </Link>
+          </div>
+        </CardHeader>
+
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Auto-save Raw Photos */}
+            <div className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="font-semibold text-xs text-zinc-900">Auto-Save Foto Mentahan</p>
+                <Button
+                  variant={autoSaveRawPhotos ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setAutoSaveRawPhotos(!autoSaveRawPhotos)}
+                  className="text-xs h-7 px-3"
+                >
+                  {autoSaveRawPhotos ? 'Aktif' : 'Nonaktif'}
+                </Button>
+              </div>
+              <p className="text-[11px] text-zinc-500 leading-relaxed">
+                Menyimpan seluruh foto kamera asli tanpa overlay frame ke Supabase storage (folder <code className="text-[10px] bg-zinc-200 px-1 py-0.5 rounded">photos/raw/</code>) untuk setiap sesi.
+              </p>
+            </div>
+
+            {/* Early Upload on Pick Stage */}
+            <div className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <p className="font-semibold text-xs text-zinc-900">Upload Cepat di Tahap &quot;Pick your 4&quot;</p>
+                <Button
+                  variant={earlyUploadEnabled ? 'default' : 'outline'}
+                  size="sm"
+                  onClick={() => setEarlyUploadEnabled(!earlyUploadEnabled)}
+                  className="text-xs h-7 px-3"
+                >
+                  {earlyUploadEnabled ? 'Aktif' : 'Nonaktif'}
+                </Button>
+              </div>
+              <p className="text-[11px] text-zinc-500 leading-relaxed">
+                Foto langsung masuk ke admin begitu tamu selesai memilih 4 foto terbaik, sehingga foto tetap aman tersimpan meskipun tamu menutup browser sebelum selesai menghias.
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3.5 flex items-center justify-between text-xs text-emerald-800">
+            <div className="flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="font-medium">Status Storage: Bucket &apos;photos&apos; &amp; Folder &apos;raw/&apos; Siap Digunakan</span>
+            </div>
+            <span className="text-[10px] font-mono text-emerald-700 bg-emerald-100/80 px-2 py-0.5 rounded">
+              Original 1080p
+            </span>
+          </div>
+        </CardContent>
+
+        <CardFooter className="pt-4 border-t border-zinc-100 flex justify-end">
+          <Button size="sm" onClick={handleSavePreferences} className="gap-1.5 text-xs">
+            <Save className="h-3.5 w-3.5" />
+            <span>Simpan Pengaturan</span>
           </Button>
         </CardFooter>
       </Card>

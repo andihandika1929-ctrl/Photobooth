@@ -41,6 +41,12 @@ export const ADMIN_NAV_ITEMS: NavItem[] = [
     icon: HardDrive,
   },
   {
+    label: 'Foto Mentahan (Raw)',
+    href: '/admin/raw-photos',
+    icon: Camera,
+    badge: 'Raw',
+  },
+  {
     label: 'Analytics & Session Stats',
     href: '/admin/analytics',
     icon: BarChart3,

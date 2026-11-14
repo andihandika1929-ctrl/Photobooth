@@ -55,7 +55,34 @@ export default function MediaManagementPage() {
 
   // Dialog states
   const [photoToDelete, setPhotoToDelete] = React.useState<PhotoRecord | null>(null);
+  const [rawModalPhoto, setRawModalPhoto] = React.useState<PhotoRecord | null>(null);
   const [showBulkConfirm, setShowBulkConfirm] = React.useState(false);
+  const [downloadingRaw, setDownloadingRaw] = React.useState(false);
+
+  const handleDownloadAllRaw = async (sessionId: string, rawUrls: string[]) => {
+    if (!rawUrls || rawUrls.length === 0) return;
+    setDownloadingRaw(true);
+    try {
+      for (let i = 0; i < rawUrls.length; i++) {
+        const url = rawUrls[i];
+        const res = await fetch(url);
+        const blob = await res.blob();
+        const blobUrl = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = blobUrl;
+        a.download = `haloluna-raw-${sessionId.substring(0, 8)}-shot-${i + 1}.png`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 10_000);
+        await new Promise((r) => setTimeout(r, 350));
+      }
+    } catch (err) {
+      console.error('[HaloLuna] Download raw err:', err);
+    } finally {
+      setDownloadingRaw(false);
+    }
+  };
 
   const confirmSingleDelete = async () => {
     if (!photoToDelete) return;
@@ -86,6 +113,14 @@ export default function MediaManagementPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          <Link href="/admin/raw-photos">
+            <Button variant="outline" size="sm" className="gap-1.5 text-xs h-9">
+              <Camera className="h-3.5 w-3.5 text-zinc-700" />
+              <span>Foto Mentahan</span>
+              <Badge variant="default" className="text-[9px] px-1 py-0 h-4">Raw</Badge>
+            </Button>
+          </Link>
+
           <Button
             variant="outline"
             size="sm"
@@ -268,6 +303,19 @@ export default function MediaManagementPage() {
                     )}
                   </div>
 
+                  {/* Raw Photos Quick Access */}
+                  {photo.raw_photos && photo.raw_photos.length > 0 && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setRawModalPhoto(photo)}
+                      className="w-full h-8 text-[11px] gap-1.5 px-2 border-emerald-200 text-emerald-700 bg-emerald-50/50 hover:bg-emerald-100 hover:text-emerald-800"
+                    >
+                      <Camera className="h-3 w-3" />
+                      <span>{photo.raw_photos.length} Foto Mentahan (Tanpa Frame)</span>
+                    </Button>
+                  )}
+
                   {/* Action Buttons */}
                   <div className="flex items-center gap-1.5 pt-2 border-t border-zinc-100">
                     <a
@@ -279,7 +327,7 @@ export default function MediaManagementPage() {
                     >
                       <Button variant="outline" size="sm" className="w-full h-8 text-[11px] gap-1 px-2">
                         <Download className="h-3 w-3" />
-                        <span>Download</span>
+                        <span>Download Strip</span>
                       </Button>
                     </a>
 
@@ -417,6 +465,84 @@ export default function MediaManagementPage() {
             >
               Delete {selectedIds.size} Photos
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Raw Photos Modal Dialog ── */}
+      <Dialog
+        open={Boolean(rawModalPhoto)}
+        onOpenChange={(open) => !open && setRawModalPhoto(null)}
+      >
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-zinc-900">
+              <Camera className="h-4 w-4" />
+              <span>Foto Mentahan (Tanpa Frame) — #{rawModalPhoto?.id.substring(0, 8)}</span>
+            </DialogTitle>
+            <DialogDescription>
+              Arsip foto asli hasil kamera tanpa border dekorasi dari sesi ini ({rawModalPhoto?.raw_photos?.length || 0} foto).
+            </DialogDescription>
+          </DialogHeader>
+
+          {rawModalPhoto && rawModalPhoto.raw_photos && rawModalPhoto.raw_photos.length > 0 ? (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 my-3">
+              {rawModalPhoto.raw_photos.map((rawUrl, idx) => (
+                <div key={idx} className="relative group rounded-lg overflow-hidden border border-zinc-200 bg-zinc-100 shadow-2xs flex flex-col">
+                  <div className="relative aspect-[4/3] bg-zinc-900/5">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={rawUrl}
+                      alt={`Shot ${idx + 1}`}
+                      className="w-full h-full object-cover"
+                      loading="lazy"
+                    />
+                    <div className="absolute top-1.5 left-1.5 bg-black/75 text-white text-[9px] font-mono px-1 rounded">
+                      #{idx + 1}
+                    </div>
+                  </div>
+                  <div className="p-2 bg-white flex items-center justify-between text-[11px] font-mono border-t border-zinc-100">
+                    <span className="text-zinc-600 font-medium">Shot #{idx + 1}</span>
+                    <a
+                      href={rawUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      download={`haloluna-raw-${rawModalPhoto.id.substring(0, 8)}-shot-${idx + 1}.png`}
+                      className="text-zinc-500 hover:text-zinc-900 flex items-center gap-0.5"
+                    >
+                      <Download className="h-3 w-3" />
+                      <span className="text-[10px]">Unduh</span>
+                    </a>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="p-8 text-center text-zinc-500 text-xs font-mono">
+              Tidak ada foto mentahan yang tersimpan untuk sesi ini.
+            </div>
+          )}
+
+          <DialogFooter className="flex items-center justify-between sm:justify-between w-full">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setRawModalPhoto(null)}
+            >
+              Tutup
+            </Button>
+            {rawModalPhoto && rawModalPhoto.raw_photos && rawModalPhoto.raw_photos.length > 0 && (
+              <Button
+                variant="default"
+                size="sm"
+                disabled={downloadingRaw}
+                onClick={() => handleDownloadAllRaw(rawModalPhoto.id, rawModalPhoto.raw_photos || [])}
+                className="gap-1.5 bg-zinc-900 hover:bg-zinc-800 text-white"
+              >
+                <Download className="h-3.5 w-3.5" />
+                <span>{downloadingRaw ? 'Mendownload...' : `Download Semua (${rawModalPhoto.raw_photos.length} Foto)`}</span>
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

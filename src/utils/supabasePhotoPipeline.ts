@@ -6,6 +6,7 @@ export interface SavePhotoResult {
   sessionId?: string;
   publicUrl?: string;
   storage_path?: string;
+  rawPhotos?: string[];
   error?: unknown;
 }
 
@@ -22,6 +23,8 @@ export interface SavePhotoOptions {
   existingPhotoId?: string;
   /** Re-use the same storage path (skip generating a new one) */
   existingStoragePath?: string;
+  /** Array of raw un-framed photo data URLs or blobs */
+  rawPhotos?: string[];
 }
 
 /**
@@ -71,7 +74,23 @@ export async function savePhotoToSupabase(
   console.log('[HaloLuna] savePhotoToSupabase → frame:', selectedFrame,
     '| guest:', guestName || '—',
     '| age:', guestAge || '—',
+    '| rawPhotos:', opts.rawPhotos?.length || 0,
     '| size:', blob?.size);
+
+  // If raw photos are included, use the server-side pipeline which has full
+  // service-role storage permissions to write to raw/ and create manifests.
+  if (opts.rawPhotos && opts.rawPhotos.length > 0) {
+    return _serverFallback({
+      blob,
+      storagePath,
+      selectedFrame,
+      locationTag,
+      guestName: isBirthdayFrame ? guestName : '',
+      guestAge:  isBirthdayFrame ? guestAge  : '',
+      cleanExistingId,
+      rawPhotos: opts.rawPhotos,
+    });
+  }
 
   // ── Attempt client-side pipeline ─────────────────────────────────────────
   try {
@@ -197,8 +216,9 @@ async function _serverFallback(params: {
   guestName: string;
   guestAge: string;
   cleanExistingId: string | undefined;
+  rawPhotos?: string[];
 }): Promise<SavePhotoResult> {
-  const { blob, storagePath, selectedFrame, locationTag, guestName, guestAge, cleanExistingId } = params;
+  const { blob, storagePath, selectedFrame, locationTag, guestName, guestAge, cleanExistingId, rawPhotos } = params;
   try {
     const fd = new FormData();
     fd.append('file', blob, storagePath);
@@ -208,6 +228,9 @@ async function _serverFallback(params: {
     if (guestAge)  fd.append('guestAge',  guestAge);
     if (cleanExistingId) fd.append('existingId', cleanExistingId);
     fd.append('storagePath', storagePath);
+    if (rawPhotos && rawPhotos.length > 0) {
+      fd.append('rawPhotos', JSON.stringify(rawPhotos));
+    }
 
     const res = await fetch('/api/upload', { method: 'POST', body: fd });
     if (!res.ok) {
@@ -223,6 +246,7 @@ async function _serverFallback(params: {
       sessionId:     data.sessionId,
       publicUrl:     data.publicUrl,
       storage_path:  data.storage_path || storagePath,
+      rawPhotos:     data.rawPhotos || [],
     };
     console.log('[HaloLuna] savePhotoToSupabase ✓ server fallback', result);
     return result;

@@ -26,6 +26,21 @@ export async function POST(request: NextRequest) {
       if (storageError) console.error('Storage delete error:', storageError);
     }
 
+    // Clean up raw un-framed photos if present in raw/{id}
+    for (const id of ids) {
+      try {
+        const { data: rawFiles } = await supabaseAdmin.storage
+          .from('photos')
+          .list(`raw/${id}`);
+        if (rawFiles && rawFiles.length > 0) {
+          const rawPaths = rawFiles.map((f) => `raw/${id}/${f.name}`);
+          await supabaseAdmin.storage.from('photos').remove(rawPaths);
+        }
+      } catch (rawErr) {
+        console.warn(`[HaloLuna] Raw cleanup notice for ${id}:`, rawErr);
+      }
+    }
+
     const { error: dbError } = await supabaseAdmin
       .from('photos')
       .delete()

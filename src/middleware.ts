@@ -7,7 +7,14 @@ const ADMIN_PATH = '/hq-x9k2-console';
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (!pathname.startsWith(ADMIN_PATH)) {
+  // Never intercept icon files or non-admin routes
+  if (
+    pathname === '/favicon.ico' ||
+    pathname === '/icon.png' ||
+    pathname === '/apple-icon.png' ||
+    pathname === '/apple-touch-icon.png' ||
+    !pathname.startsWith(ADMIN_PATH)
+  ) {
     return NextResponse.next();
   }
 
@@ -42,5 +49,15 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/hq-x9k2-console/:path*'],
+  matcher: [
+    /*
+     * Match all request paths except for:
+     * - favicon.ico (favicon file)
+     * - icon.png, apple-icon.png, apple-touch-icon.png
+     * - _next/static (static files)
+     * - _next/image (image optimization files)
+     * - static images/media files
+     */
+    '/((?!_next/static|_next/image|favicon\\.ico|icon\\.png|apple-icon\\.png|apple-touch-icon\\.png|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico)$).*)',
+  ],
 };

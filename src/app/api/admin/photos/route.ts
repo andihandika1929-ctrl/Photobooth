@@ -24,7 +24,39 @@ export async function GET() {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    return NextResponse.json({ photos: data ?? [] });
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+    const { data: rawFolders } = await supabaseAdmin.storage
+      .from('photos')
+      .list('raw', { limit: 200 });
+
+    const rawFolderNames = new Set(
+      (rawFolders || [])
+        .filter((f) => f.name && !f.name.startsWith('.'))
+        .map((f) => f.name)
+    );
+
+    const photosWithRaw = await Promise.all(
+      (data ?? []).map(async (p) => {
+        let raw_photos: string[] = [];
+        if (rawFolderNames.has(p.id)) {
+          const { data: files } = await supabaseAdmin.storage
+            .from('photos')
+            .list(`raw/${p.id}`);
+          if (files && files.length > 0) {
+            raw_photos = files
+              .filter((f) => f.name.startsWith('shot_'))
+              .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+              .map((f) => `${supabaseUrl}/storage/v1/object/public/photos/raw/${p.id}/${f.name}`);
+          }
+        }
+        return {
+          ...p,
+          raw_photos,
+        };
+      })
+    );
+
+    return NextResponse.json({ photos: photosWithRaw });
   } catch (err) {
     console.error('Admin photos API error:', err);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });

@@ -10,6 +10,7 @@ export interface PhotoRecord {
   template_type: string;
   location_tag?: string | null;
   created_at: string;
+  raw_photos?: string[];
 }
 
 export function useAdminPhotos() {
@@ -26,6 +27,17 @@ export function useAdminPhotos() {
   const fetchPhotos = useCallback(async () => {
     setLoading(true);
     try {
+      // Primary: fetch via admin API to get both photo records and raw photo URLs
+      const res = await fetch('/api/admin/photos', { cache: 'no-store' });
+      if (res.ok) {
+        const apiData = await res.json();
+        if (Array.isArray(apiData.photos)) {
+          setPhotos(apiData.photos as PhotoRecord[]);
+          return;
+        }
+      }
+
+      // Fallback: direct Supabase client query
       const { data, error } = await supabase
         .from('photos')
         .select('id, image_url, storage_path, template_type, location_tag, created_at')
@@ -33,13 +45,6 @@ export function useAdminPhotos() {
 
       if (!error && data) {
         setPhotos(data as PhotoRecord[]);
-      } else {
-        if (error) console.error('Supabase query error, fallback to admin API:', error);
-        const res = await fetch('/api/admin/photos', { cache: 'no-store' });
-        if (res.ok) {
-          const apiData = await res.json();
-          setPhotos(apiData.photos || []);
-        }
       }
     } catch (err) {
       console.error('Failed to load photos:', err);

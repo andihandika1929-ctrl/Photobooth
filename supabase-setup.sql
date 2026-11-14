@@ -125,4 +125,10 @@ CREATE POLICY "admin_manage_frame_presets"
 CREATE POLICY "anon_manage_frame_presets"
   ON public.frame_presets FOR ALL TO anon USING (true) WITH CHECK (true);
 
+-- ─────────────────────────────────────────
+-- 8. Raw Photos Column (Optional enhancement)
+-- ─────────────────────────────────────────
+ALTER TABLE public.photos ADD COLUMN IF NOT EXISTS raw_photos JSONB DEFAULT '[]'::jsonb;
+
+
 
