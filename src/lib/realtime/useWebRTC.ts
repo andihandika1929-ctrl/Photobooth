@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { RTCSignal } from './roomTypes';
 
-// Google public STUN servers for WebRTC peer-to-peer connection
+// Google & Cloudflare public STUN servers + Metered Open Relay STUN/TURN for WebRTC peer-to-peer connection
 const ICE_SERVERS: RTCConfiguration = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
@@ -11,6 +11,17 @@ const ICE_SERVERS: RTCConfiguration = {
     { urls: 'stun:stun2.l.google.com:19302' },
     { urls: 'stun:stun3.l.google.com:19302' },
     { urls: 'stun:stun4.l.google.com:19302' },
+    { urls: 'stun:stun.cloudflare.com:3478' },
+    { urls: 'stun:openrelay.metered.ca:80' },
+    {
+      urls: [
+        'turn:openrelay.metered.ca:80',
+        'turn:openrelay.metered.ca:443',
+        'turn:openrelay.metered.ca:443?transport=tcp',
+      ],
+      username: 'openrelayproject',
+      credential: 'openrelayproject',
+    },
   ],
   iceCandidatePoolSize: 10,
 };
@@ -38,31 +49,6 @@ export function useWebRTC({
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const iceCandidatesQueue = useRef<RTCIceCandidateInit[]>([]);
   const isMakingOfferRef = useRef(false);
-
-  // Apply 480p 30fps constraints to transmitted video stream
-  const applyVideoSenderConstraints = useCallback(async (sender: RTCRtpSender, track: MediaStreamTrack) => {
-    if (track.kind !== 'video') return;
-    try {
-      const settings = track.getSettings();
-      const height = settings.height || 720;
-      // Downscale so transmitted preview stream is 480p (ideal for mobile & PC smooth 30-60fps)
-      const scaleFactor = height > 480 ? Math.max(1, height / 480) : 1;
-
-      const params = sender.getParameters();
-      if (!params.encodings || params.encodings.length === 0) {
-        params.encodings = [{}];
-      }
-      params.encodings[0].scaleResolutionDownBy = scaleFactor;
-      params.encodings[0].maxBitrate = 900_000; // 900 kbps (lightweight 480p)
-      params.encodings[0].maxFramerate = 30; // 30 FPS preview target
-      (params as any).degradationPreference = 'maintain-framerate'; // Prioritize fluid framerate over resolution
-
-      await sender.setParameters(params);
-      console.log(`[WebRTC] Video stream constrained to 480p@30fps (scale: ${scaleFactor.toFixed(2)})`);
-    } catch (err) {
-      console.warn('[WebRTC] setParameters error (ignorable):', err);
-    }
-  }, []);
 
   // Initialize or clean up RTCPeerConnection
   const cleanupPC = useCallback(() => {
@@ -114,30 +100,36 @@ export function useWebRTC({
     };
 
     pc.ontrack = (event) => {
-      console.log('[WebRTC] Track received:', event.track.kind);
-      if (event.streams && event.streams[0]) {
-        setRemoteStream(event.streams[0]);
-      } else {
-        setRemoteStream((prevStream) => {
-          if (prevStream) {
-            if (!prevStream.getTracks().some((t) => t.id === event.track.id)) {
-              prevStream.addTrack(event.track);
+      console.log('[WebRTC] Track received:', event.track.kind, event.track.id);
+
+      // Listen for when first RTP packets arrive from network
+      event.track.onunmute = () => {
+        console.log('[WebRTC] Track unmuted (media packets flowing):', event.track.kind);
+        setRemoteStream((prev) => (prev ? new MediaStream(prev.getTracks()) : null));
+      };
+
+      // Always create a fresh MediaStream instance so React state and HTML5 video detect the change
+      const incomingStream = event.streams && event.streams[0] ? event.streams[0] : null;
+      setRemoteStream((prevStream) => {
+        const sourceTracks = incomingStream ? incomingStream.getTracks() : [event.track];
+        if (prevStream) {
+          const merged = [...prevStream.getTracks()];
+          sourceTracks.forEach((t) => {
+            if (!merged.some((m) => m.id === t.id)) {
+              merged.push(t);
             }
-            return new MediaStream(prevStream.getTracks());
-          }
-          return new MediaStream([event.track]);
-        });
-      }
+          });
+          return new MediaStream(merged);
+        }
+        return new MediaStream(sourceTracks);
+      });
     };
 
-    // Add local tracks if available and apply 480p preview constraints
+    // Add local tracks if available
     if (localStream) {
       localStream.getTracks().forEach((track) => {
         try {
-          const sender = pc.addTrack(track, localStream);
-          if (track.kind === 'video') {
-            applyVideoSenderConstraints(sender, track);
-          }
+          pc.addTrack(track, localStream);
         } catch (e) {
           console.warn('[WebRTC] addTrack error:', e);
         }
@@ -145,7 +137,7 @@ export function useWebRTC({
     }
 
     return pc;
-  }, [enabled, cleanupPC, localStream, onSendSignal, senderId, applyVideoSenderConstraints]);
+  }, [enabled, cleanupPC, localStream, onSendSignal, senderId]);
 
   // Initiate call if this client is initiator
   const startCall = useCallback(async () => {
@@ -156,7 +148,17 @@ export function useWebRTC({
     if (!pc) return;
 
     if (pc.signalingState !== 'stable') {
-      console.log('[WebRTC] Cannot startCall, signalingState is not stable:', pc.signalingState);
+      console.log('[WebRTC] startCall invoked while signalingState is:', pc.signalingState);
+      // If we already prepared an offer, re-send it so the guest receives it
+      if (pc.localDescription && pc.localDescription.type === 'offer') {
+        console.log('[WebRTC] Re-broadcasting existing local offer...');
+        onSendSignal({
+          type: 'offer',
+          sdp: pc.localDescription,
+          senderId,
+        });
+        return;
+      }
       return;
     }
 
@@ -167,10 +169,7 @@ export function useWebRTC({
         const existing = senders.find((s) => s.track?.kind === track.kind);
         if (!existing) {
           try {
-            const sender = pc!.addTrack(track, localStream);
-            if (track.kind === 'video') {
-              applyVideoSenderConstraints(sender, track);
-            }
+            pc!.addTrack(track, localStream);
           } catch (e) {}
         }
       });
@@ -197,7 +196,7 @@ export function useWebRTC({
     } finally {
       isMakingOfferRef.current = false;
     }
-  }, [createPeerConnection, localStream, onSendSignal, senderId, applyVideoSenderConstraints]);
+  }, [createPeerConnection, localStream, onSendSignal, senderId]);
 
   // Request offer from host (used by guest when guest camera becomes ready)
   const requestOffer = useCallback(() => {
@@ -242,10 +241,7 @@ export function useWebRTC({
               const existing = senders.find((s) => s.track?.kind === track.kind);
               if (!existing) {
                 try {
-                  const sender = pc!.addTrack(track, localStream);
-                  if (track.kind === 'video') {
-                    applyVideoSenderConstraints(sender, track);
-                  }
+                  pc!.addTrack(track, localStream);
                 } catch (e) {}
               }
             });
@@ -307,7 +303,7 @@ export function useWebRTC({
         console.error('[WebRTC] Error handling signal:', err);
       }
     },
-    [createPeerConnection, isInitiator, localStream, onSendSignal, senderId, startCall, applyVideoSenderConstraints]
+    [createPeerConnection, isInitiator, localStream, onSendSignal, senderId, startCall]
   );
 
   // Sync track replacements when localStream changes (without re-triggering startCall renegotiation loop)
@@ -319,21 +315,14 @@ export function useWebRTC({
     localStream.getTracks().forEach((track) => {
       const sender = senders.find((s) => s.track?.kind === track.kind);
       if (sender) {
-        sender.replaceTrack(track).then(() => {
-          if (track.kind === 'video') {
-            applyVideoSenderConstraints(sender, track);
-          }
-        }).catch(console.error);
+        sender.replaceTrack(track).catch(console.error);
       } else {
         try {
-          const newSender = pc.addTrack(track, localStream);
-          if (track.kind === 'video') {
-            applyVideoSenderConstraints(newSender, track);
-          }
+          pc.addTrack(track, localStream);
         } catch (e) {}
       }
     });
-  }, [localStream, applyVideoSenderConstraints]);
+  }, [localStream]);
 
   // Audio / Video toggles
   const toggleAudio = useCallback(() => {

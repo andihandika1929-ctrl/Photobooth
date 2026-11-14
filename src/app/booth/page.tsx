@@ -380,6 +380,8 @@ function CaptureRoom() {
         const audioTrack = audioStream.getAudioTracks()[0];
         if (audioTrack) {
           stream.addTrack(audioTrack);
+          // Broadcast refreshed stream with audio track to React state
+          setLocalStream(new MediaStream(stream.getTracks()));
         }
       } catch (micErr) {
         console.warn('Microphone permission ignored/skipped:', micErr);
@@ -739,6 +741,23 @@ function CaptureRoom() {
       requestOffer();
     }
   }, [role, partner, isDuoActive, localStream, startCall, requestOffer]);
+
+  // Periodic retry until remoteStream is received (in case initial signaling packet dropped over WebSockets)
+  useEffect(() => {
+    if (!isDuoActive || !partner || !localStream || remoteStream) return;
+
+    const interval = setInterval(() => {
+      if (role === 'guest' && !remoteStream) {
+        console.log('[HaloLuna Duo] Retrying requestOffer because remoteStream is not yet connected...');
+        requestOffer();
+      } else if (role === 'host' && !remoteStream) {
+        console.log('[HaloLuna Duo] Host re-checking call state...');
+        startCall();
+      }
+    }, 3500);
+
+    return () => clearInterval(interval);
+  }, [isDuoActive, partner, localStream, remoteStream, role, requestOffer, startCall]);
 
   // Secret admin access via Ctrl+Shift+A / Cmd+Shift+A shortcut
   useEffect(() => {
@@ -3213,12 +3232,12 @@ function CaptureRoom() {
                               : 'border-neutral-200 hover:border-neutral-800 hover:-translate-y-0.5'
                           }`}
                         >
-                          {/* Thumbnail Image (object-[center_20%] prevents face/forehead clipping) */}
+                          {/* Thumbnail Image (object-center prevents chin/mouth clipping) */}
                           <img
                             src={frame.dataUrl}
                             alt={`Shot ${index + 1}`}
                             draggable={false}
-                            className={`w-full h-full object-cover object-[center_20%] pointer-events-none transition-opacity ${
+                            className={`w-full h-full object-cover object-center pointer-events-none transition-opacity ${
                               isPlaced ? 'opacity-55 group-hover:opacity-35' : 'opacity-100'
                             }`}
                           />
@@ -3335,7 +3354,7 @@ function CaptureRoom() {
                               <img
                                 src={capturedFrames[shot].dataUrl}
                                 alt={`Slot ${slotIdx + 1}`}
-                                className="w-full h-full object-cover object-[center_20%] pointer-events-none group-hover:opacity-90 transition-opacity"
+                                className="w-full h-full object-cover object-center pointer-events-none group-hover:opacity-90 transition-opacity"
                               />
                             ) : (
                               <span className="text-xl text-neutral-400 font-light select-none">+</span>
@@ -3382,7 +3401,7 @@ function CaptureRoom() {
                               <img
                                 src={capturedFrames[shot].dataUrl}
                                 alt={`Slot ${slotIdx + 1}`}
-                                className="w-full h-full object-cover object-[center_20%] pointer-events-none group-hover:opacity-90 transition-opacity"
+                                className="w-full h-full object-cover object-center pointer-events-none group-hover:opacity-90 transition-opacity"
                               />
                             ) : (
                               <span className="text-xl text-neutral-400 font-light select-none">+</span>
@@ -3539,7 +3558,7 @@ function CaptureRoom() {
                                 src={capturedFrames[shot].dataUrl}
                                 alt={`Slot ${slotIdx + 1}`}
                                 draggable={false}
-                                className="w-full h-full object-cover object-[center_20%] pointer-events-none transition-all duration-300"
+                                className="w-full h-full object-cover object-center pointer-events-none transition-all duration-300"
                                 style={{
                                   filter:
                                     activeStyleLook.css !== 'none'
@@ -3583,7 +3602,7 @@ function CaptureRoom() {
                                 src={capturedFrames[shot].dataUrl}
                                 alt={`Slot ${slotIdx + 1}`}
                                 draggable={false}
-                                className="w-full h-full object-cover object-[center_20%] pointer-events-none transition-all duration-300"
+                                className="w-full h-full object-cover object-center pointer-events-none transition-all duration-300"
                                 style={{
                                   filter:
                                     activeStyleLook.css !== 'none'
@@ -3655,7 +3674,7 @@ function CaptureRoom() {
                             src={sampleUrl}
                             alt={f.cap}
                             draggable={false}
-                            className="w-full h-full object-cover object-[center_20%] pointer-events-none"
+                            className="w-full h-full object-cover object-center pointer-events-none"
                             style={{ filter: f.css !== 'none' ? f.css : undefined }}
                           />
                         </div>
@@ -3828,7 +3847,7 @@ function CaptureRoom() {
                                   src={capturedFrames[shot].dataUrl}
                                   alt={`Slot ${slotIdx + 1}`}
                                   draggable={false}
-                                  className="w-full h-full object-cover object-[center_20%] pointer-events-none transition-all duration-300"
+                                  className="w-full h-full object-cover object-center pointer-events-none transition-all duration-300"
                                   style={{
                                     filter:
                                       activeStyleLook.css !== 'none'
@@ -3880,7 +3899,7 @@ function CaptureRoom() {
                                   src={capturedFrames[shot].dataUrl}
                                   alt={`Slot ${slotIdx + 1}`}
                                   draggable={false}
-                                  className="w-full h-full object-cover object-[center_20%] pointer-events-none transition-all duration-300"
+                                  className="w-full h-full object-cover object-center pointer-events-none transition-all duration-300"
                                   style={{
                                     filter:
                                       activeStyleLook.css !== 'none'
@@ -4467,7 +4486,7 @@ function CaptureRoom() {
                                   src={capturedFrames[shot].dataUrl}
                                   alt={`Slot ${slotIdx + 1}`}
                                   draggable={false}
-                                  className="w-full h-full object-cover object-[center_20%] pointer-events-none transition-all duration-300"
+                                  className="w-full h-full object-cover object-center pointer-events-none transition-all duration-300"
                                   style={{
                                     filter:
                                       activeStyleLook.css !== 'none'
@@ -4519,7 +4538,7 @@ function CaptureRoom() {
                                   src={capturedFrames[shot].dataUrl}
                                   alt={`Slot ${slotIdx + 1}`}
                                   draggable={false}
-                                  className="w-full h-full object-cover object-[center_20%] pointer-events-none transition-all duration-300"
+                                  className="w-full h-full object-cover object-center pointer-events-none transition-all duration-300"
                                   style={{
                                     filter:
                                       activeStyleLook.css !== 'none'

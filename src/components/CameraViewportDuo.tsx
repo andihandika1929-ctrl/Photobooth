@@ -110,6 +110,7 @@ export default function CameraViewportDuo({
 }: CameraViewportDuoProps) {
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const flashRef = useRef<HTMLDivElement | null>(null);
 
   // MediaPipe Tracker & Segmenter Refs
@@ -422,7 +423,7 @@ export default function CameraViewportDuo({
     }
   }, []);
 
-  // Capture High-Res Snapshot with background & face stickers composited
+  // Capture High-Res Snapshot with background & face stickers composited matching viewport crop
   const captureLocalSnapshot = useCallback((): string | null => {
     const video = localVideoRef.current;
     if (!video || video.readyState < 2) return null;
@@ -430,10 +431,30 @@ export default function CameraViewportDuo({
     const origWidth = video.videoWidth || 1920;
     const origHeight = video.videoHeight || 1080;
 
+    // Viewport geometry from parent container to match preview framing (prevent cropping face)
+    const container = video.parentElement;
+    const cw = container?.clientWidth || origWidth;
+    const ch = container?.clientHeight || origHeight;
+    const targetAspect = cw / ch;
+    const videoAspect = origWidth / origHeight;
+
+    let sx = 0;
+    let sy = 0;
+    let sw = origWidth;
+    let sh = origHeight;
+
+    if (videoAspect > targetAspect) {
+      sw = Math.round(origHeight * targetAspect);
+      sx = Math.round((origWidth - sw) / 2);
+    } else if (videoAspect < targetAspect) {
+      sh = Math.round(origWidth / targetAspect);
+      sy = Math.round((origHeight - sh) / 2);
+    }
+
     const maxDim = 1920;
-    const scale = Math.min(1, maxDim / Math.max(origWidth, origHeight));
-    const width = Math.round(origWidth * scale);
-    const height = Math.round(origHeight * scale);
+    const scale = Math.min(1, maxDim / Math.max(sw, sh));
+    const width = Math.round(sw * scale);
+    const height = Math.round(sh * scale);
 
     const canvas = document.createElement('canvas');
     canvas.width = width;
@@ -448,12 +469,24 @@ export default function CameraViewportDuo({
 
     // 1. If Snap Camera Kit Lens is active, capture directly from Snap live canvas (with horizontal flip if isMirrored)
     if (hasSnapLens && snapCanvas) {
+      const snapAspect = snapCanvas.width / snapCanvas.height;
+      let ssx = 0;
+      let ssy = 0;
+      let ssw = snapCanvas.width;
+      let ssh = snapCanvas.height;
+      if (snapAspect > targetAspect) {
+        ssw = Math.round(snapCanvas.height * targetAspect);
+        ssx = Math.round((snapCanvas.width - ssw) / 2);
+      } else if (snapAspect < targetAspect) {
+        ssh = Math.round(snapCanvas.width / targetAspect);
+        ssy = Math.round((snapCanvas.height - ssh) / 2);
+      }
       ctx.save();
       if (isMirrored) {
         ctx.translate(width, 0);
         ctx.scale(-1, 1);
       }
-      ctx.drawImage(snapCanvas, 0, 0, width, height);
+      ctx.drawImage(snapCanvas, ssx, ssy, ssw, ssh, 0, 0, width, height);
       ctx.restore();
     } else if (hasBg) {
       const img = bgImage(selectedBg);
@@ -474,7 +507,7 @@ export default function CameraViewportDuo({
           ctx.translate(width, 0);
           ctx.scale(-1, 1);
         }
-        ctx.drawImage(cut, 0, 0, width, height);
+        ctx.drawImage(cut, sx, sy, sw, sh, 0, 0, width, height);
         ctx.restore();
       } else {
         // Fallback to raw video
@@ -483,17 +516,17 @@ export default function CameraViewportDuo({
           ctx.translate(width, 0);
           ctx.scale(-1, 1);
         }
-        ctx.drawImage(video, 0, 0, width, height);
+        ctx.drawImage(video, sx, sy, sw, sh, 0, 0, width, height);
         ctx.restore();
       }
     } else {
-      // Raw video
+      // Raw video cropped to match viewport
       ctx.save();
       if (isMirrored) {
         ctx.translate(width, 0);
         ctx.scale(-1, 1);
       }
-      ctx.drawImage(video, 0, 0, width, height);
+      ctx.drawImage(video, sx, sy, sw, sh, 0, 0, width, height);
       ctx.restore();
     }
 
@@ -537,10 +570,29 @@ export default function CameraViewportDuo({
     const origHeight = video.videoHeight || 720;
     if (origWidth === 0 || origHeight === 0) return null;
 
+    const container = video.parentElement;
+    const cw = container?.clientWidth || origWidth;
+    const ch = container?.clientHeight || origHeight;
+    const targetAspect = cw / ch;
+    const videoAspect = origWidth / origHeight;
+
+    let sx = 0;
+    let sy = 0;
+    let sw = origWidth;
+    let sh = origHeight;
+
+    if (videoAspect > targetAspect) {
+      sw = Math.round(origHeight * targetAspect);
+      sx = Math.round((origWidth - sw) / 2);
+    } else if (videoAspect < targetAspect) {
+      sh = Math.round(origWidth / targetAspect);
+      sy = Math.round((origHeight - sh) / 2);
+    }
+
     const maxDim = 1920;
-    const scale = Math.min(1, maxDim / Math.max(origWidth, origHeight));
-    const width = Math.round(origWidth * scale);
-    const height = Math.round(origHeight * scale);
+    const scale = Math.min(1, maxDim / Math.max(sw, sh));
+    const width = Math.round(sw * scale);
+    const height = Math.round(sh * scale);
 
     const canvas = document.createElement('canvas');
     canvas.width = width;
@@ -562,12 +614,12 @@ export default function CameraViewportDuo({
 
         const r = bgSourceRect(img.naturalWidth, img.naturalHeight, width, height, half, halves);
         ctx.drawImage(img, r.sx, r.sy, r.sw, r.sh, 0, 0, width, height);
-        ctx.drawImage(cut, 0, 0, width, height);
+        ctx.drawImage(cut, sx, sy, sw, sh, 0, 0, width, height);
       } else {
-        ctx.drawImage(video, 0, 0, width, height);
+        ctx.drawImage(video, sx, sy, sw, sh, 0, 0, width, height);
       }
     } else {
-      ctx.drawImage(video, 0, 0, width, height);
+      ctx.drawImage(video, sx, sy, sw, sh, 0, 0, width, height);
     }
 
     const cssFilter = getFilterCss(selectedFilter);
@@ -775,27 +827,50 @@ export default function CameraViewportDuo({
                           else remoteVideoRef.current = el;
                           if (el && leftStream && el.srcObject !== leftStream) {
                             el.srcObject = leftStream;
-                            el.onloadedmetadata = () => {
-                              el.play().then(() => {
-                                if (!isLeftLocal) setRemoteVideoActive(true);
-                              }).catch(() => {
-                                el.muted = true;
-                                el.play().then(() => {
+                            el.muted = isLeftLocal ? isMirrored : true;
+                            const play = () => {
+                              el.play()
+                                .then(() => {
                                   if (!isLeftLocal) setRemoteVideoActive(true);
-                                }).catch(console.error);
-                              });
+                                })
+                                .catch(() => {
+                                  el.muted = true;
+                                  el.play()
+                                    .then(() => {
+                                      if (!isLeftLocal) setRemoteVideoActive(true);
+                                    })
+                                    .catch(console.error);
+                                });
                             };
-                            el.play().catch(() => {});
+                            if (el.readyState >= 1) play();
+                            else {
+                              el.onloadedmetadata = play;
+                              el.oncanplay = play;
+                            }
                           }
                         }}
                         autoPlay
                         playsInline
-                        muted={isLeftLocal ? isMirrored : isRemoteAudioMuted}
+                        muted={isLeftLocal ? isMirrored : true}
                         className={`w-full h-full object-cover relative z-[1] ${
                           isLeftLocal && isSnapFilterActive ? 'hidden' : 'block'
                         } ${isLeftLocal && isMirrored ? 'scale-x-[-1]' : ''}`}
                         style={{ filter: getFilterCss(selectedFilter) }}
                       />
+                      {/* Dedicated Remote Audio Player */}
+                      {!isLeftLocal && (
+                        <audio
+                          ref={(el) => {
+                            remoteAudioRef.current = el;
+                            if (el && leftStream && el.srcObject !== leftStream) {
+                              el.srcObject = leftStream;
+                            }
+                          }}
+                          autoPlay
+                          playsInline
+                          muted={isRemoteAudioMuted}
+                        />
+                      )}
                       {/* MediaPipe Segmentation & Face Filter Live Overlay */}
                       <canvas
                         ref={localOverlayCanvasRef}
@@ -823,9 +898,13 @@ export default function CameraViewportDuo({
                         <button
                           type="button"
                           onClick={() => {
-                            if (remoteVideoRef.current) {
-                              remoteVideoRef.current.muted = !remoteVideoRef.current.muted;
-                              setIsRemoteAudioMuted(remoteVideoRef.current.muted);
+                            const nextMuted = !isRemoteAudioMuted;
+                            setIsRemoteAudioMuted(nextMuted);
+                            if (remoteAudioRef.current) {
+                              remoteAudioRef.current.muted = nextMuted;
+                              if (!nextMuted) {
+                                remoteAudioRef.current.play().catch(console.error);
+                              }
                             }
                           }}
                           className="absolute bottom-3 right-3 z-20 rounded-full bg-black/60 p-2 text-white hover:bg-black/80 backdrop-blur-md"
@@ -876,27 +955,50 @@ export default function CameraViewportDuo({
                           else remoteVideoRef.current = el;
                           if (el && rightStream && el.srcObject !== rightStream) {
                             el.srcObject = rightStream;
-                            el.onloadedmetadata = () => {
-                              el.play().then(() => {
-                                if (!isRightLocal) setRemoteVideoActive(true);
-                              }).catch(() => {
-                                el.muted = true;
-                                el.play().then(() => {
+                            el.muted = isRightLocal ? isMirrored : true;
+                            const play = () => {
+                              el.play()
+                                .then(() => {
                                   if (!isRightLocal) setRemoteVideoActive(true);
-                                }).catch(console.error);
-                              });
+                                })
+                                .catch(() => {
+                                  el.muted = true;
+                                  el.play()
+                                    .then(() => {
+                                      if (!isRightLocal) setRemoteVideoActive(true);
+                                    })
+                                    .catch(console.error);
+                                });
                             };
-                            el.play().catch(() => {});
+                            if (el.readyState >= 1) play();
+                            else {
+                              el.onloadedmetadata = play;
+                              el.oncanplay = play;
+                            }
                           }
                         }}
                         autoPlay
                         playsInline
-                        muted={isRightLocal ? isMirrored : isRemoteAudioMuted}
+                        muted={isRightLocal ? isMirrored : true}
                         className={`w-full h-full object-cover relative z-[1] ${
                           isRightLocal && isSnapFilterActive ? 'hidden' : 'block'
                         } ${isRightLocal && isMirrored ? 'scale-x-[-1]' : ''}`}
                         style={{ filter: getFilterCss(selectedFilter) }}
                       />
+                      {/* Dedicated Remote Audio Player */}
+                      {!isRightLocal && (
+                        <audio
+                          ref={(el) => {
+                            remoteAudioRef.current = el;
+                            if (el && rightStream && el.srcObject !== rightStream) {
+                              el.srcObject = rightStream;
+                            }
+                          }}
+                          autoPlay
+                          playsInline
+                          muted={isRemoteAudioMuted}
+                        />
+                      )}
                       {/* MediaPipe Segmentation & Face Filter Live Overlay */}
                       <canvas
                         ref={remoteOverlayCanvasRef}
@@ -924,9 +1026,13 @@ export default function CameraViewportDuo({
                         <button
                           type="button"
                           onClick={() => {
-                            if (remoteVideoRef.current) {
-                              remoteVideoRef.current.muted = !remoteVideoRef.current.muted;
-                              setIsRemoteAudioMuted(remoteVideoRef.current.muted);
+                            const nextMuted = !isRemoteAudioMuted;
+                            setIsRemoteAudioMuted(nextMuted);
+                            if (remoteAudioRef.current) {
+                              remoteAudioRef.current.muted = nextMuted;
+                              if (!nextMuted) {
+                                remoteAudioRef.current.play().catch(console.error);
+                              }
                             }
                           }}
                           className="absolute bottom-3 right-3 z-20 rounded-full bg-black/60 p-2 text-white hover:bg-black/80 backdrop-blur-md"
