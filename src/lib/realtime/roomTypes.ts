@@ -49,6 +49,8 @@ export type RoomSyncAction =
   | { type: 'DECO_ADD_STROKE'; stroke: { cid: string; mode: 'draw' | 'erase'; color: string; size: number; pts: number[] } }
   | { type: 'DECO_CLEAR_STROKES' }
   | { type: 'DECO_ADD_TEXT'; cid: string; text: string; color: string; font: string; x: number; y: number; scale: number; rot: number }
+  | { type: 'DECO_MOVE_TEXT'; cid: string; x: number; y: number; scale: number; rot: number }
+  | { type: 'DECO_UPDATE_TEXT'; cid: string; color?: string; font?: string }
   | { type: 'DECO_REMOVE_TEXT'; cid: string };
 
 export interface CursorPosition {

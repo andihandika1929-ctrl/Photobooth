@@ -108,11 +108,30 @@ interface DecoStickerItem {
   rot: number;
 }
 
+const DECO_FONTS = [
+  { id: 'bubble', label: 'Bubble', family: "'Cherry Bomb One', cursive" },
+  { id: 'caveat', label: 'Doodle', family: "'Caveat', cursive" },
+  { id: 'pacifico', label: 'Brush', family: "'Pacifico', cursive" },
+  { id: 'dynapuff', label: 'Chubby', family: "'DynaPuff', cursive" },
+  { id: 'pinyon', label: 'Cursive', family: "'Pinyon Script', cursive" },
+  { id: 'shrikhand', label: 'Retro', family: "'Shrikhand', cursive" },
+  { id: 'serif', label: 'Serif', family: "'Playfair Display', serif" },
+  { id: 'sans', label: 'Sans', family: "'Inter', system-ui, sans-serif" },
+  { id: 'mono', label: 'Mono', family: "'Courier New', monospace" },
+] as const;
+
+type DecoFontId = typeof DECO_FONTS[number]['id'];
+
+function getDecoFontFamily(fontId?: string): string {
+  const found = DECO_FONTS.find((f) => f.id === fontId);
+  return found ? found.family : "'Inter', system-ui, sans-serif";
+}
+
 interface DecoTextItem {
   cid: string;
   text: string;
   color: string;
-  font: 'sans' | 'serif' | 'mono';
+  font: string;
   x: number;
   y: number;
   scale: number;
@@ -341,7 +360,7 @@ function CaptureRoom() {
   const [decoTexts, setDecoTexts] = useState<DecoTextItem[]>([]);
   const [decoTextInput, setDecoTextInput] = useState<string>('');
   const [activeTextColor, setActiveTextColor] = useState<string>('#FFFFFF');
-  const [activeTextFont, setActiveTextFont] = useState<'sans' | 'serif' | 'mono'>('sans');
+  const [activeTextFont, setActiveTextFont] = useState<string>('bubble');
 
   const decoStageRef = useRef<HTMLDivElement | null>(null);
   const decoCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -349,6 +368,7 @@ function CaptureRoom() {
   const currentStrokeRef = useRef<DecoStrokeItem | null>(null);
   const stickerDragRef = useRef<{
     cid: string;
+    type: 'sticker' | 'text';
     mode: 'drag' | 'transform';
     startX: number;
     startY: number;
@@ -607,6 +627,22 @@ function CaptureRoom() {
             rot: action.rot,
           },
         ]);
+      } else if (action.type === 'DECO_MOVE_TEXT') {
+        setDecoTexts((prev) =>
+          prev.map((t) =>
+            t.cid === action.cid
+              ? { ...t, x: action.x, y: action.y, scale: action.scale, rot: action.rot }
+              : t
+          )
+        );
+      } else if (action.type === 'DECO_UPDATE_TEXT') {
+        setDecoTexts((prev) =>
+          prev.map((t) =>
+            t.cid === action.cid
+              ? { ...t, color: action.color || t.color, font: action.font || t.font }
+              : t
+          )
+        );
       } else if (action.type === 'DECO_REMOVE_TEXT') {
         setDecoTexts((prev) => prev.filter((t) => t.cid !== action.cid));
       }
@@ -1503,23 +1539,38 @@ function CaptureRoom() {
     e.stopPropagation();
     e.preventDefault();
     setSelectedDecoCid(cid);
-    const sticker = decoStickers.find((s) => s.cid === cid);
-    if (!sticker || !decoStageRef.current) return;
+
+    const isSticker = decoStickers.some((s) => s.cid === cid);
+    const item = isSticker
+      ? decoStickers.find((s) => s.cid === cid)
+      : decoTexts.find((t) => t.cid === cid);
+
+    if (!item || !decoStageRef.current) return;
+
+    if (!isSticker) {
+      const textItem = item as DecoTextItem;
+      setActiveTextFont(textItem.font);
+      setActiveTextColor(textItem.color);
+      setDecoTab('text');
+    } else {
+      setDecoTab('stickers');
+    }
 
     const stageRect = decoStageRef.current.getBoundingClientRect();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
 
     stickerDragRef.current = {
       cid,
+      type: isSticker ? 'sticker' : 'text',
       mode: 'drag',
       startX: e.clientX,
       startY: e.clientY,
-      initialX: sticker.x,
-      initialY: sticker.y,
-      initialScale: sticker.scale,
-      initialRot: sticker.rot,
-      centerX: stageRect.left + sticker.x * stageRect.width,
-      centerY: stageRect.top + sticker.y * stageRect.height,
+      initialX: item.x,
+      initialY: item.y,
+      initialScale: item.scale,
+      initialRot: item.rot,
+      centerX: stageRect.left + item.x * stageRect.width,
+      centerY: stageRect.top + item.y * stageRect.height,
     };
   };
 
@@ -1527,23 +1578,29 @@ function CaptureRoom() {
     e.stopPropagation();
     e.preventDefault();
     setSelectedDecoCid(cid);
-    const sticker = decoStickers.find((s) => s.cid === cid);
-    if (!sticker || !decoStageRef.current) return;
+
+    const isSticker = decoStickers.some((s) => s.cid === cid);
+    const item = isSticker
+      ? decoStickers.find((s) => s.cid === cid)
+      : decoTexts.find((t) => t.cid === cid);
+
+    if (!item || !decoStageRef.current) return;
 
     const stageRect = decoStageRef.current.getBoundingClientRect();
     (e.target as HTMLElement).setPointerCapture(e.pointerId);
 
     stickerDragRef.current = {
       cid,
+      type: isSticker ? 'sticker' : 'text',
       mode: 'transform',
       startX: e.clientX,
       startY: e.clientY,
-      initialX: sticker.x,
-      initialY: sticker.y,
-      initialScale: sticker.scale,
-      initialRot: sticker.rot,
-      centerX: stageRect.left + sticker.x * stageRect.width,
-      centerY: stageRect.top + sticker.y * stageRect.height,
+      initialX: item.x,
+      initialY: item.y,
+      initialScale: item.scale,
+      initialRot: item.rot,
+      centerX: stageRect.left + item.x * stageRect.width,
+      centerY: stageRect.top + item.y * stageRect.height,
     };
   };
 
@@ -1558,9 +1615,15 @@ function CaptureRoom() {
       const nx = Math.min(1, Math.max(0, drag.initialX + dx));
       const ny = Math.min(1, Math.max(0, drag.initialY + dy));
 
-      setDecoStickers((prev) =>
-        prev.map((s) => (s.cid === drag.cid ? { ...s, x: nx, y: ny } : s))
-      );
+      if (drag.type === 'text') {
+        setDecoTexts((prev) =>
+          prev.map((t) => (t.cid === drag.cid ? { ...t, x: nx, y: ny } : t))
+        );
+      } else {
+        setDecoStickers((prev) =>
+          prev.map((s) => (s.cid === drag.cid ? { ...s, x: nx, y: ny } : s))
+        );
+      }
     } else if (drag.mode === 'transform') {
       const d0 = Math.max(10, Math.hypot(drag.startX - drag.centerX, drag.startY - drag.centerY));
       const d1 = Math.max(10, Math.hypot(e.clientX - drag.centerX, e.clientY - drag.centerY));
@@ -1570,9 +1633,15 @@ function CaptureRoom() {
       const nScale = Math.min(0.6, Math.max(0.08, drag.initialScale * (d1 / d0)));
       const nRot = drag.initialRot + (a1 - a0);
 
-      setDecoStickers((prev) =>
-        prev.map((s) => (s.cid === drag.cid ? { ...s, scale: nScale, rot: nRot } : s))
-      );
+      if (drag.type === 'text') {
+        setDecoTexts((prev) =>
+          prev.map((t) => (t.cid === drag.cid ? { ...t, scale: nScale, rot: nRot } : t))
+        );
+      } else {
+        setDecoStickers((prev) =>
+          prev.map((s) => (s.cid === drag.cid ? { ...s, scale: nScale, rot: nRot } : s))
+        );
+      }
     }
   };
 
@@ -1583,18 +1652,64 @@ function CaptureRoom() {
       (e.target as HTMLElement).releasePointerCapture(e.pointerId);
     } catch {}
 
-    const updated = decoStickers.find((s) => s.cid === drag.cid);
-    if (updated && isDuoActive) {
-      sendSync({
-        type: 'DECO_MOVE_STICKER',
-        cid: updated.cid,
-        x: updated.x,
-        y: updated.y,
-        scale: updated.scale,
-        rot: updated.rot,
-      });
+    if (drag.type === 'text') {
+      const updated = decoTexts.find((t) => t.cid === drag.cid);
+      if (updated && isDuoActive) {
+        sendSync({
+          type: 'DECO_MOVE_TEXT',
+          cid: updated.cid,
+          x: updated.x,
+          y: updated.y,
+          scale: updated.scale,
+          rot: updated.rot,
+        });
+      }
+    } else {
+      const updated = decoStickers.find((s) => s.cid === drag.cid);
+      if (updated && isDuoActive) {
+        sendSync({
+          type: 'DECO_MOVE_STICKER',
+          cid: updated.cid,
+          x: updated.x,
+          y: updated.y,
+          scale: updated.scale,
+          rot: updated.rot,
+        });
+      }
     }
     stickerDragRef.current = null;
+  };
+
+  const handleSelectTextFont = (fontId: string) => {
+    setActiveTextFont(fontId);
+    if (selectedDecoCid && decoTexts.some((t) => t.cid === selectedDecoCid)) {
+      setDecoTexts((prev) =>
+        prev.map((t) => (t.cid === selectedDecoCid ? { ...t, font: fontId } : t))
+      );
+      if (isDuoActive) {
+        sendSync({
+          type: 'DECO_UPDATE_TEXT',
+          cid: selectedDecoCid,
+          font: fontId,
+        });
+      }
+    }
+  };
+
+  const handleSelectTextColor = (color: string) => {
+    setActiveTextColor(color);
+    if (selectedDecoCid && decoTexts.some((t) => t.cid === selectedDecoCid)) {
+      setDecoTexts((prev) =>
+        prev.map((t) => (t.cid === selectedDecoCid ? { ...t, color } : t))
+      );
+      if (isDuoActive) {
+        sendSync({
+          type: 'DECO_UPDATE_TEXT',
+          cid: selectedDecoCid,
+          color,
+        });
+      }
+    }
   };
 
   // Text Tool actions
@@ -1635,8 +1750,8 @@ function CaptureRoom() {
     const newText: DecoTextItem = {
       cid,
       text: caption,
-      color: '#FFFFFF',
-      font: 'sans',
+      color: activeTextColor,
+      font: activeTextFont,
       x: 0.5,
       y: decoTexts.length % 2 === 0 ? 0.08 : 0.92,
       scale: 0.18,
@@ -1963,7 +2078,7 @@ function CaptureRoom() {
         ctx.rotate(txt.rot);
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.font = `bold ${fontSize}px ${txt.font === 'serif' ? 'serif' : txt.font === 'mono' ? 'monospace' : 'sans-serif'}`;
+        ctx.font = `bold ${fontSize}px ${getDecoFontFamily(txt.font)}`;
 
         ctx.lineWidth = Math.max(3, Math.round(fontSize * 0.12));
         ctx.strokeStyle = '#000000';
@@ -4250,12 +4365,7 @@ function CaptureRoom() {
                             style={{
                               color: txt.color,
                               fontSize: `${Math.round(txt.scale * 130)}px`,
-                              fontFamily:
-                                txt.font === 'serif'
-                                  ? 'serif'
-                                  : txt.font === 'mono'
-                                  ? 'monospace'
-                                  : 'sans-serif',
+                              fontFamily: getDecoFontFamily(txt.font),
                               textShadow:
                                 '-1.5px -1.5px 0 #000, 1.5px -1.5px 0 #000, -1.5px 1.5px 0 #000, 1.5px 1.5px 0 #000, 0 2px 4px rgba(0,0,0,0.5)',
                             }}
@@ -4518,7 +4628,7 @@ function CaptureRoom() {
                         <button
                           key={c}
                           type="button"
-                          onClick={() => setActiveTextColor(c)}
+                          onClick={() => handleSelectTextColor(c)}
                           className={`w-6 h-6 rounded-full border transition-all cursor-pointer ${
                             activeTextColor === c ? 'ring-2 ring-neutral-900 scale-110 shadow-sm' : 'border-black/10'
                           }`}
@@ -4527,25 +4637,30 @@ function CaptureRoom() {
                       ))}
                     </div>
 
-                    {/* Font Selector */}
-                    <div className="flex items-center gap-2">
-                      {(['sans', 'serif', 'mono'] as const).map((font) => (
-                        <button
-                          key={font}
-                          type="button"
-                          onClick={() => setActiveTextFont(font)}
-                          className={`px-3.5 py-1.5 rounded-lg text-xs font-bold border transition-all cursor-pointer capitalize ${
-                            activeTextFont === font
-                              ? 'bg-neutral-900 text-white border-neutral-900'
-                              : 'bg-white text-neutral-700 border-neutral-300 hover:border-neutral-500'
-                          }`}
-                          style={{
-                            fontFamily: font === 'serif' ? 'serif' : font === 'mono' ? 'monospace' : 'sans-serif',
-                          }}
-                        >
-                          {font}
-                        </button>
-                      ))}
+                    {/* Font Selector (9 Distinct Korean Aesthetic Fonts) */}
+                    <div className="w-full">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-neutral-400 block mb-1.5 text-center">
+                        Font Style
+                      </span>
+                      <div className="grid grid-cols-3 gap-1.5 w-full max-w-[340px] mx-auto">
+                        {DECO_FONTS.map((font) => (
+                          <button
+                            key={font.id}
+                            type="button"
+                            onClick={() => handleSelectTextFont(font.id)}
+                            className={`px-2 py-1.5 rounded-xl text-xs border transition-all cursor-pointer flex items-center justify-center text-center ${
+                              activeTextFont === font.id
+                                ? 'bg-neutral-900 text-white border-neutral-900 shadow-xs'
+                                : 'bg-white text-neutral-800 border-neutral-200 hover:border-neutral-400'
+                            }`}
+                            style={{
+                              fontFamily: font.family,
+                            }}
+                          >
+                            <span className="truncate">{font.label}</span>
+                          </button>
+                        ))}
+                      </div>
                     </div>
 
                     {/* Quick Caption Chips */}
@@ -4851,12 +4966,7 @@ function CaptureRoom() {
                         style={{
                           color: txt.color,
                           fontSize: `${Math.round(txt.scale * 130)}px`,
-                          fontFamily:
-                            txt.font === 'serif'
-                              ? 'serif'
-                              : txt.font === 'mono'
-                              ? 'monospace'
-                              : 'sans-serif',
+                          fontFamily: getDecoFontFamily(txt.font),
                           textShadow:
                             '-1.5px -1.5px 0 #000, 1.5px -1.5px 0 #000, -1.5px 1.5px 0 #000, 1.5px 1.5px 0 #000, 0 2px 4px rgba(0,0,0,0.5)',
                         }}
